@@ -254,8 +254,16 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     if (state.tokenBalanceOf(token.id, tx.from) < 1n) {
       throw new Error('no units of this token to spend');
     }
-    const key = expressionKey(tx.from, token.id);
-    if (token.voteMode === 'single') {
+    // The scope IS the rule. `quantum` keys to the voting place, so a wallet
+    // expresses once per question and remains free in every other question.
+    const scope = token.voteMode === 'quantum' ? express.pollId : token.id;
+    const key = expressionKey(tx.from, scope);
+    if (token.voteMode === 'quantum') {
+      if (state.hasVoteKey(key)) {
+        throw new Error(
+          `${tx.from} has already expressed in voting place ${express.pollId}`);
+      }
+    } else if (token.voteMode === 'single') {
       // One expression per wallet, however much of the token it holds.
       if (state.hasVoteKey(key)) {
         throw new Error(`${tx.from} has already expressed on token ${token.id}`);
@@ -288,8 +296,12 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     // Burn, do not transfer: the unit is destroyed, so it cannot be replayed
     // and `minted - burned` is the count anyone can verify.
     state.burnToken(expressed.token.id, tx.from, 1n);
-    if (expressed.token.voteMode === 'single') state.recordVoteKey(expressed.key);
-    else state.bumpExpressionCount(expressed.key);
+    if (expressed.token.voteMode === 'single'
+        || expressed.token.voteMode === 'quantum') {
+      state.recordVoteKey(expressed.key);
+    } else {
+      state.bumpExpressionCount(expressed.key);
+    }
   }
 
   return {

@@ -223,9 +223,15 @@ export class Chain {
       if (this.state.tokenBalanceOf(token.id, tx.from) < 1n) {
         throw new Error('no units of this token to spend');
       }
-      const key = expressionKey(tx.from, token.id);
-      if (token.voteMode === 'single' && this.state.hasVoteKey(key)) {
-        throw new Error(`${tx.from} has already expressed on token ${token.id}`);
+      const scope = token.voteMode === 'quantum' ? express.pollId : token.id;
+      const key = expressionKey(tx.from, scope);
+      if ((token.voteMode === 'single' || token.voteMode === 'quantum')
+          && this.state.hasVoteKey(key)) {
+        // Word it by the scope that actually applies, so the sender is told
+        // which rule refused them rather than a generic one.
+        throw new Error(token.voteMode === 'quantum'
+          ? `${tx.from} has already expressed in voting place ${express.pollId}`
+          : `${tx.from} has already expressed on token ${token.id}`);
       }
       if (token.voteMode === 'capped'
           && this.state.expressionCount(key) >= BigInt(token.cap)) {

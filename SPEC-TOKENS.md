@@ -113,6 +113,7 @@ money*, and a weighted token can never masquerade as an equal one.
 
 | Mode | Rule | Enforcement |
 |---|---|---|
+| **`quantum`** | One expression per wallet per VOTING PLACE; unlimited places. Each question is a macrobiotic quantum, a GIZ unit one of its subquanta: once a unit has left a voting place it can never return to it, but is free to enter another. Key `H(wallet ‖ pollId)`. This is GIZ mode |
 | **`single`** | One expression per wallet, for this token only | Vote key `H(wallet ‖ tokenId)` in state; a second attempt is rejected by consensus |
 | **`capped(n)`** | Up to *n* expressions per wallet | Counter keyed by `H(wallet ‖ tokenId)`, refused above *n* |
 | **`weighted`** | Each unit spent carries one unit of weight | No per-wallet limit; weight is whatever the holder burns |

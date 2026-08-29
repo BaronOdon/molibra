@@ -512,6 +512,8 @@ async function main() {
   for (let i = 0; i < 4; i++) tk.mine(ALICE);
 
   const COMMIT = '0x' + '5a'.repeat(32);
+  const POLL_Q = toPollId('voting-place-alpha');
+  const POLL_R = toPollId('voting-place-beta');
   const gasP = 1000000000n;
   const send = (key, from, nonce, data, to = from) => signTransaction(
     { nonce, gasPrice: gasP, gasLimit: 300000n, to, value: 0n, data }, key, tk.chainId,
@@ -563,7 +565,7 @@ async function main() {
   check('a token with fewer than two options is refused', no);
 
   // --- expressing burns ---------------------------------------------------
-  const eHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 1n, encodeExpress(GIZ, COMMIT))));
+  const eHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 1n, encodeExpress(GIZ, POLL_Q, COMMIT))));
   tk.mine(ALICE);
   check('expressing BURNS the unit rather than transferring it',
     tk.state.tokenBalanceOf(GIZ, ALICE) === 2n
@@ -576,7 +578,7 @@ async function main() {
     tk.state.hasVoteKey(expressionKey(ALICE, GIZ)));
 
   no = false;
-  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 2n, encodeExpress(GIZ, COMMIT)))); }
+  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 2n, encodeExpress(GIZ, POLL_Q, COMMIT)))); }
   catch (e) { no = /already expressed/.test(e.message); }
   check('single mode: a second expression from the same wallet is refused', no,
     'holding 2 more units did not buy a second voice');
@@ -584,7 +586,7 @@ async function main() {
   no = false;
   try {
     tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 2n,
-      encodeExpress('0x' + 'ff'.repeat(32), COMMIT))));
+      encodeExpress("0x" + "ff".repeat(32), POLL_Q, COMMIT))));
   } catch (e) { no = /unknown token/.test(e.message); }
   check('expressing on a token that does not exist is refused', no);
 
@@ -597,7 +599,7 @@ async function main() {
   check('BOB is funded, so the next refusal is about units and nothing else',
     tk.state.balanceOf(BOB) >= 5n * 10n ** 18n);
   no = false;
-  try { tk.submitRaw(toHex(send(BOB_KEY, BOB, 0n, encodeExpress(GIZ, COMMIT)))); }
+  try { tk.submitRaw(toHex(send(BOB_KEY, BOB, 0n, encodeExpress(GIZ, POLL_Q, COMMIT)))); }
   catch (e) { no = /no units of this token/.test(e.message); }
   check('a funded wallet holding no UNITS still cannot express', no);
 
@@ -607,16 +609,57 @@ async function main() {
   const capHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 3n, encodeTokenCreate(capRec))));
   tk.mine(ALICE);
   const CAP = tokenId(ALICE, capRec.title, BigInt(tk.txIndex.get(capHash).blockNumber));
-  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 4n, encodeExpress(CAP, COMMIT))));
+  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 4n, encodeExpress(CAP, POLL_Q, COMMIT))));
   tk.mine(ALICE);
-  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 5n, encodeExpress(CAP, COMMIT))));
+  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 5n, encodeExpress(CAP, POLL_Q, COMMIT))));
   tk.mine(ALICE);
   check('capped(2) allows exactly two expressions',
     tk.state.getToken(CAP).burned === '2');
   no = false;
-  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 6n, encodeExpress(CAP, COMMIT)))); }
+  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 6n, encodeExpress(CAP, POLL_Q, COMMIT)))); }
   catch (e) { no = /cap of 2/.test(e.message); }
   check('capped(2) refuses the third', no);
+
+  // --- quantum: the GIZ rule ---------------------------------------------
+  // Each question is a macrobiotic quantum - a voting place. A unit that has
+  // left one can never return to it, but is free to enter another.
+  const gizRec = { title: 'Chalk (GIZ)', options: ['agree', 'disagree'],
+                   voteMode: 'quantum', supply: '100',
+                   electoral: true, transferable: false };
+  const gizHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 6n, encodeTokenCreate(gizRec))));
+  tk.mine(ALICE);
+  const QGIZ = tokenId(ALICE, gizRec.title, BigInt(tk.txIndex.get(gizHash).blockNumber));
+  check('a quantum-mode token is accepted', tk.state.getToken(QGIZ)?.voteMode === 'quantum');
+
+  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 7n, encodeExpress(QGIZ, POLL_Q, COMMIT))));
+  tk.mine(ALICE);
+  check('a subquantum enters a voting place and burns',
+    tk.state.getToken(QGIZ).burned === '1'
+    && tk.state.tokenBalanceOf(QGIZ, ALICE) === 99n);
+
+  no = false;
+  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 8n, encodeExpress(QGIZ, POLL_Q, COMMIT)))); }
+  catch (e) { no = /already expressed in voting place/.test(e.message); }
+  check('it can NEVER return to the voting place it left', no,
+    'holding 99 more units bought no second voice there');
+
+  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 8n, encodeExpress(QGIZ, POLL_R, COMMIT))));
+  tk.mine(ALICE);
+  check('but it CAN be in another macrobiotic quantum',
+    tk.state.getToken(QGIZ).burned === '2'
+    && tk.state.tokenBalanceOf(QGIZ, ALICE) === 98n,
+    'one currency, many voting places, once each');
+
+  check('the burn is still the tally, now across every voting place',
+    BigInt(tk.state.getToken(QGIZ).supply)
+      - tk.state.tokenBalanceOf(QGIZ, ALICE)
+      === BigInt(tk.state.getToken(QGIZ).burned));
+
+  check('quantum scopes to the VOTING PLACE, not the token - which is the '
+    + 'whole difference from single',
+    tk.state.hasVoteKey(expressionKey(ALICE, POLL_Q))
+    && tk.state.hasVoteKey(expressionKey(ALICE, POLL_R))
+    && !tk.state.hasVoteKey(expressionKey(ALICE, QGIZ)));
 
   // --- consensus ----------------------------------------------------------
   const tkMirror = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-b')).init();
