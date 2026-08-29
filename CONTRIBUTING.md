@@ -10,7 +10,7 @@ it lands; rotate it, do not try to delete the commit.
 
 ```bash
 npm install          # two dependencies, no build step
-npm test             # 124 checks, all of which must pass
+npm test             # 130 checks, all of which must pass
 node src/cli.js keys # a fresh keypair — the private key never leaves your machine
 node src/cli.js node --port 8545 --miner 0xYourAddress --mine
 ```

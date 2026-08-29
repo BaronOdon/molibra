@@ -3,7 +3,7 @@
 A public audit chain. Native coin: **MOLI**.
 
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-124%20passing-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-130%20passing-brightgreen.svg)](#tests)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-informational.svg)](#install)
 
 **[White paper](WHITEPAPER.md)** · [Theory](THEORY.md) · [Token spec](SPEC-TOKENS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
@@ -167,7 +167,7 @@ observable from outside.
 npm test
 ```
 
-124 checks covering: genesis and sealed attribution; mining and block rewards; the JSON-RPC
+130 checks covering: genesis and sealed attribution; mining and block rewards; the JSON-RPC
 method set; a real signed transaction from submission through receipt; replay, wrong-chain,
 insufficient-funds and tampered-block rejection; the audit routes; two-node replication with
 independent re-verification; fork choice (reorg onto heavier work, lighter branches kept but
