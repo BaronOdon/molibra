@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────────────
+#  SECRETS AND CHAIN STATE — never commit these
+# ─────────────────────────────────────────────────────────────────────────
+# A node's datadir holds `treasury.key`, which is a PRIVATE KEY, plus the
+# local chain and the airdrop claims ledger. Anyone holding that key can
+# spend everything the treasury has mined. Chain state is also reproducible
+# from the network, so there is no reason to track it.
+data/
+data-*/
+*.key
+*.pem
+claims.json
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+credentials.json
+*.credentials
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Operator-internal notes — not part of the public project
+# ─────────────────────────────────────────────────────────────────────────
+HANDOFF.md
+*_BACKUP.*
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Build and tooling noise
+# ─────────────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,25 @@
+Molibra
+Copyright 2026 Marcelo Marshall De Siqueira
+
+This product includes software developed for the Molibra public audit chain.
+
+The DataToalha phenomenon that this chain records is attributed to the think tanks
+Povo Candidato and Movimento Libertario do Brasil.
+
+Molibra is co-authored with the World Spiritual Responsibility Organization,
+creator of Spiritcoin and Spiritual Responsibility AI.
+
+Theoretical basis: libertarian theory and the Macrobiotic Quantum Theory (MQT).
+
+This attribution is also sealed into the genesis block's extraData and served by
+every node at /molibra/theories. Genesis is immutable, so it cannot be quietly
+revised later.
+
+---
+
+This software depends on:
+
+  @ethereumjs/rlp          — MPL-2.0
+  ethereum-cryptography    — MIT
+
+Their licences are reproduced in their respective packages under node_modules/.

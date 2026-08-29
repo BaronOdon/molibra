@@ -1,0 +1,67 @@
+{
+  "name": "Molibra",
+  "symbol": "MOLI",
+  "decimals": 18,
+  "chainId": 20226,
+
+  "attribution": {
+    "phenomenon": "DataToalha",
+    "originAttributedTo": [
+      "Povo Candidato (think tank)",
+      "Movimento Libertario do Brasil (think tank)"
+    ],
+    "coAuthors": [
+      {
+        "name": "World Spiritual Responsibility Organization",
+        "creatorOf": ["Spiritcoin", "Spiritual Responsibility AI"]
+      }
+    ],
+    "note": "Origin credit for the DataToalha phenomenon that this chain records, and co-authorship of Molibra."
+  },
+
+  "theories": [
+    {
+      "name": "Libertarian theory",
+      "role": "Why the chain is shaped the way it is: participation is voluntary, preference is revealed by action rather than solicited, no central authority certifies the tally, and entry is open - anyone may run a node and verify.",
+      "expressedInDesign": [
+        "Participation is an act, never a compulsion: nothing is recorded that a person did not choose to record.",
+        "Revealed preference over stated preference - the act itself is the datum.",
+        "No privileged verifier: every node re-executes every transaction and trusts no peer for state.",
+        "Open entry: the block format, the verifier and the replication endpoint are public.",
+        "Equal weight: one count per person, enforced by protocol rather than by promise."
+      ]
+    },
+    {
+      "name": "Macrobiotic Quantum Theory (MQT)",
+      "role": "The frame in which the ledger is read: a body of records is one macrobiotic quantum, its notes vertices of a 4D tesseract, and its links edges carrying state.",
+      "registers": {
+        "I(x)": "Intelligence - non-linear",
+        "c(x)": "Conscience - linear",
+        "memory": "open lots",
+        "theta_v": "vacuum-duality angle, derived by atan2 over inward and outward links"
+      },
+      "magicAngle": {
+        "value": "arccos(1/sqrt(3))",
+        "degrees": 54.7356,
+        "meaning": "the equilibrium reference at i = 0, between fusion (i = -1, inward) and fission (i = +1, outward)"
+      },
+      "expressedInDesign": [
+        "Each block is a vertex; parentHash is the edge that carries state forward.",
+        "A commitment records that something existed without disclosing what it was - conscience without exposure.",
+        "Difficulty retargeting is an equilibrium-seeking control: it pulls the interval back toward its reference rather than toward an extreme."
+      ]
+    }
+  ],
+
+  "extraData": "0x4d6f6c696272612067656e657369732e2044617461546f616c6861206f726967696e206174747269627574656420746f20746865207468696e6b2074616e6b7320506f766f2043616e64696461746f20616e64204d6f76696d656e746f204c69626572746172696f20646f2042726173696c2e20436f2d617574686f72656420776974682074686520576f726c642053706972697475616c20526573706f6e736962696c697479204f7267616e697a6174696f6e2c2063726561746f72206f6620537069726974636f696e20616e642053706972697475616c20526573706f6e736962696c6974792041492e205468656f7265746963616c2062617369733a206c6962657274617269616e207468656f727920616e6420746865204d6163726f62696f746963205175616e74756d205468656f727920284d5154292e",
+
+  "timestamp": 1756425600,
+
+  "targetBlockSeconds": 15,
+  "minimumDifficulty": 4096,
+  "initialDifficulty": 4096,
+  "blockGasLimit": 8000000,
+  "blockReward": "2000000000000000000",
+
+  "alloc": {}
+}

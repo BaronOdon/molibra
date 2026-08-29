@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Molibra — connect a wallet</title>
+<style>
+  :root { color-scheme: light dark; --fg:#111; --bg:#fafafa; --card:#fff; --line:#e3e3e3; --accent:#1f6feb; --mut:#666; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8e8; --bg:#0f1115; --card:#171a21; --line:#2a2f3a; --accent:#5b9bff; --mut:#9aa3b2; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:32px 20px; font:15px/1.55 -apple-system,Segoe UI,Roboto,sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--mut); margin: 0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:14px; }
+  .card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut); margin:0 0 12px; }
+  button { font:inherit; padding:9px 16px; border-radius:7px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  code, .mono { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; }
+  dt { color:var(--mut); }
+  dd { margin:0; }
+  textarea { width:100%; min-height:110px; margin-top:10px; padding:10px; border-radius:7px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font-family:ui-monospace,monospace; font-size:12px; }
+  .note { color:var(--mut); font-size:13px; margin-top:10px; }
+  .warn { border-left:3px solid #d29922; padding-left:12px; }
+  #status { min-height:20px; font-size:13px; color:var(--mut); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Molibra</h1>
+  <p class="sub">
+    A public record of what people freely choose to put on it.
+    Molibra does not ask you anything and does not survey anyone — it lets a person
+    <strong>express their organic will publicly</strong>, one entry per person, in a form
+    anyone can verify.
+  </p>
+
+  <div class="card">
+    <h2>1 · Network</h2>
+    <dl>
+      <dt>Chain</dt><dd>Molibra</dd>
+      <dt>Chain ID</dt><dd class="mono" id="cfg-chain">—</dd>
+      <dt>Symbol</dt><dd class="mono" id="cfg-symbol">—</dd>
+      <dt>RPC</dt><dd class="mono" id="cfg-rpc">—</dd>
+    </dl>
+    <div class="row" style="margin-top:14px">
+      <button id="add">Add Molibra to wallet</button>
+    </div>
+    <p class="note">Your wallet will ask you to approve. Molibra approves nothing on your behalf.</p>
+  </div>
+
+  <div class="card">
+    <h2>2 · Wallet</h2>
+    <div class="row">
+      <button id="connect" class="secondary">Connect wallet</button>
+      <span class="mono" id="account">not connected</span>
+    </div>
+    <dl style="margin-top:12px">
+      <dt>Balance</dt><dd class="mono" id="balance">—</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>3 · Linking proof</h2>
+    <p class="note" style="margin-top:0">
+      Signs a one-time challenge with your wallet and produces a code to paste into the app.
+      The signature proves you control the address. <strong>No key ever leaves your wallet</strong>,
+      and the code moves no funds.
+    </p>
+    <div class="row">
+      <input id="appid" placeholder="your app account id" style="padding:9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit">
+      <button id="prove" class="secondary" disabled>Create linking code</button>
+      <button id="copy" class="secondary" disabled>Copy</button>
+    </div>
+    <textarea id="proof" readonly placeholder="the code appears here"></textarea>
+  </div>
+
+  <div class="card warn">
+    <h2>Mining</h2>
+    <p class="note" style="margin-top:0">
+      Real mining runs on a node you download and control, not in this tab.
+      A browser can only contribute a token amount of work, and it will only ever do so
+      after you press start — never in the background, never without telling you.
+    </p>
+  </div>
+
+  <p id="status"></p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const say = (m) => { $('status').textContent = m; };
+
+let CFG = null;
+let account = null;
+
+async function loadConfig() {
+  const res = await fetch('/molibra');
+  const info = await res.json();
+  CFG = {
+    chainIdDec: info.chainId,
+    chainIdHex: '0x' + info.chainId.toString(16),
+    name: info.chain,
+    symbol: info.symbol,
+    rpc: location.origin,
+  };
+  $('cfg-chain').textContent = CFG.chainIdDec + '  (' + CFG.chainIdHex + ')';
+  $('cfg-symbol').textContent = CFG.symbol;
+  $('cfg-rpc').textContent = CFG.rpc;
+}
+
+function wallet() {
+  if (!window.ethereum) throw new Error('No wallet detected in this browser.');
+  return window.ethereum;
+}
+
+$('add').onclick = async () => {
+  try {
+    // EIP-3085. The wallet shows its own approval dialog; that is the user deciding.
+    await wallet().request({
+      method: 'wallet_addEthereumChain',
+      params: [{
+        chainId: CFG.chainIdHex,
+        chainName: CFG.name,
+        nativeCurrency: { name: CFG.name, symbol: CFG.symbol, decimals: 18 },
+        rpcUrls: [CFG.rpc],
+      }],
+    });
+    say('Network added. If the wallet did not switch to it, switch manually.');
+  } catch (e) { say('Could not add the network: ' + (e.message || e)); }
+};
+
+$('connect').onclick = async () => {
+  try {
+    const accounts = await wallet().request({ method: 'eth_requestAccounts' });
+    account = accounts[0];
+    $('account').textContent = account;
+    $('prove').disabled = false;
+    await refreshBalance();
+    say('Connected.');
+  } catch (e) { say('Could not connect: ' + (e.message || e)); }
+};
+
+async function refreshBalance() {
+  const res = await fetch(CFG.rpc, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [account, 'latest'] }),
+  });
+  const { result } = await res.json();
+  const wei = BigInt(result || '0x0');
+  const whole = wei / (10n ** 18n);
+  const frac = (wei % (10n ** 18n)).toString().padStart(18, '0').replace(/0+$/, '');
+  $('balance').textContent = (frac ? whole + '.' + frac : String(whole)) + ' ' + CFG.symbol;
+}
+
+$('prove').onclick = async () => {
+  try {
+    const appId = $('appid').value.trim();
+    if (!appId) return say('Enter the app account id first.');
+    const challenge = await (await fetch('/molibra/challenge')).json();
+    const message = [
+      'Molibra linking proof',
+      'chainId: ' + CFG.chainIdDec,
+      'address: ' + account,
+      'app account: ' + appId,
+      'nonce: ' + challenge.nonce,
+      'expires: ' + challenge.expires,
+      '',
+      'Signing proves control of this address. It moves no funds.',
+    ].join('\n');
+
+    const signature = await wallet().request({ method: 'personal_sign', params: [message, account] });
+    const code = btoa(JSON.stringify({ m: message, s: signature, a: account }))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    $('proof').value = code;
+    $('copy').disabled = false;
+    say('Proof created. Paste this code into the app.');
+  } catch (e) { say('Could not sign: ' + (e.message || e)); }
+};
+
+$('copy').onclick = async () => {
+  await navigator.clipboard.writeText($('proof').value);
+  say('Copied.');
+};
+
+loadConfig().catch((e) => say('Could not read node config: ' + e.message));
+</script>
+</body>
+</html>

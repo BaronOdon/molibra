@@ -1,0 +1,47 @@
+{
+  "name": "molibra",
+  "version": "0.1.0",
+  "description": "Molibra - public audit chain. Native coin: MOLI. EVM-compatible addressing, signing and JSON-RPC, so standard wallets connect natively.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Marcelo Marshall De Siqueira",
+  "homepage": "https://github.com/BaronOdon/molibra#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BaronOdon/molibra.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BaronOdon/molibra/issues"
+  },
+  "keywords": [
+    "blockchain",
+    "proof-of-work",
+    "evm-compatible",
+    "eip-155",
+    "json-rpc",
+    "molibra",
+    "moli",
+    "audit"
+  ],
+  "engines": { "node": ">=20" },
+  "bin": { "molibra": "./src/cli.js" },
+  "files": [
+    "src/",
+    "genesis.json",
+    "README.md",
+    "WHITEPAPER.md",
+    "THEORY.md",
+    "SPEC-TOKENS.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "start": "node src/cli.js node",
+    "keys": "node src/cli.js keys",
+    "test": "node test/run.js"
+  },
+  "dependencies": {
+    "@ethereumjs/rlp": "^5.0.2",
+    "ethereum-cryptography": "^2.2.1"
+  }
+}
