@@ -338,6 +338,40 @@ function handleAudit(node, req, res) {
     return json(res, 200, { nonce, expires });
   }
 
+  if (path === '/molibra/tokens' || path.startsWith('/molibra/token/')) {
+    // The disclosure rules are served with the data, not left to the client:
+    // mode, supply, burn count and the two warnings travel together, because
+    // the reason the mode is on-chain is that a reader always knows whether
+    // they are looking at one-person-one-voice or at weight bought with money.
+    const describe = (t) => ({
+      ...t,
+      remaining: (BigInt(t.supply) - BigInt(t.burned ?? 0)).toString(),
+      expressionsCast: String(t.burned ?? '0'),
+      warnings: [
+        t.voteMode === 'weighted'
+          ? 'WEIGHTED: one unit burned is one unit of weight. This is '
+            + 'plutocratic by construction.'
+          : null,
+        t.electoral
+          ? 'ELECTORAL SUBJECT: this token can never be made transferable.'
+          : null,
+        t.transferable ? 'TRANSFERABLE: this token has a market.' : null,
+      ].filter(Boolean),
+    });
+
+    if (path === '/molibra/tokens') {
+      return json(res, 200, {
+        count: chain.state.tokens.size,
+        tokens: [...chain.state.tokens.values()].map(describe),
+      });
+    }
+    const id = path.slice('/molibra/token/'.length);
+    const found = chain.state.getToken(id);
+    return found
+      ? json(res, 200, describe(found))
+      : json(res, 404, { error: 'token not found' });
+  }
+
   if (path === '/molibra/theories') {
     return json(res, 200, {
       attribution: chain.genesis.attribution,

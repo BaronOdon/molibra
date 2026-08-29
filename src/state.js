@@ -13,10 +13,22 @@
 
 import { keccak256, toHex, normalizeAddress } from './crypto.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
+import {
+  decodeTokenCreate, decodeExpress, normalizeTokenRecord, expressionKey,
+} from './token.js';
 
 export class State {
-  constructor(accounts = new Map(), voteKeys = new Set()) {
+  constructor(accounts = new Map(), voteKeys = new Set(),
+              tokens = new Map(), tokenBalances = new Map(),
+              expressCounts = new Map()) {
     this.accounts = accounts;
+    // The token registry. Immutable records, plus the supply accounting
+    // that makes `minted - remaining = expressions cast` checkable by
+    // anyone. Balances are keyed `${tokenId}:${address}`.
+    this.tokens = tokens;
+    this.tokenBalances = tokenBalances;
+    // capped(n) needs a count, not just a flag.
+    this.expressCounts = expressCounts;
     // voteKeys holds H(wallet || pollId) for every expression of will already
     // recorded. It lives in state, so a reorg that unwinds a block also unwinds
     // the right to speak again - no separate bookkeeping to get out of step.
@@ -29,6 +41,46 @@ export class State {
 
   recordVoteKey(key) {
     this.voteKeys.add(String(key).toLowerCase());
+  }
+
+  /* ----------------------------- tokens ----------------------------- */
+
+  getToken(id) {
+    return this.tokens.get(String(id).toLowerCase()) ?? null;
+  }
+
+  putToken(record) {
+    this.tokens.set(String(record.id).toLowerCase(),
+      { ...record, burned: record.burned ?? '0' });
+  }
+
+  tokenBalanceOf(id, address) {
+    const k = `${String(id).toLowerCase()}:${normalizeAddress(address)}`;
+    return BigInt(this.tokenBalances.get(k) ?? 0n);
+  }
+
+  setTokenBalance(id, address, amount) {
+    const k = `${String(id).toLowerCase()}:${normalizeAddress(address)}`;
+    if (BigInt(amount) === 0n) this.tokenBalances.delete(k);
+    else this.tokenBalances.set(k, BigInt(amount));
+  }
+
+  /** Destroyed, not transferred - which is what makes the burn the tally. */
+  burnToken(id, address, amount) {
+    const held = this.tokenBalanceOf(id, address);
+    if (held < BigInt(amount)) throw new Error('insufficient token balance');
+    this.setTokenBalance(id, address, held - BigInt(amount));
+    const rec = this.getToken(id);
+    rec.burned = (BigInt(rec.burned ?? 0) + BigInt(amount)).toString();
+  }
+
+  expressionCount(key) {
+    return BigInt(this.expressCounts.get(String(key).toLowerCase()) ?? 0n);
+  }
+
+  bumpExpressionCount(key) {
+    const k = String(key).toLowerCase();
+    this.expressCounts.set(k, this.expressionCount(k) + 1n);
   }
 
   /** Accepts either a bare account map or { accounts, voteKeys }. */
@@ -61,7 +113,15 @@ export class State {
     }
     // Vote keys are copied, not shared: a candidate block built on this state
     // must not be able to write a vote back into its parent.
-    return new State(accounts, new Set(this.voteKeys));
+    return new State(
+      accounts,
+      new Set(this.voteKeys),
+      // Records are copied, not shared: a candidate block must not be able
+      // to write a burn back into its parent's state.
+      new Map([...this.tokens].map(([k, v]) => [k, { ...v }])),
+      new Map(this.tokenBalances),
+      new Map(this.expressCounts),
+    );
   }
 
   get(address) {
@@ -115,6 +175,22 @@ export class State {
       lines.push(`${address}:${account.balance.toString(16)}:${account.nonce.toString(16)}`);
     }
     for (const key of [...this.voteKeys].sort()) lines.push(`vote:${key}`);
+    // Tokens, balances and counts are consensus state: every node must
+    // agree on what exists, who holds it, and how much has been burned,
+    // or a block spending a unit would be valid on one node and not
+    // another. Appended only when present, so a chain written before
+    // tokens existed still hashes to exactly the same root.
+    for (const id of [...this.tokens.keys()].sort()) {
+      const t = this.tokens.get(id);
+      lines.push(`token:${id}:${t.voteMode}:${t.supply}:${t.burned}:`
+        + `${t.transferable ? 1 : 0}${t.electoral ? 1 : 0}`);
+    }
+    for (const k of [...this.tokenBalances.keys()].sort()) {
+      lines.push(`tbal:${k}:${this.tokenBalances.get(k).toString(16)}`);
+    }
+    for (const k of [...this.expressCounts.keys()].sort()) {
+      lines.push(`ecount:${k}:${this.expressCounts.get(k).toString(16)}`);
+    }
     return toHex(keccak256(new TextEncoder().encode(lines.join('\n'))));
   }
 }
@@ -124,7 +200,7 @@ export class State {
  * Returns the receipt fields; throws with a reason when the transaction is
  * not applicable, so the caller can drop it from the block.
  */
-export function applyTransaction(state, tx, intrinsicGas, miner) {
+export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0n) {
   const expectedNonce = state.nonceOf(tx.from);
   if (tx.nonce !== expectedNonce) {
     throw new Error(`bad nonce for ${tx.from}: got ${tx.nonce}, expected ${expectedNonce}`);
@@ -150,6 +226,50 @@ export function applyTransaction(state, tx, intrinsicGas, miner) {
     }
   }
 
+  // ---------------------------------------------------------------- tokens
+  // Both shapes are checked BEFORE anything is mutated, so a refused
+  // transaction leaves no trace in state.
+  const creation = decodeTokenCreate(tx.data);
+  let record = null;
+  if (creation) {
+    if (tx.value !== 0n) throw new Error('creating a token moves no value');
+    // createdAt is the block height, supplied by the caller; the id derives
+    // from it, so the same record proposed in two different blocks is two
+    // different tokens rather than a collision.
+    record = normalizeTokenRecord(creation, tx.from, blockNumber ?? 0n);
+    if (state.getToken(record.id)) {
+      throw new Error(`token ${record.id} already exists`);
+    }
+  }
+
+  const express = decodeExpress(tx.data);
+  let expressed = null;
+  if (express) {
+    if (tx.value !== 0n) throw new Error('an expression carries no value');
+    if (!tx.to || tx.to !== tx.from) {
+      throw new Error('an expression must be self-addressed');
+    }
+    const token = state.getToken(express.tokenId);
+    if (!token) throw new Error(`unknown token ${express.tokenId}`);
+    if (state.tokenBalanceOf(token.id, tx.from) < 1n) {
+      throw new Error('no units of this token to spend');
+    }
+    const key = expressionKey(tx.from, token.id);
+    if (token.voteMode === 'single') {
+      // One expression per wallet, however much of the token it holds.
+      if (state.hasVoteKey(key)) {
+        throw new Error(`${tx.from} has already expressed on token ${token.id}`);
+      }
+    } else if (token.voteMode === 'capped') {
+      if (state.expressionCount(key) >= BigInt(token.cap)) {
+        throw new Error(`cap of ${token.cap} expressions reached for ${tx.from}`);
+      }
+    }
+    // `weighted` has no per-wallet limit by design - weight is whatever the
+    // holder burns. It is plutocratic by construction and labelled so.
+    expressed = { token, key };
+  }
+
   state.debit(tx.from, total);
   if (tx.to) state.credit(tx.to, tx.value);
   else state.credit(tx.from, tx.value); // no contract creation in v0.1; value is returned
@@ -157,5 +277,26 @@ export function applyTransaction(state, tx, intrinsicGas, miner) {
   state.bumpNonce(tx.from);
   if (key) state.recordVoteKey(key);
 
-  return { gasUsed: intrinsicGas, status: 1, voteKey: key, pollId: expression?.pollId ?? null };
+  if (record) {
+    // The whole supply is minted to the creator at creation. There is no other
+    // mint path, so a `fixed` token is mathematically incapable of inflating.
+    state.putToken(record);
+    state.setTokenBalance(record.id, record.creator, BigInt(record.supply));
+  }
+
+  if (expressed) {
+    // Burn, do not transfer: the unit is destroyed, so it cannot be replayed
+    // and `minted - burned` is the count anyone can verify.
+    state.burnToken(expressed.token.id, tx.from, 1n);
+    if (expressed.token.voteMode === 'single') state.recordVoteKey(expressed.key);
+    else state.bumpExpressionCount(expressed.key);
+  }
+
+  return {
+    gasUsed: intrinsicGas,
+    status: 1,
+    voteKey: key ?? expressed?.key ?? null,
+    pollId: expression?.pollId ?? null,
+    tokenId: record?.id ?? expressed?.token.id ?? null,
+  };
 }

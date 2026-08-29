@@ -14,6 +14,9 @@ import { decodeTransaction, intrinsicGas } from './tx.js';
 import { State, applyTransaction } from './state.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
+  decodeTokenCreate, decodeExpress, normalizeTokenRecord, expressionKey,
+} from './token.js';
+import {
   ZERO_HASH, merkleRoot, blockHash, isValidSeal, mineHeader,
   nextDifficulty, serializeBlock, deserializeHeader, blockRewardAt,
 } from './block.js';
@@ -196,6 +199,40 @@ export class Chain {
       }
     }
 
+    // Token transactions are validated at the door too. Without this an
+    // invalid creation or an over-cap expression sits in the mempool and is
+    // silently skipped at composition time, which looks to the sender like
+    // the network swallowed it. applyTransaction enforces the same rules
+    // again when the block is built and once more on every verifying node.
+    const creation = decodeTokenCreate(tx.data);
+    if (creation) {
+      if (tx.value !== 0n) throw new Error('creating a token moves no value');
+      // The id depends on the block height, which is not known yet, so
+      // validate the record's shape against the next height as a stand-in.
+      normalizeTokenRecord(creation, tx.from, this.height + 1n);
+    }
+
+    const express = decodeExpress(tx.data);
+    if (express) {
+      if (tx.value !== 0n) throw new Error('an expression carries no value');
+      if (!tx.to || tx.to !== tx.from) {
+        throw new Error('an expression must be self-addressed');
+      }
+      const token = this.state.getToken(express.tokenId);
+      if (!token) throw new Error(`unknown token ${express.tokenId}`);
+      if (this.state.tokenBalanceOf(token.id, tx.from) < 1n) {
+        throw new Error('no units of this token to spend');
+      }
+      const key = expressionKey(tx.from, token.id);
+      if (token.voteMode === 'single' && this.state.hasVoteKey(key)) {
+        throw new Error(`${tx.from} has already expressed on token ${token.id}`);
+      }
+      if (token.voteMode === 'capped'
+          && this.state.expressionCount(key) >= BigInt(token.cap)) {
+        throw new Error(`cap of ${token.cap} expressions reached for ${tx.from}`);
+      }
+    }
+
     this.mempool.set(tx.hash, tx);
     return tx.hash;
   }
@@ -230,7 +267,7 @@ export class Chain {
       const gas = intrinsicGas(tx);
       if (gasUsed + gas > this.genesis.blockGasLimit) continue;
       try {
-        const receipt = applyTransaction(state, tx, gas, minerAddress);
+        const receipt = applyTransaction(state, tx, gas, minerAddress, parent.header.number + 1n);
         included.push(tx);
         gasUsed += receipt.gasUsed;
       } catch {
@@ -306,7 +343,7 @@ export class Chain {
     let gasUsed = 0n;
     for (const tx of block.transactions) {
       const gas = intrinsicGas(tx);
-      const receipt = applyTransaction(state, tx, gas, header.miner);
+      const receipt = applyTransaction(state, tx, gas, header.miner, header.number);
       receipts.push(receipt);
       gasUsed += receipt.gasUsed;
     }
@@ -421,6 +458,7 @@ export class Chain {
           contractAddress: null,
           voteKey: receipt.voteKey ?? null,
           pollId: receipt.pollId ?? null,
+          tokenId: receipt.tokenId ?? null,
           logs: [],
         });
       });
