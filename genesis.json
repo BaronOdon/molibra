@@ -63,5 +63,9 @@
   "blockGasLimit": 8000000,
   "blockReward": "2000000000000000000",
 
+  "rewardHalvingInterval": 2102400,
+  "rewardFloor": "250000000000000000",
+  "feeBurnBasisPoints": 0,
+
   "alloc": {}
 }

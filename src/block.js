@@ -105,6 +105,39 @@ export function nextDifficulty(parentHeader, timestamp, targetSeconds, minimum) 
   return next;
 }
 
+/**
+ * The block reward at a given height.
+ *
+ * Tail emission, decided 29 Aug 2026: the reward halves once per
+ * `rewardHalvingInterval` blocks until it reaches `rewardFloor`, and then
+ * stays there forever.
+ *
+ * Why a floor rather than a hard cap. Molibra's fees are deliberately
+ * negligible - expressing should cost something, but barely. A chain whose
+ * fees are tiny by design cannot pay for its own security from fees once
+ * issuance ends, so a hard cap would schedule a security cliff the design has
+ * already promised not to fund. A permanent floor keeps miners paid while
+ * inflation falls asymptotically toward zero as supply grows.
+ *
+ * CONSENSUS-CRITICAL. Both the miner and the verifier must derive the reward
+ * from this one function - the same lesson as the header timestamp, where two
+ * call sites computing "the same" value from different inputs produced blocks
+ * a node's own validator rejected.
+ */
+export function blockRewardAt(number, genesis) {
+  const initial = BigInt(genesis.blockReward);
+  const interval = BigInt(genesis.rewardHalvingInterval ?? 0);
+  const floor = BigInt(genesis.rewardFloor ?? 0);
+
+  if (interval <= 0n) return initial;               // halving disabled
+
+  // Cap the shift: beyond 64 eras the reward is 0 anyway, and shifting by a
+  // huge BigInt is a denial-of-service waiting to happen.
+  const era = BigInt(number) / interval;
+  const reward = initial >> (era > 64n ? 64n : era);
+  return reward < floor ? floor : reward;
+}
+
 /** Total work behind a chain tip - the fork-choice metric. */
 export function totalDifficulty(blocks) {
   return blocks.reduce((sum, block) => sum + BigInt(block.header.difficulty), 0n);

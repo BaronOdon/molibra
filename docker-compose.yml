@@ -1,0 +1,69 @@
+# A two-node Molibra network.
+#
+# Two nodes is the smallest configuration that proves anything. One node cannot
+# demonstrate replication, cannot disagree, and cannot be checked by anyone —
+# which is the entire point of the chain. The second node exists so that every
+# block is verified twice, independently, against its own parent's state.
+#
+#   docker compose up -d --build
+#   curl localhost:8545/molibra | head       # node A
+#   curl localhost:8546/molibra | head       # node B — heights should converge
+#
+# MINER is the address that receives block rewards. It is an ADDRESS, never a
+# key: a mining node holds no credential, so these containers store no secret.
+# Set it in a .env file next to this one, or export it before `up`.
+
+services:
+  node-a:
+    build: .
+    image: molibra:0.1.0
+    container_name: molibra-node-a
+    restart: unless-stopped
+    ports:
+      - "8545:8545"
+    volumes:
+      - molibra-a:/data
+    command:
+      - node
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8545"
+      - --datadir
+      - /data
+      - --miner
+      - "${MINER:-0xf51ac8FD4112bF1d45fD5C38D5aBfe0c61Ec3F5a}"
+      - --mine
+
+  node-b:
+    build: .
+    image: molibra:0.1.0
+    container_name: molibra-node-b
+    restart: unless-stopped
+    depends_on:
+      node-a:
+        condition: service_healthy
+    ports:
+      - "8546:8545"
+    volumes:
+      - molibra-b:/data
+    # Peers at node-a over the compose network. B pulls A's chain and
+    # re-verifies every block itself before adopting any of it — it does not
+    # trust A for state, which is what makes the second node worth having.
+    command:
+      - node
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8545"
+      - --datadir
+      - /data
+      - --peers
+      - http://node-a:8545
+      - --miner
+      - "${MINER:-0xf51ac8FD4112bF1d45fD5C38D5aBfe0c61Ec3F5a}"
+      - --mine
+
+volumes:
+  molibra-a:
+  molibra-b:

@@ -18,7 +18,7 @@ import { signTransaction } from '../src/tx.js';
 import { encodeVoteData, toPollId, voteKey, VOTE_TAG } from '../src/vote.js';
 import { applyTransaction, State } from '../src/state.js';
 import { fromHex, privateToAddress, toChecksumAddress, toHex } from '../src/crypto.js';
-import { blockHash } from '../src/block.js';
+import { blockHash, blockRewardAt } from '../src/block.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GENESIS = join(ROOT, 'genesis.json');
@@ -334,6 +334,49 @@ async function main() {
   }
   check('a fresh node accepts every block of a fast miner', joinFailure === null, joinFailure ?? '');
   check('the joining node reaches the same head', joiner.head.hash === fast.head.hash);
+
+  // ------------------------------------------------------ issuance schedule
+  console.log('\n6b. issuance - tail emission, decided 29 Aug 2026');
+
+  const G = Chain.loadGenesis(GENESIS);
+  const MOLI = 10n ** 18n;
+  const era = Number(G.rewardHalvingInterval);
+
+  check('genesis declares the halving interval and a permanent floor',
+    era === 2102400 && G.rewardFloor === MOLI / 4n, `floor ${G.rewardFloor}`);
+  check('fee burn is declared and OFF, not left silent', G.feeBurnBasisPoints === 0);
+
+  check('era 0 pays the full 2 MOLI', blockRewardAt(1n, G) === 2n * MOLI);
+  check('the last block of era 0 still pays 2 MOLI',
+    blockRewardAt(BigInt(era) - 1n, G) === 2n * MOLI);
+  check('the first block of era 1 halves to 1 MOLI',
+    blockRewardAt(BigInt(era), G) === MOLI);
+  check('era 2 halves again to 0.5 MOLI',
+    blockRewardAt(BigInt(era) * 2n, G) === MOLI / 2n);
+  check('era 3 reaches the 0.25 MOLI floor',
+    blockRewardAt(BigInt(era) * 3n, G) === MOLI / 4n);
+
+  // The floor is the whole point: a chain with deliberately negligible fees
+  // cannot pay for security from fees, so issuance must never reach zero.
+  check('the reward never falls below the floor, however far out',
+    blockRewardAt(BigInt(era) * 40n, G) === MOLI / 4n
+    && blockRewardAt(BigInt(era) * 10000n, G) === MOLI / 4n);
+  check('an absurd height does not hang or overflow the shift',
+    blockRewardAt(10n ** 30n, G) === MOLI / 4n);
+
+  // Backward compatibility: every block mined before this rule existed sits in
+  // era 0, so the chain already on disk stays valid and needs no reset.
+  check('blocks already mined are unaffected - all of era 0 pays 2 MOLI',
+    blockRewardAt(0n, G) === 2n * MOLI && blockRewardAt(1156n, G) === 2n * MOLI);
+
+  // And the miner and the verifier must agree, which is the actual risk.
+  const issue = new Chain(Chain.loadGenesis(GENESIS), scratch('issuance')).init();
+  issue.mine(ALICE);
+  const mirror = new Chain(Chain.loadGenesis(GENESIS), scratch('issuance-b')).init();
+  mirror.appendSerialized(serializeBlock(issue.blockByNumber(1)));
+  check('a second node re-derives the same reward from the same schedule',
+    mirror.state.balanceOf(ALICE) === issue.state.balanceOf(ALICE)
+    && mirror.state.balanceOf(ALICE) === 2n * MOLI);
 
   // -------------------------------------------------- expressions of will
   console.log('\n7. expressions of will (one wallet, one poll)');

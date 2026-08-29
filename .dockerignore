@@ -1,0 +1,24 @@
+# Keep the build context minimal and, above all, keep secrets out of it.
+# A datadir contains treasury.key — a live private key. It must never be sent
+# to the daemon, let alone land in a layer.
+data/
+data-*/
+*.key
+*.pem
+claims.json
+.env
+.env.*
+
+node_modules/
+.git/
+.gitignore
+
+# Docs and tests are not needed to run a node.
+test/
+*.md
+!README.md
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

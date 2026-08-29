@@ -15,7 +15,7 @@ import { State, applyTransaction } from './state.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
   ZERO_HASH, merkleRoot, blockHash, isValidSeal, mineHeader,
-  nextDifficulty, serializeBlock, deserializeHeader,
+  nextDifficulty, serializeBlock, deserializeHeader, blockRewardAt,
 } from './block.js';
 
 export class Chain {
@@ -49,6 +49,12 @@ export class Chain {
       initialDifficulty: BigInt(raw.initialDifficulty ?? raw.minimumDifficulty ?? 1000),
       blockGasLimit: BigInt(raw.blockGasLimit ?? 8000000),
       blockReward: BigInt(raw.blockReward ?? '2000000000000000000'),
+      // Tail emission (decided 29 Aug 2026): halve every interval down to a
+      // permanent floor. 0 disables halving and keeps the flat reward.
+      rewardHalvingInterval: BigInt(raw.rewardHalvingInterval ?? 0),
+      rewardFloor: BigInt(raw.rewardFloor ?? 0),
+      // Fee burn is OFF and declared so, rather than left silent.
+      feeBurnBasisPoints: Number(raw.feeBurnBasisPoints ?? 0),
       timestamp: BigInt(raw.timestamp ?? 0),
       extraData: raw.extraData ?? '0x',
       attribution: raw.attribution ?? null,
@@ -231,7 +237,7 @@ export class Chain {
         // not applicable in this position; a later block may take it
       }
     }
-    state.credit(minerAddress, this.genesis.blockReward);
+    state.credit(minerAddress, blockRewardAt(parent.header.number + 1n, this.genesis));
 
     const header = {
       number: parent.header.number + 1n,
@@ -304,7 +310,7 @@ export class Chain {
       receipts.push(receipt);
       gasUsed += receipt.gasUsed;
     }
-    state.credit(header.miner, this.genesis.blockReward);
+    state.credit(header.miner, blockRewardAt(header.number, this.genesis));
 
     if (gasUsed !== header.gasUsed) {
       throw new Error(`gas used mismatch: computed ${gasUsed}, header says ${header.gasUsed}`);

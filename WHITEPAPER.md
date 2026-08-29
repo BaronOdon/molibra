@@ -214,12 +214,27 @@ For a `single`-mode token, who receives the one unit, and how is that establishe
 building the database of identified political preferences that §1 rejects? This is the question
 most likely to change the rest of the design. It is open.
 
-### 8.3 Issuance
+### 8.3 Issuance — decided 29 August 2026
 
-The block reward is a flat two MOLI with **no cap**. That is unbounded inflation, and it is
-stated plainly rather than hidden behind a chart. A halving schedule gives a hard asymptotic
-cap; a tail emission pays miners forever at an ever-shrinking percentage. Either is defensible.
-Leaving it undecided is not — and until it is chosen, **Molibra makes no claim about scarcity.**
+**Settled: tail emission.** The reward starts at 2 MOLI and halves every 2,102,400 blocks
+(about a year at 15 s) until it reaches a permanent floor of **0.25 MOLI per block**, where it
+stays forever.
+
+| | Reward/block | Issued that year | Cumulative |
+|---|---|---|---|
+| Year 1 | 2.0 | 4.20M | 4.20M |
+| Year 2 | 1.0 | 2.10M | 6.30M |
+| Year 3 | 0.5 | 1.05M | 7.36M |
+| Year 4 → ∞ | **0.25** | 0.525M | +0.525M/yr |
+
+There is deliberately **no hard cap**. A chain whose fees are negligible by design cannot pay
+for its own security from fees once issuance ends, so a cap would schedule a security cliff the
+design has already promised not to fund. A permanent floor keeps miners paid while inflation
+falls asymptotically toward zero as supply grows — roughly 5% at year ten, and declining.
+
+**Fee burn is off**, and declared so rather than left silent. Burning fees is a deflationary
+lever, and an appreciating MOLI would make expressing progressively more expensive — attacking
+the one property this design exists to protect.
 
 ### 8.4 Fee burn
 

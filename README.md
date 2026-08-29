@@ -3,7 +3,7 @@
 A public audit chain. Native coin: **MOLI**.
 
 [![Licence](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-94%20passing-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-105%20passing-brightgreen.svg)](#tests)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-informational.svg)](#install)
 
 **[White paper](WHITEPAPER.md)** · [Theory](THEORY.md) · [Token spec](SPEC-TOKENS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
@@ -21,7 +21,7 @@ and sign for it with no bespoke client.
 | Consensus | Proof of work (Keccak-256), retargeting toward a 15-second interval |
 | Fork choice | Heaviest chain by cumulative difficulty, with reorg |
 | Transactions | Legacy type 0, EIP-155 replay-protected |
-| Block reward | 2 MOLI |
+| Block reward | 2 MOLI, halving to a 0.25 MOLI floor (§8.3) |
 
 ## Origin and authorship
 
@@ -167,7 +167,7 @@ observable from outside.
 npm test
 ```
 
-94 checks covering: genesis and sealed attribution; mining and block rewards; the JSON-RPC
+105 checks covering: genesis and sealed attribution; mining and block rewards; the JSON-RPC
 method set; a real signed transaction from submission through receipt; replay, wrong-chain,
 insufficient-funds and tampered-block rejection; the audit routes; two-node replication with
 independent re-verification; fork choice (reorg onto heavier work, lighter branches kept but
@@ -198,9 +198,10 @@ Honest about what is and is not here:
 - **No coercion resistance.** Expressions are individually verifiable, which means they come
   with a receipt. See [WHITEPAPER.md](WHITEPAPER.md) §8.1.
 
-The full list of open problems, including issuance and eligibility, is
-[WHITEPAPER.md](WHITEPAPER.md) §8. Molibra makes **no claim about scarcity** while issuance is
-undecided.
+Issuance is **settled**: 2 MOLI per block, halving every 2,102,400 blocks to a permanent floor
+of **0.25 MOLI**, forever. No hard cap, deliberately — see [WHITEPAPER.md](WHITEPAPER.md) §8.3.
+Fee burn is **off**. The remaining open problems, including coercion resistance and
+`single`-mode eligibility, are §8.
 
 ## Not financial advice
 
