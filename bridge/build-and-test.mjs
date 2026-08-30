@@ -62,7 +62,10 @@ console.log('Molibra -> Ethereum bridge: compile, then execute\n');
 const source = readFileSync(join(HERE, 'MolibraProver.sol'), 'utf8');
 const out = JSON.parse(solc.compile(JSON.stringify({
   language: 'Solidity',
-  sources: { 'MolibraProver.sol': { content: source } },
+  sources: {
+    'MolibraProver.sol': { content: source },
+    'MolibraRelay.sol': { content: readFileSync(join(HERE, 'MolibraRelay.sol'), 'utf8') },
+  },
   settings: {
     optimizer: { enabled: true, runs: 200 },
     // Target Paris, not the compiler's default.
@@ -82,7 +85,10 @@ check('the contract compiles', errors.length === 0,
   errors.map((e) => e.formattedMessage).join('\n') || 'solc ' + solc.version().split('+')[0]);
 if (errors.length) process.exit(1);
 
-const artifacts = out.contracts['MolibraProver.sol'];
+const artifacts = {
+  ...out.contracts['MolibraProver.sol'],
+  ...out.contracts['MolibraRelay.sol'],
+};
 mkdirSync(join(HERE, 'artifacts'), { recursive: true });
 for (const [name, c] of Object.entries(artifacts)) {
   writeFileSync(join(HERE, 'artifacts', `${name}.json`),
@@ -270,6 +276,119 @@ check('the same molibra transaction cannot be claimed twice', !again.ok,
 console.log('\n  NOTE  a single header with valid work is cheap to mine at low difficulty.');
 console.log('        This rig is deliberately not safe for third-party funds; a real bridge');
 console.log('        needs a header chain with accumulated difficulty and a confirmation depth.');
+
+/* ------------------------------------------------- the relay: the real fix */
+// One header proves one block of work. The relay makes a forger out-work the
+// NETWORK: difficulty must follow molibra's own retarget rule from a
+// checkpoint, chains are compared by accumulated work, and a transaction only
+// counts once enough work is piled on top of it.
+const relayArtifact = JSON.parse(readFileSync(join(HERE, 'artifacts', 'MolibraRelay.json'), 'utf8'));
+const relayIface = new ethers.Interface(relayArtifact.abi);
+const rlpOf = (blk) => {
+  const bh = blk.header;
+  return bytesToHex(RLP.encode([
+    big(bh.number), hexToBytes(bh.parentHash), big(bh.timestamp), hexToBytes(bh.miner),
+    hexToBytes(bh.stateRoot), hexToBytes(bh.txRoot), big(bh.difficulty), big(bh.gasLimit),
+    big(bh.gasUsed), bh.extraData === '0x' ? new Uint8Array(0) : hexToBytes(bh.extraData),
+    big(bh.nonce),
+  ]));
+};
+
+const anchor = chain.blockByNumber(4);
+const relayDeploy = await evm.runCall({
+  caller: OWNER, origin: OWNER,
+  data: hexToBytes(relayArtifact.bytecode + ethers.AbiCoder.defaultAbiCoder().encode(
+    ['address', 'bytes32', 'uint64', 'uint64', 'uint128', 'bytes32', 'uint256', 'uint256'],
+    [proverAddress.toString(), anchor.hash, anchor.header.number, anchor.header.timestamp,
+      anchor.header.difficulty, anchor.header.txRoot,
+      chain.genesis.targetBlockSeconds, chain.genesis.minimumDifficulty]).slice(2)),
+  gasLimit: 20_000_000n,
+});
+check('the relay deploys, anchored to a checkpoint',
+  !relayDeploy.execResult.exceptionError,
+  relayDeploy.execResult.exceptionError?.error ?? `block ${anchor.header.number}`);
+const relayAddress = relayDeploy.createdAddress;
+
+async function callRelay(fn, args, caller = OWNER) {
+  const r = await evm.runCall({
+    caller, origin: caller, to: relayAddress,
+    data: hexToBytes(relayIface.encodeFunctionData(fn, args)),
+    gasLimit: 100_000_000n,
+  });
+  if (r.execResult.exceptionError) {
+    let why = r.execResult.exceptionError.error;
+    const rv = bytesToHex(r.execResult.returnValue);
+    if (rv.length > 10) { try { why = relayIface.parseError(rv)?.name ?? why; } catch { /* not ours */ } }
+    return { ok: false, why };
+  }
+  return { ok: true, value: relayIface.decodeFunctionResult(fn, bytesToHex(r.execResult.returnValue)) };
+}
+
+for (let i = 0; i < 6; i++) chain.mine(ALICE);
+const run = [];
+for (let n = 5; n <= Number(chain.height); n++) run.push(rlpOf(chain.blockByNumber(n)));
+const submitted = await callRelay('submit', [run]);
+check('THE RELAY ACCEPTS A REAL RUN OF MOLIBRA HEADERS', submitted.ok,
+  submitted.ok ? `${run.length} headers, each checked against the retarget rule` : submitted.why);
+
+const bestWork = await callRelay('bestWork', []);
+const expectedWork = chain.canonical.slice(4)
+  .reduce((sum, b) => sum + BigInt(b.header.difficulty), 0n);
+check('and accumulates exactly the work molibra did',
+  bestWork.ok && bestWork.value[0] === expectedWork, `${expectedWork} total difficulty`);
+
+// The attack the test rig cannot see: a header that simply DECLARES an easy
+// difficulty. The retarget rule refuses it.
+const tip = chain.blockByNumber(Number(chain.height));
+const forgedRlp = bytesToHex(RLP.encode([
+  big(BigInt(tip.header.number) + 1n), hexToBytes(tip.hash),
+  big(BigInt(tip.header.timestamp) + 1n), hexToBytes(tip.header.miner),
+  hexToBytes(tip.header.stateRoot), hexToBytes(tip.header.txRoot),
+  big(1000), big(tip.header.gasLimit), big(0), new Uint8Array(0), big(1),
+]));
+const forgedSubmit = await callRelay('submit', [[forgedRlp]]);
+check('a header that simply DECLARES an easy difficulty is refused', !forgedSubmit.ok,
+  `${forgedSubmit.why} — the attack a single-header bridge cannot see`);
+
+const settledHigh = await callRelay('isSettled',
+  [proof.blockHash, proof.txHash, siblings, onRight, expectedWork * 10n]);
+const settledLow = await callRelay('isSettled',
+  [proof.blockHash, proof.txHash, siblings, onRight, 1n]);
+check('a transaction is NOT settled until enough work is piled on top',
+  settledHigh.ok && settledHigh.value[0] === false);
+check('and IS settled once it is buried', settledLow.ok && settledLow.value[0] === true,
+  'confirmation measured in work, not in a count of blocks');
+
+/* ------------------------------------ the instruction comes from the chain */
+const b2Artifact = JSON.parse(readFileSync(join(HERE, 'artifacts', 'MolibraBridge.json'), 'utf8'));
+const b2Iface = new ethers.Interface(b2Artifact.abi);
+const { encodeBridgeOut } = await import('../src/bridge.js');
+const rawBridgeTx = toHex(signTransaction(
+  { nonce: 3n, gasPrice: 1000000000n, gasLimit: 60000n, to: ALICE, value: 0n,
+    data: encodeBridgeOut('0x' + '22'.repeat(20), 10n ** 17n) },
+  ALICE_KEY, chain.chainId));
+
+const b2Deploy = await evm.runCall({
+  caller: OWNER, origin: OWNER, value: 10n ** 18n,
+  data: hexToBytes(b2Artifact.bytecode + ethers.AbiCoder.defaultAbiCoder()
+    .encode(['address', 'uint256'], [relayAddress.toString(), 1]).slice(2)),
+  gasLimit: 20_000_000n,
+});
+check('the relay-backed bridge deploys', !b2Deploy.execResult.exceptionError,
+  b2Deploy.execResult.exceptionError?.error ?? '1 ETH in');
+
+const decoded = await evm.runCall({
+  to: b2Deploy.createdAddress,
+  data: hexToBytes(b2Iface.encodeFunctionData('decodeBridgeOut', [rawBridgeTx])),
+  gasLimit: 10_000_000n,
+});
+const readBack = decoded.execResult.exceptionError ? null
+  : b2Iface.decodeFunctionResult('decodeBridgeOut', bytesToHex(decoded.execResult.returnValue));
+check('THE CONTRACT READS THE INSTRUCTION OUT OF THE MOLIBRA TRANSACTION ITSELF',
+  readBack !== null && readBack[0].toLowerCase() === '0x' + '22'.repeat(20)
+  && readBack[1] === 10n ** 17n,
+  readBack ? `${readBack[0]} <- ${(Number(readBack[1]) / 1e18).toFixed(2)} ETH`
+    : decoded.execResult.exceptionError?.error);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 for (const d of dirs) rmSync(d, { recursive: true, force: true });

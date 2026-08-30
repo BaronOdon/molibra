@@ -26,13 +26,28 @@
  * side must do for itself. A proof says "this happened in this block"; only a
  * chain of headers says "and that block won".
  *
- * ⛔ **What is NOT here, and must not be added without the legal opinions doc
- * 28 § 8.8 requires**: anything that locks, mints, releases or custodies value
- * across networks. That half makes the operator a service provider executing
- * transfers on behalf of third parties - PSAV under Lei 14.478/2022 art. 5º,
- * requiring prior federal authorisation under art. 2º - and it re-opens every
- * question the non-transferable design was built to avoid. The verification
- * half below has none of that: it moves nothing and holds nothing.
+ * ## Where legislation enters, and where it does not
+ *
+ * **This chain is built on libertarian theory and Macrobiotic Quantum Theory**
+ * (see THEORY.md), not on any one country's statute. It is a general-purpose
+ * public chain, and its design answers to its own principles.
+ *
+ * **MOLI is an ordinary coin of that chain** - mined, priced, transferable by
+ * settled design, and **not used in the DataToalha application at all**.
+ * Bridging it is a technical question: can the other side verify what happened
+ * here? That is what this file answers.
+ *
+ * ⛔ **GIZ is where legislation applies, and GIZ never crosses.** It is the
+ * application token for a board in Brazil, and the electoral rules attach to
+ * it and to the questions it carries - not to the chain, and not to MOLI. Its
+ * whole design is that it has no market and therefore no price; a bridged
+ * claim on it would manufacture both. See `mayCrossABridge` below: GIZ, and
+ * any `social`, `purchase` or `electoral` token, is refused in any wrapping.
+ *
+ * Whoever chooses to *operate* a bridge as a service answers to whatever rules
+ * their own jurisdiction puts on that. That is a property of the operator, not
+ * of the chain, and not a reason the verifier below should not exist: it moves
+ * nothing, holds nothing, and anybody may run it.
  */
 
 import { keccak256, toHex, fromHex, concatBytes } from './crypto.js';
