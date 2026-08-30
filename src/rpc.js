@@ -397,6 +397,13 @@ function handleAudit(node, req, res) {
     return;
   }
 
+  if (path === '/molibra/create') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'create.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/chalk') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'chalk.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

@@ -1,0 +1,616 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Criar uma pergunta — Molibra</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0F0F2A;color:#E0E0E8;font:15px/1.6 system-ui,sans-serif;
+       max-width:720px;margin:32px auto;padding:0 20px}
+  h1{background:linear-gradient(96deg,#00F0FF,#B14AFF);-webkit-background-clip:text;
+     background-clip:text;color:transparent;font-size:32px;margin:0 0 4px}
+  h2{font-size:17px;margin:0 0 4px}
+  .card{background:#16162D;border:1px solid rgba(224,224,232,.12);border-radius:12px;
+        padding:18px;margin:14px 0}
+  button{background:linear-gradient(96deg,#00F0FF,#B14AFF);color:#0F0F2A;border:0;
+         border-radius:10px;padding:13px 22px;font:600 15px system-ui;cursor:pointer}
+  button.ghost{background:none;color:#9098B0;border:1px solid rgba(224,224,232,.2);
+               font-size:13px;padding:8px 13px;font-weight:500}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select,textarea{background:#0F0F2A;border:1px solid rgba(224,224,232,.2);
+        border-radius:8px;color:#E0E0E8;font:14px system-ui;padding:10px;width:100%;
+        box-sizing:border-box;margin:5px 0}
+  input.mono{font:13px ui-monospace,Menlo,monospace}
+  label{font-size:13px;color:#9098B0;display:block;margin-top:10px}
+  code,pre{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#66F8FF;
+           word-break:break-all;white-space:pre-wrap}
+  .muted{color:#9098B0}
+  .small{font-size:13px}
+  .row{display:flex;gap:8px;align-items:center}
+  .row input{margin:3px 0}
+  .warn{border-left:3px solid #FFB020;background:rgba(255,176,32,.07);
+        padding:11px 13px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+  .stop{border-left:3px solid #FF7A7A;background:rgba(255,122,122,.07);
+        padding:11px 13px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+  .ok{color:#63E6A0}.err{color:#FF7A7A}
+  .langs{text-align:right;font-size:13px;margin:0 0 8px}
+  .langs button{background:none;border:0;color:#9098B0;font:13px system-ui;cursor:pointer;
+                padding:2px 6px;border-radius:6px}
+  .langs button[aria-current="true"]{color:#00F0FF;background:rgba(0,240,255,.08)}
+  a{color:#00F0FF}
+  .pill{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;
+        background:rgba(224,224,232,.1);color:#9098B0;margin-right:6px}
+</style>
+
+<p class="langs" id="langs"></p>
+
+<h1 data-t="title"></h1>
+<p class="muted" data-t="intro"></p>
+
+<div class="card">
+  <h2 data-t="qTitle"></h2>
+  <p class="muted small" data-t="qTitleHelp"></p>
+  <input id="title" maxlength="200" data-t-placeholder="qTitlePlaceholder">
+
+  <label data-t="qOptions"></label>
+  <div id="options"></div>
+  <p><button class="ghost" id="addOption" data-t="addOption"></button></p>
+</div>
+
+<div class="card">
+  <h2 data-t="qPurpose"></h2>
+  <p class="muted small" data-t="qPurposeHelp"></p>
+  <select id="purpose"></select>
+  <div id="purposeNote" class="warn"></div>
+</div>
+
+<div class="card">
+  <h2 data-t="qMode"></h2>
+  <p class="muted small" data-t="qModeHelp"></p>
+  <select id="voteMode"></select>
+  <div id="modeNote" class="warn"></div>
+  <div id="capRow" hidden>
+    <label data-t="qCap"></label>
+    <input id="cap" type="number" min="1" value="2">
+  </div>
+</div>
+
+<div class="card">
+  <h2 data-t="qSupply"></h2>
+  <p class="muted small" data-t="qSupplyHelp"></p>
+  <label data-t="qCost"></label>
+  <input id="cost" type="number" min="1" step="1" value="1000">
+  <p class="muted small" id="costNote"></p>
+
+  <label class="row"><input type="checkbox" id="issuable" checked style="width:auto">
+    <span data-t="qIssuable"></span></label>
+  <label class="row"><input type="checkbox" id="capped" style="width:auto">
+    <span data-t="qCapped"></span></label>
+  <div id="maxRow" hidden>
+    <label data-t="qMax"></label>
+    <input id="maxUnits" type="number" min="1" value="1000">
+  </div>
+  <label class="row"><input type="checkbox" id="transferable" style="width:auto">
+    <span data-t="qTransferable"></span></label>
+  <div id="transferNote" class="warn" hidden></div>
+</div>
+
+<div class="card">
+  <h2 data-t="qSign"></h2>
+  <p class="muted small" data-t="qSignHelp"></p>
+  <p id="who" class="small muted"></p>
+  <p>
+    <button class="ghost" id="useWallet" data-t="useWallet"></button>
+    <button class="ghost" id="useKey" data-t="useKey"></button>
+  </p>
+  <div id="unlock" hidden>
+    <input id="pass" type="password" data-t-placeholder="pass" autocomplete="current-password">
+    <p><button class="ghost" id="unlockNow" data-t="unlockNow"></button></p>
+  </div>
+</div>
+
+<div id="problems"></div>
+
+<p><button id="create" disabled data-t="create"></button></p>
+<p id="out" class="small muted">&nbsp;</p>
+
+<div class="card">
+  <p class="muted small" style="margin:0 0 6px" data-t="payload"></p>
+  <pre id="data"></pre>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@noble/hashes/": "/molibra/vendor/hashes/",
+    "@noble/curves/": "/molibra/vendor/curves/"
+  }
+}
+</script>
+
+<script type="module">
+import * as wallet from '/molibra/wallet.js';
+
+/* RECORD-BEGIN — test/create-page.mjs extracts this region and checks it
+   against src/token.js, so what the form refuses and what consensus refuses
+   stay the same thing. Nothing here may touch the DOM. */
+
+const UNIT = 10n ** 18n;
+
+/** The purposes, and the two facts about each that change what the form does. */
+const PURPOSES = {
+  market:    { label: 'aferição de mercado',        mayTransfer: true },
+  behaviour: { label: 'comportamento do consumidor', mayTransfer: true },
+  social:    { label: 'comunicação social',          mayTransfer: false },
+  purchase:  { label: 'expressão pública de compra', mayTransfer: false },
+  electoral: { label: 'matéria eleitoral',           mayTransfer: false },
+};
+
+const VOTE_MODES = ['quantum', 'single', 'capped', 'weighted'];
+
+/** Mirrors normalizeTokenRecord. Returns a list of problems - empty is valid. */
+function problemsWith(form) {
+  const problems = [];
+  const title = String(form.title ?? '').trim();
+  if (!title) problems.push('needsTitle');
+  if (title.length > 200) problems.push('titleTooLong');
+
+  const options = (form.options ?? []).map((o) => String(o).trim()).filter(Boolean);
+  if (options.length < 2) problems.push('needsTwoOptions');
+  if (options.length > 64) problems.push('tooManyOptions');
+  if (new Set(options.map((o) => o.toLowerCase())).size !== options.length) {
+    problems.push('duplicateOptions');
+  }
+
+  if (!(form.purpose in PURPOSES)) problems.push('needsPurpose');
+
+  if (!VOTE_MODES.includes(form.voteMode)) problems.push('needsMode');
+  if (form.voteMode === 'capped' && !(Number(form.cap) >= 1)) problems.push('needsCap');
+
+  if (!(BigInt(form.expressionCost ?? 0) > 0n)) problems.push('needsCost');
+
+  // The naming rule, checked here so the form says so before the chain does.
+  if (form.purpose === 'purchase' && /\b(enquete|enquetes|pesquisa|pesquisas)\b/i.test(title)) {
+    problems.push('noEnqueteName');
+  }
+
+  // The compliance keystone.
+  if (form.transferable && form.purpose in PURPOSES && !PURPOSES[form.purpose].mayTransfer) {
+    problems.push('cannotTransfer');
+  }
+
+  // The dead end: nobody but the creator could ever hold a unit.
+  if (!form.issuable && !form.transferable) problems.push('deadEnd');
+  if (!form.issuable && BigInt(form.initialSupply ?? 0) === 0n) problems.push('nothingToIssue');
+
+  const max = BigInt(form.maxSupply ?? 0);
+  if (max > 0n && BigInt(form.initialSupply ?? 0) > max) problems.push('supplyOverMax');
+  return problems;
+}
+
+/** The record exactly as the chain wants it. */
+function buildRecord(form) {
+  return {
+    title: String(form.title).trim(),
+    options: (form.options ?? []).map((o) => String(o).trim()).filter(Boolean),
+    voteMode: form.voteMode,
+    ...(form.voteMode === 'capped' ? { cap: Number(form.cap) } : {}),
+    initialSupply: String(form.initialSupply ?? '0'),
+    maxSupply: String(form.maxSupply ?? '0'),
+    expressionCost: String(form.expressionCost),
+    issuable: Boolean(form.issuable),
+    purpose: form.purpose,
+    transferable: Boolean(form.transferable),
+  };
+}
+
+/** How many expressions a whole unit of the token buys. */
+function expressionsPerUnit(expressionCost) {
+  const cost = BigInt(expressionCost);
+  return cost > 0n ? UNIT / cost : 0n;
+}
+
+/* RECORD-END */
+
+/* I18N-BEGIN */
+const STRINGS = {
+  'pt-BR': {
+    lang: 'Português (BR)',
+    title: 'Criar uma pergunta',
+    intro: 'Uma pergunta no Molibra é um token: a pergunta, as opções, e a regra pela qual as '
+      + 'pessoas podem falar sobre ela. Tudo fica <b>fixo na criação e publicado junto</b> — '
+      + 'quem lê nunca precisa acreditar numa descrição.',
+    qTitle: 'A pergunta',
+    qTitleHelp: 'É o título do token e não pode ser mudado depois.',
+    qTitlePlaceholder: 'O que você quer perguntar?',
+    qOptions: 'Opções (no mínimo duas)',
+    addOption: '+ opção',
+    qPurpose: 'Para que serve',
+    qPurposeHelp: 'Declarado na criação, imutável, publicado junto. Não existe padrão: a marca '
+      + 'é registrada para pesquisa e comunicação social, e qual delas é esta pergunta precisa '
+      + 'estar no registro, não na sua palavra.',
+    qMode: 'Quem pode falar, e quantas vezes',
+    qModeHelp: 'Imutável. Uma pergunta cujas regras mudam depois que as pessoas responderam '
+      + 'não é registro de coisa alguma.',
+    qCap: 'Quantas vezes cada carteira pode falar',
+    qSupply: 'Giz e custo',
+    qSupplyHelp: 'O custo é cobrado em granularidade de wei, então uma unidade cobre muitas '
+      + 'perguntas. Falar não custa MOLI — só queima o custo declarado.',
+    qCost: 'Custo por expressão (milionésimos de unidade)',
+    qIssuable: 'O criador pode emitir mais unidades (direção única — quem recebe não repassa)',
+    qCapped: 'Limitar o total que pode existir',
+    qMax: 'Total máximo (unidades)',
+    qTransferable: 'Transferível entre pessoas',
+    qSign: 'Quem assina',
+    qSignHelp: 'Criar uma pergunta é publicar, e publicar custa gás em MOLI. Use sua carteira '
+      + 'ou a chave criada nesta página.',
+    useWallet: 'Usar minha carteira',
+    useKey: 'Usar a chave desta página',
+    pass: 'senha',
+    unlockNow: 'Desbloquear',
+    create: 'Criar a pergunta',
+    payload: 'Dados da transação',
+    noWallet: 'Nenhuma carteira neste navegador.',
+    noKey: 'Nenhuma chave criada nesta página ainda.',
+    connected: 'Assinando como {address}',
+    wrongPass: 'senha incorreta',
+    sending: 'Confirme na carteira…',
+    sent: 'Enviada: <code>{hash}</code><br>Ela é minerada em ~15s. O id do token é derivado do '
+      + 'criador, do título e da altura do bloco — leia em <a href="/molibra/tokens">/molibra/tokens</a>.',
+    failed: 'Falhou: {error}',
+    perUnit: 'Uma unidade inteira cobre {n} expressões.',
+    // problems
+    needsTitle: 'A pergunta precisa de um título.',
+    titleTooLong: 'Título longo demais (máx. 200).',
+    needsTwoOptions: 'São necessárias pelo menos duas opções.',
+    tooManyOptions: 'Opções demais (máx. 64).',
+    duplicateOptions: 'Há opções repetidas.',
+    needsPurpose: 'Escolha para que serve.',
+    needsMode: 'Escolha quem pode falar.',
+    needsCap: 'O limite precisa ser pelo menos 1.',
+    needsCost: 'O custo por expressão precisa ser maior que zero.',
+    noEnqueteName: 'Uma pergunta de expressão pública de compra <b>não pode se chamar enquete '
+      + 'nem pesquisa</b> — são objetos regulados pelas resoluções do TSE, e esta não é um '
+      + 'deles. O próprio validador recusa.',
+    cannotTransfer: 'Este propósito <b>nunca</b> pode ser transferível: um instrumento com '
+      + 'preço que dá voz sobre assunto público liga vantagem econômica à participação '
+      + 'política. Recusado por consenso.',
+    deadEnd: 'Nem emitível nem transferível: ninguém além do criador conseguiria falar.',
+    nothingToIssue: 'Sem estoque inicial e sem emissão, nenhuma unidade existiria.',
+    supplyOverMax: 'O estoque inicial passa do total máximo.',
+    // purposes / modes
+    p_market: 'aferição de mercado',
+    p_behaviour: 'comportamento do consumidor',
+    p_social: 'comunicação social',
+    p_purchase: 'expressão pública de compra',
+    p_electoral: 'matéria eleitoral',
+    pn_market: 'Medição de mercado. Pode ser transferível, se você quiser.',
+    pn_behaviour: 'Comportamento do consumidor. Pode ser transferível, se você quiser.',
+    pn_social: 'Comunicação social. <b>Nunca transferível</b> — sem mercado, sem preço.',
+    pn_purchase: '<b>É o que vale no período eleitoral.</b> Uma compra, tornada pública por '
+      + 'quem a fez. Não é enquete e não é pesquisa, e o validador recusa esses nomes no '
+      + 'título. <b>Nunca transferível.</b>',
+    pn_electoral: 'Matéria eleitoral: <b>nunca transferível</b>, e a pergunta carrega deveres '
+      + 'próprios que esta cadeia não cumpre por você.',
+    m_quantum: 'quantum — uma vez por local de votação',
+    m_single: 'single — uma vez, para esta pergunta inteira',
+    m_capped: 'capped(n) — até n vezes por carteira',
+    m_weighted: 'weighted — o quanto queimar é o peso',
+    mn_quantum: 'Cada pergunta é um local de votação. Uma carteira fala uma vez em cada, e '
+      + 'quantas unidades ela tem não muda isso. É a regra do GIZ.',
+    mn_single: 'Uma expressão por carteira, para sempre, nesta pergunta.',
+    mn_capped: 'Até n expressões por carteira. Todas custam igual.',
+    mn_weighted: '<b>Plutocrático por construção</b>: quem queima mais, pesa mais. Legítimo '
+      + 'para algumas perguntas, e rotulado assim em todo lugar onde aparecer.',
+  },
+  en: {
+    lang: 'English',
+    title: 'Create a question',
+    intro: 'A question on Molibra is a token: the question, its options, and the rule by which '
+      + 'people may speak on it. All of it is <b>fixed at creation and published with it</b> — '
+      + 'a reader never has to trust a description.',
+    qTitle: 'The question',
+    qTitleHelp: 'It is the token title and cannot be changed afterwards.',
+    qTitlePlaceholder: 'What do you want to ask?',
+    qOptions: 'Options (at least two)',
+    addOption: '+ option',
+    qPurpose: 'What it is for',
+    qPurposeHelp: 'Declared at creation, immutable, published with it. There is no default: '
+      + 'the mark is registered for pesquisa e comunicação social, and which of those this '
+      + 'question is has to be on the record rather than in your word for it.',
+    qMode: 'Who may speak, and how often',
+    qModeHelp: 'Immutable. A question whose rules can move after people have answered is not a '
+      + 'record of anything.',
+    qCap: 'How many times each wallet may speak',
+    qSupply: 'Chalk and cost',
+    qSupplyHelp: 'The cost is charged in wei granularity, so one unit covers many questions. '
+      + 'Speaking costs no MOLI — it burns only the declared cost.',
+    qCost: 'Cost per expression (millionths of a unit)',
+    qIssuable: 'The creator may issue more units (one-directional — a holder cannot pass them on)',
+    qCapped: 'Cap the total that may ever exist',
+    qMax: 'Maximum total (units)',
+    qTransferable: 'Transferable between people',
+    qSign: 'Who signs',
+    qSignHelp: 'Creating a question is publishing, and publishing costs gas in MOLI. Use your '
+      + 'wallet or the key created on this site.',
+    useWallet: 'Use my wallet',
+    useKey: 'Use this site\'s key',
+    pass: 'passphrase',
+    unlockNow: 'Unlock',
+    create: 'Create the question',
+    payload: 'Transaction data',
+    noWallet: 'No wallet in this browser.',
+    noKey: 'No key has been created on this site yet.',
+    connected: 'Signing as {address}',
+    wrongPass: 'wrong passphrase',
+    sending: 'Confirm in your wallet…',
+    sent: 'Sent: <code>{hash}</code><br>It mines in ~15s. The token id is derived from creator, '
+      + 'title and block height — read it at <a href="/molibra/tokens">/molibra/tokens</a>.',
+    failed: 'Failed: {error}',
+    perUnit: 'One whole unit covers {n} expressions.',
+    needsTitle: 'The question needs a title.',
+    titleTooLong: 'Title too long (max 200).',
+    needsTwoOptions: 'At least two options are needed.',
+    tooManyOptions: 'Too many options (max 64).',
+    duplicateOptions: 'Two options are the same.',
+    needsPurpose: 'Choose what it is for.',
+    needsMode: 'Choose who may speak.',
+    needsCap: 'The cap must be at least 1.',
+    needsCost: 'The cost per expression must be greater than zero.',
+    noEnqueteName: 'A question declared as expressão pública de compra <b>cannot be called an '
+      + 'enquete or a pesquisa</b> — those are regulated objects under the TSE resolutions, and '
+      + 'this is not one of them. The validator itself refuses it.',
+    cannotTransfer: 'This purpose can <b>never</b> be transferable: a priced instrument that '
+      + 'grants a say on a public matter attaches economic value to political participation. '
+      + 'Refused by consensus.',
+    deadEnd: 'Neither issuable nor transferable: nobody but the creator could ever speak.',
+    nothingToIssue: 'With no initial supply and no issuance, no unit would ever exist.',
+    supplyOverMax: 'The initial supply exceeds the maximum.',
+    p_market: 'market measurement',
+    p_behaviour: 'consumer behaviour',
+    p_social: 'social communication',
+    p_purchase: 'purchase, publicly expressed',
+    p_electoral: 'electoral subject',
+    pn_market: 'Market measurement. May be transferable, if you want it to be.',
+    pn_behaviour: 'Consumer behaviour. May be transferable, if you want it to be.',
+    pn_social: 'Social communication. <b>Never transferable</b> — no market, no price.',
+    pn_purchase: '<b>This is the one for an electoral period.</b> A purchase, made public by '
+      + 'the person who made it. It is not an enquete and not a pesquisa, and the validator '
+      + 'refuses those words in the title. <b>Never transferable.</b>',
+    pn_electoral: 'Electoral subject: <b>never transferable</b>, and such a question carries '
+      + 'duties of its own that this chain does not discharge for you.',
+    m_quantum: 'quantum — once per voting place',
+    m_single: 'single — once, for this whole question',
+    m_capped: 'capped(n) — up to n times per wallet',
+    m_weighted: 'weighted — the amount burned is the weight',
+    mn_quantum: 'Each question is a voting place. A wallet speaks once in each, and how many '
+      + 'units it holds changes nothing. This is the GIZ rule.',
+    mn_single: 'One expression per wallet, forever, on this question.',
+    mn_capped: 'Up to n expressions per wallet. All cost the same.',
+    mn_weighted: '<b>Plutocratic by construction</b>: burn more, weigh more. Legitimate for '
+      + 'some questions, and labelled this way wherever it appears.',
+  },
+};
+/* I18N-END */
+
+const LANG_SLOT = 'molibra.create.lang';
+function pickLanguage() {
+  const saved = localStorage.getItem(LANG_SLOT);
+  if (saved && STRINGS[saved]) return saved;
+  const url = new URLSearchParams(location.search).get('lang');
+  if (url && STRINGS[url]) return url;
+  for (const tag of navigator.languages ?? [navigator.language ?? '']) {
+    const lower = String(tag).toLowerCase();
+    if (lower.startsWith('pt')) return 'pt-BR';
+    if (lower.startsWith('en')) return 'en';
+  }
+  return 'pt-BR';
+}
+let LANG = pickLanguage();
+const t = (key, vars = {}) => {
+  const raw = STRINGS[LANG]?.[key] ?? STRINGS.en[key] ?? key;
+  return raw.replace(/\{(\w+)\}/g, (_, n) => (n in vars ? vars[n] : `{${n}}`));
+};
+
+/* ------------------------------------------------------------------- ui */
+const $ = (id) => document.getElementById(id);
+const VAULT_SLOT = 'molibra.chalk.vault.v1';
+let signer = null;   // { kind: 'wallet' } | { kind: 'key', privateKey, address }
+let address = null;
+let chainIdDec = 20226;
+
+function optionRows() {
+  return [...$('options').querySelectorAll('input')].map((i) => i.value);
+}
+
+function addOption(value = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const input = document.createElement('input');
+  input.value = value;
+  input.oninput = refresh;
+  const del = document.createElement('button');
+  del.className = 'ghost';
+  del.textContent = '×';
+  del.onclick = () => { row.remove(); refresh(); };
+  row.append(input, del);
+  $('options').appendChild(row);
+}
+
+function readForm() {
+  const costMillionths = BigInt($('cost').value || '0');
+  return {
+    title: $('title').value,
+    options: optionRows(),
+    purpose: $('purpose').value,
+    voteMode: $('voteMode').value,
+    cap: $('cap').value,
+    // The form asks for millionths of a unit, because "1000" is a number a
+    // person can hold in their head and 10^12 is not.
+    expressionCost: (costMillionths * (UNIT / 1000000n)).toString(),
+    initialSupply: '0',
+    maxSupply: $('capped').checked
+      ? (BigInt($('maxUnits').value || '0') * UNIT).toString() : '0',
+    issuable: $('issuable').checked,
+    transferable: $('transferable').checked,
+  };
+}
+
+function refresh() {
+  const form = readForm();
+  const purpose = PURPOSES[form.purpose];
+
+  $('purposeNote').innerHTML = t('pn_' + form.purpose);
+  $('modeNote').innerHTML = t('mn_' + form.voteMode);
+  $('capRow').hidden = form.voteMode !== 'capped';
+  $('maxRow').hidden = !$('capped').checked;
+
+  // Transferability is not offered where consensus would refuse it, and the
+  // reason is shown rather than the control silently vanishing.
+  const mayTransfer = purpose ? purpose.mayTransfer : true;
+  $('transferable').disabled = !mayTransfer;
+  if (!mayTransfer) $('transferable').checked = false;
+  $('transferNote').hidden = mayTransfer;
+  $('transferNote').innerHTML = t('cannotTransfer');
+
+  const perUnit = expressionsPerUnit(form.expressionCost);
+  $('costNote').textContent = perUnit > 0n
+    ? t('perUnit', { n: perUnit.toLocaleString(LANG) }) : '';
+
+  const problems = problemsWith(form);
+  $('problems').innerHTML = problems
+    .map((p) => `<div class="stop">${t(p)}</div>`).join('');
+
+  const ok = problems.length === 0;
+  $('create').disabled = !ok || !signer;
+  $('data').textContent = ok ? encodeTokenCreate(buildRecord(form)) : '—';
+  return { form, ok };
+}
+
+/* The TOKEN_CREATE payload: tag + utf8 JSON, exactly as src/token.js builds it. */
+const TOKEN_CREATE_TAG = '0x73306244';
+const encodeTokenCreate = (record) => TOKEN_CREATE_TAG
+  + Array.from(new TextEncoder().encode(JSON.stringify(record)),
+      (b) => b.toString(16).padStart(2, '0')).join('');
+
+/* --------------------------------------------------------------- signing */
+function setSigner(next, addr) {
+  signer = next;
+  address = addr.toLowerCase();
+  $('who').innerHTML = t('connected', { address: `<code>${address}</code>` });
+  refresh();
+}
+
+$('useWallet').onclick = async () => {
+  if (!window.ethereum) return ($('who').innerHTML = t('noWallet'));
+  try {
+    const [a] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    setSigner({ kind: 'wallet' }, a);
+  } catch (e) { $('who').innerHTML = t('failed', { error: e.message }); }
+};
+
+$('useKey').onclick = () => {
+  if (!localStorage.getItem(VAULT_SLOT)) return ($('who').innerHTML = t('noKey'));
+  $('unlock').hidden = false;
+};
+
+$('unlockNow').onclick = async () => {
+  try {
+    const opened = await wallet.open(JSON.parse(localStorage.getItem(VAULT_SLOT)), $('pass').value);
+    $('pass').value = '';
+    $('unlock').hidden = true;
+    setSigner({ kind: 'key', privateKey: opened.privateKey }, opened.address);
+  } catch (e) {
+    $('who').innerHTML = /wrong passphrase/.test(e.message) ? t('wrongPass') : e.message;
+  }
+};
+
+/* --------------------------------------------------------------- create */
+$('create').onclick = async () => {
+  const { form, ok } = refresh();
+  if (!ok || !signer) return;
+  const data = encodeTokenCreate(buildRecord(form));
+  $('out').className = 'small muted';
+  try {
+    let hash;
+    if (signer.kind === 'wallet') {
+      $('out').innerHTML = t('sending');
+      hash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        // Self-addressed, zero value: creating a question moves no money.
+        params: [{ from: address, to: address, value: '0x0', data, gas: '0x493e0' }],
+      });
+    } else {
+      const nonce = await rpc('eth_getTransactionCount', [address, 'pending']);
+      const gasPrice = await rpc('eth_gasPrice', []);
+      const raw = wallet.signTransaction({
+        nonce: BigInt(nonce), gasPrice: BigInt(gasPrice), gasLimit: 300000n,
+        to: address, value: 0n, data,
+      }, signer.privateKey, chainIdDec);
+      hash = await rpc('eth_sendRawTransaction', [raw]);
+    }
+    $('out').className = 'small ok';
+    $('out').innerHTML = t('sent', { hash });
+  } catch (e) {
+    $('out').className = 'small err';
+    $('out').innerHTML = t('failed', { error: e.message || e });
+  }
+};
+
+async function rpc(method, params) {
+  const r = await fetch('/', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const body = await r.json();
+  if (body.error) throw new Error(body.error.message);
+  return body.result;
+}
+
+/* ----------------------------------------------------------------- boot */
+function applyLanguage() {
+  document.documentElement.lang = LANG === 'pt-BR' ? 'pt-BR' : 'en';
+  for (const el of document.querySelectorAll('[data-t]')) el.innerHTML = t(el.dataset.t);
+  for (const el of document.querySelectorAll('[data-t-placeholder]')) {
+    el.placeholder = t(el.dataset.tPlaceholder);
+  }
+  document.title = t('title') + ' — Molibra';
+  $('purpose').innerHTML = Object.keys(PURPOSES)
+    .map((p) => `<option value="${p}">${t('p_' + p)}</option>`).join('');
+  $('voteMode').innerHTML = VOTE_MODES
+    .map((m) => `<option value="${m}">${t('m_' + m)}</option>`).join('');
+}
+
+function render(keepValues) {
+  const purpose = keepValues ? $('purpose').value : 'purchase';
+  const mode = keepValues ? $('voteMode').value : 'quantum';
+  applyLanguage();
+  $('purpose').value = purpose;
+  $('voteMode').value = mode;
+  for (const b of $('langs').children) {
+    b.setAttribute('aria-current', b.dataset.lang === LANG ? 'true' : 'false');
+  }
+  refresh();
+}
+
+for (const code of Object.keys(STRINGS)) {
+  const b = document.createElement('button');
+  b.textContent = STRINGS[code].lang;
+  b.dataset.lang = code;
+  b.onclick = () => { LANG = code; localStorage.setItem(LANG_SLOT, code); render(true); };
+  $('langs').appendChild(b);
+}
+
+addOption();
+addOption();
+$('addOption').onclick = () => { addOption(); refresh(); };
+for (const id of ['title', 'purpose', 'voteMode', 'cap', 'cost',
+                  'issuable', 'capped', 'maxUnits', 'transferable']) {
+  $(id).addEventListener('input', refresh);
+  $(id).addEventListener('change', refresh);
+}
+render(false);
+
+fetch('/molibra').then((r) => r.json()).then((c) => {
+  if (c.chainId) chainIdDec = Number(c.chainId);
+}).catch(() => {});
+</script>

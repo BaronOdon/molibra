@@ -197,20 +197,21 @@ function buildBlock(challenge, address) {
 const STRINGS = {
   'pt-BR': {
     lang: 'Português (BR)',
-    title: 'Pegue seu giz',
-    intro: 'Giz (GIZ) é o que você gasta para fazer sua marca no quadro. Você não pode '
-      + 'comprá-lo e ninguém pode vendê-lo a você — ele não tem mercado e não tem preço. '
-      + 'Você o ganha aqui, em alguns segundos, fazendo seu computador trabalhar um pouco. '
-      + 'O quadro registra <b>expressão pública de compra</b>: uma compra, tornada pública '
-      + 'por quem a fez. Não é uma enquete e não é uma pesquisa.',
+    title: 'Seu giz',
+    intro: 'Giz (GIZ) é o que você <b>usa</b> para fazer sua marca no quadro. Você não pode '
+      + 'comprá-lo e ninguém pode vendê-lo a você — ele não tem mercado, não tem preço e não '
+      + 'vale nada. Ele é liberado aqui, em alguns segundos, fazendo seu computador trabalhar '
+      + 'um pouco. O quadro registra <b>expressão pública de compra</b>: uma compra, tornada '
+      + 'pública por quem a fez. Não é uma enquete e não é uma pesquisa.',
     warnTitle: 'O que isto é, exatamente.',
     warnBody: 'Seu navegador resolve um pequeno desafio, e então o publicador emite giz para '
-      + 'o seu endereço. Isto <b>não</b> é mineração de blocos: não protege a rede, não cria '
-      + 'MOLI, e nada de valor é transferido para você. Só roda enquanto você deixar rodando, '
-      + 'e Parar encerra a qualquer momento.',
+      + 'o seu endereço. Isto <b>não</b> é mineração de blocos e <b>não é um ganho</b>: não '
+      + 'protege a rede, não cria MOLI, não tem valor e nada de valor é transferido para você. '
+      + 'O giz serve para uma coisa só — ser gasto no quadro. Só roda enquanto você deixar '
+      + 'rodando, e Parar encerra a qualquer momento.',
     step1: 'Para onde vai o giz',
-    step1Help: 'Decida isto <b>antes</b> de ganhar. O giz é emitido para um endereço e não '
-      + 'pode ser repassado depois, então o endereço precisa ser seu desde o início.',
+    step1Help: 'Decida isto <b>antes</b>. O giz é emitido para um endereço e não pode ser '
+      + 'repassado depois, então o endereço precisa ser seu desde o início.',
     useWallet: 'Tenho uma carteira — usar',
     noWalletNote: 'Sem carteira neste navegador? Peça uma chave criada para você abaixo. É uma '
       + 'chave de verdade, utilizável em qualquer lugar, e continua sendo sua.',
@@ -229,8 +230,8 @@ const STRINGS = {
     orPaste: 'Ou cole um endereço que você já controla:',
     copy: 'Copiar endereço',
     reveal: 'Mostrar minha chave privada',
-    step2: 'Ganhar',
-    go: 'Ganhar giz',
+    step2: 'Liberar seu giz',
+    go: 'Liberar giz',
     stop: 'Parar',
     chooseFirst: 'Escolha primeiro para onde vai o giz.',
     step3: 'De volta ao aplicativo',
@@ -256,12 +257,12 @@ const STRINGS = {
     secretWarn: '<b>Esta é a sua chave privada. Quem a tiver controla este endereço.</b> '
       + 'Anote-a em algum lugar que só você alcance. Ela é mostrada aqui, e em nenhum outro '
       + 'lugar, nunca.',
-    readyGen: 'Pronto. Ao ganhar, o giz vai para este endereço.',
+    readyGen: 'Pronto. O giz vai para este endereço.',
     readyPasted: 'Pronto. Esta página não consegue assinar por um endereço colado, apenas receber nele.',
     nothingCopy: 'Nada para copiar ainda.',
     copied: 'Endereço copiado.',
     copyFail: 'A cópia falhou — selecione à mão.',
-    working: 'Trabalhando… cerca de {tries} tentativas para o equivalente a {n} expressões de giz.',
+    working: 'Trabalhando… cerca de {tries} tentativas para giz suficiente para {n} expressões.',
     stopped: 'Parado. Nada foi enviado.',
     solved: 'Resolvido em {secs}s após {tries} tentativas. Solicitando…',
     onItsWay: 'Giz a caminho: <code>{hash}</code><br>Suficiente para {n} expressões, assim que '
@@ -282,20 +283,21 @@ const STRINGS = {
   },
   en: {
     lang: 'English',
-    title: 'Get chalk',
-    intro: 'Chalk (GIZ) is what you spend to make your mark on the board. You cannot buy it and '
-      + 'nobody can sell it to you — it has no market and no price. You earn it here, in a few '
-      + 'seconds, by making your computer do a little work. The board records '
-      + '<b>expressão pública de compra</b>: a purchase, made public by the person who made it. '
-      + 'It is not an enquete and not a pesquisa.',
+    title: 'Your chalk',
+    intro: 'Chalk (GIZ) is what you <b>use</b> to make your mark on the board. You cannot buy '
+      + 'it and nobody can sell it to you — it has no market, no price and no value. It is '
+      + 'released here, in a few seconds, by making your computer do a little work. The board '
+      + 'records <b>expressão pública de compra</b>: a purchase, made public by the person who '
+      + 'made it. It is not an enquete and not a pesquisa.',
     warnTitle: 'What this is, exactly.',
     warnBody: 'Your browser solves a small puzzle, and the publisher then issues chalk to your '
-      + 'address. This is <b>not</b> block mining: it does not secure the chain, it does not '
-      + 'create MOLI, and nothing of value is transferred to you. It runs only while you leave '
-      + 'it running, and Stop ends it at any moment.',
+      + 'address. This is <b>not</b> block mining and <b>not a gain</b>: it does not secure the '
+      + 'chain, it does not create MOLI, it has no value, and nothing of value is transferred '
+      + 'to you. Chalk does one thing — it gets spent on the board. It runs only while you '
+      + 'leave it running, and Stop ends it at any moment.',
     step1: 'Where the chalk goes',
-    step1Help: 'Decide this <b>before</b> you earn. Chalk is issued to one address and cannot '
-      + 'be passed on afterwards, so the address has to be yours from the start.',
+    step1Help: 'Decide this <b>first</b>. Chalk is issued to one address and cannot be passed '
+      + 'on afterwards, so the address has to be yours from the start.',
     useWallet: 'I have a wallet — use it',
     noWalletNote: 'No wallet in this browser? Have one created for you below. It is a real key, '
       + 'usable anywhere, and it stays yours.',
@@ -314,8 +316,8 @@ const STRINGS = {
     orPaste: 'Or paste an address you already control:',
     copy: 'Copy address',
     reveal: 'Show my private key',
-    step2: 'Earn',
-    go: 'Earn chalk',
+    step2: 'Release your chalk',
+    go: 'Release chalk',
     stop: 'Stop',
     chooseFirst: 'Choose where the chalk goes first.',
     step3: 'Back to the app',
@@ -340,12 +342,12 @@ const STRINGS = {
     deleted: 'Deleted from this device.',
     secretWarn: '<b>This is your private key. Anyone who has it controls this address.</b> '
       + 'Write it down somewhere only you can reach. It is shown here, and nowhere else, ever.',
-    readyGen: 'Ready. Earning sends the chalk to this address.',
+    readyGen: 'Ready. The chalk goes to this address.',
     readyPasted: 'Ready. This page cannot sign for a pasted address, only receive to it.',
     nothingCopy: 'Nothing to copy yet.',
     copied: 'Address copied.',
     copyFail: 'Copy failed — select it by hand.',
-    working: 'Working… about {tries} tries for {n} expressions’ worth of chalk.',
+    working: 'Working… about {tries} tries for enough chalk for {n} expressions.',
     stopped: 'Stopped. Nothing was sent.',
     solved: 'Solved in {secs}s after {tries} tries. Claiming…',
     onItsWay: 'Chalk on its way: <code>{hash}</code><br>Enough for {n} expressions, once it is '

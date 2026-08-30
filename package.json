@@ -38,7 +38,7 @@
   "scripts": {
     "start": "node src/cli.js node",
     "keys": "node src/cli.js keys",
-    "test": "node test/run.js && node test/browser-work.mjs"
+    "test": "node test/run.js && node test/browser-work.mjs && node test/wallet.mjs && node test/blind.mjs && node test/create-page.mjs"
   },
   "dependencies": {
     "@ethereumjs/rlp": "^5.0.2",
