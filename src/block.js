@@ -40,6 +40,18 @@ function headerItems(header, includeNonce) {
   return items;
 }
 
+/**
+ * The RLP bytes the block hash is taken over.
+ *
+ * Exposed because an external verifier - an Ethereum contract, say - has to be
+ * handed exactly these bytes and re-hash them itself. Re-encoding the header on
+ * the other side would mean two encoders that must agree forever; handing over
+ * the bytes means one.
+ */
+export function encodeHeader(header) {
+  return toHex(RLP.encode(headerItems(header, true)));
+}
+
 /** Hash of the sealed header - this is the block hash. */
 export function blockHash(header) {
   return toHex(keccak256(RLP.encode(headerItems(header, true))));

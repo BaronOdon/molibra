@@ -12,9 +12,9 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { toQuantity, normalizeAddress, keccak256, recoverAddress, fromHex, bytesToBig } from './crypto.js';
+import { toQuantity, normalizeAddress, keccak256, recoverAddress, fromHex, toHex, bytesToBig } from './crypto.js';
 import { intrinsicGas } from './tx.js';
-import { serializeBlock } from './block.js';
+import { serializeBlock, encodeHeader } from './block.js';
 import { PURPOSE_LABELS } from './token.js';
 import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
@@ -396,6 +396,45 @@ function handleAudit(node, req, res) {
       return json(res, 404, { error: 'not found' });
     }
     return;
+  }
+
+  // --- the bridge test rig ------------------------------------------------
+  if (path === '/molibra/bridge') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridge.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path.startsWith('/molibra/bridge/artifact/')) {
+    const name = path.slice('/molibra/bridge/artifact/'.length);
+    if (!/^[A-Za-z0-9_]+$/.test(name)) return json(res, 404, { error: 'not found' });
+    try {
+      const file = join(dirname(fileURLToPath(import.meta.url)), '..',
+        'bridge', 'artifacts', `${name}.json`);
+      return json(res, 200, JSON.parse(readFileSync(file, 'utf8')));
+    } catch {
+      return json(res, 404, {
+        error: 'not compiled yet - run: node bridge/build-and-test.mjs',
+      });
+    }
+  }
+
+  // The exact bytes the block hash is taken over. A verifier elsewhere must
+  // re-hash these itself; handing them over means one encoder rather than two
+  // that have to agree forever.
+  if (path.startsWith('/molibra/header-rlp/')) {
+    const id = path.slice('/molibra/header-rlp/'.length);
+    const block = id.startsWith('0x') ? chain.blockByHash(id) : chain.blockByNumber(Number(id));
+    if (!block) return json(res, 404, { error: 'block not found' });
+    return json(res, 200, { blockHash: block.hash, rlp: encodeHeader(block.header) });
+  }
+
+  // Selector helper for a page that has no hash function of its own. Takes
+  // text, returns its keccak - it reads nothing and decides nothing.
+  if (path === '/molibra/keccak') {
+    const text = url.searchParams.get('text') ?? '';
+    return json(res, 200, { text, hash: toHex(keccak256(new TextEncoder().encode(text))) });
   }
 
   if (path === '/molibra/create') {

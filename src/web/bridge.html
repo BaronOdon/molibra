@@ -1,0 +1,259 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bridge test — Molibra → Ethereum</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0F0F2A;color:#E0E0E8;font:15px/1.6 system-ui,sans-serif;
+       max-width:760px;margin:30px auto;padding:0 20px}
+  h1{background:linear-gradient(96deg,#00F0FF,#B14AFF);-webkit-background-clip:text;
+     background-clip:text;color:transparent;font-size:30px;margin:0 0 4px}
+  h2{font-size:17px;margin:0 0 4px}
+  .card{background:#16162D;border:1px solid rgba(224,224,232,.12);border-radius:12px;
+        padding:17px;margin:13px 0}
+  button{background:linear-gradient(96deg,#00F0FF,#B14AFF);color:#0F0F2A;border:0;
+         border-radius:10px;padding:12px 20px;font:600 15px system-ui;cursor:pointer}
+  button.ghost{background:none;color:#9098B0;border:1px solid rgba(224,224,232,.2);
+               font-size:13px;padding:8px 13px;font-weight:500}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input{background:#0F0F2A;border:1px solid rgba(224,224,232,.2);border-radius:8px;
+        color:#E0E0E8;font:13px ui-monospace,Menlo,monospace;padding:10px;width:100%;
+        box-sizing:border-box;margin:5px 0}
+  label{font-size:13px;color:#9098B0;display:block;margin-top:9px}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#66F8FF;word-break:break-all}
+  .muted{color:#9098B0}.small{font-size:13px}.ok{color:#63E6A0}.err{color:#FF7A7A}
+  .stop{border-left:3px solid #FF7A7A;background:rgba(255,122,122,.08);
+        padding:12px 14px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13px}
+  .warn{border-left:3px solid #FFB020;background:rgba(255,176,32,.07);
+        padding:11px 13px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+  a{color:#00F0FF}
+</style>
+
+<h1>Bridge test</h1>
+<p class="muted">Prove a <b>Molibra</b> transaction to a contract on <b>your Ethereum
+network</b>, and release ETH against it. Your wallet signs everything; this page holds no key
+and the Molibra node holds none of your ETH.</p>
+
+<div class="stop"><b>⛔ This is a test rig, not a bridge.</b> It releases ETH against a
+<i>single</i> Molibra header with valid proof of work — and Molibra's difficulty is small
+enough that such a header can be mined privately in seconds. Anyone who can do that can drain
+whatever you put in it. Fund it with an amount you are willing to lose, on a network you do not
+mind. A real bridge needs a header chain with accumulated difficulty and a confirmation depth,
+and — before it moves anybody else's value — the written legal opinions this project's
+compliance file requires.</div>
+
+<div class="card">
+  <h2>1. Your Ethereum network</h2>
+  <p><button id="connect">Connect wallet</button></p>
+  <p id="who" class="small muted">Not connected.</p>
+</div>
+
+<div class="card">
+  <h2>2. Deploy the verifier</h2>
+  <p class="muted small">Two contracts: the prover (pure verification, no funds) and the test
+  bridge that holds the ETH you send with it.</p>
+  <label>ETH to fund the test bridge with</label>
+  <input id="funding" value="0.01">
+  <label>Minimum Molibra difficulty the bridge will accept</label>
+  <input id="minDiff" value="1000">
+  <p><button id="deploy" disabled>Deploy both</button></p>
+  <p id="deployOut" class="small muted">&nbsp;</p>
+  <label>Or use contracts you already deployed — prover</label>
+  <input id="proverAddr" placeholder="0x…">
+  <label>test bridge</label>
+  <input id="bridgeAddr" placeholder="0x…">
+</div>
+
+<div class="card">
+  <h2>3. Prove a Molibra transaction and release</h2>
+  <p class="muted small">Any mined Molibra transaction hash. The proof is fetched from this
+  node, but nothing about it is trusted — the contract re-derives the block hash, checks the
+  proof of work, and folds the Merkle path itself.</p>
+  <label>Molibra transaction hash</label>
+  <input id="txHash" placeholder="0x…">
+  <label>Send ETH to</label>
+  <input id="recipient" placeholder="0x…">
+  <label>Amount in ETH</label>
+  <input id="amount" value="0.001">
+  <p><button id="release" disabled>Verify and release</button></p>
+  <p id="releaseOut" class="small muted">&nbsp;</p>
+</div>
+
+<div class="card">
+  <h2>Recover your test funds</h2>
+  <p><button class="ghost" id="withdraw">Withdraw everything to the owner</button></p>
+  <p id="withdrawOut" class="small muted">&nbsp;</p>
+</div>
+
+<script type="module">
+/* ------------------------------------------------------------ ABI encoding
+   Hand-rolled for the four signatures this page sends, rather than pulling a
+   library into a page that is served offline from the node. The encoder is
+   small enough to read in one sitting, which is the point: everything else
+   here is about not having to trust anybody. */
+const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const bytesOf = (h) => {
+  const s = String(h).replace(/^0x/, '');
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  return out;
+};
+const word = (n) => BigInt(n).toString(16).padStart(64, '0');
+const padRight = (h) => {
+  const s = String(h).replace(/^0x/, '');
+  return s + '0'.repeat((64 - (s.length % 64)) % 64);
+};
+
+/** keccak256 via the node — the page needs it only for the 4-byte selectors. */
+async function selector(signature) {
+  const r = await fetch('/molibra/keccak?text=' + encodeURIComponent(signature));
+  return (await r.json()).hash.slice(0, 10);
+}
+
+/** Encode one call. `types` drives the head/tail split. */
+function encodeCall(sel, types, values) {
+  let head = '';
+  let tail = '';
+  const headSize = types.length * 32;
+  for (let i = 0; i < types.length; i++) {
+    const t = types[i];
+    const v = values[i];
+    if (t === 'bytes') {
+      head += word(headSize + tail.length / 2);
+      tail += word(bytesOf(v).length) + padRight(v);
+    } else if (t === 'bytes32[]') {
+      head += word(headSize + tail.length / 2);
+      tail += word(v.length) + v.map((x) => String(x).replace(/^0x/, '')).join('');
+    } else if (t === 'bool[]') {
+      head += word(headSize + tail.length / 2);
+      tail += word(v.length) + v.map((x) => word(x ? 1 : 0)).join('');
+    } else if (t === 'bytes32') {
+      head += String(v).replace(/^0x/, '').padStart(64, '0');
+    } else if (t === 'address') {
+      head += String(v).replace(/^0x/, '').toLowerCase().padStart(64, '0');
+    } else {
+      head += word(v);
+    }
+  }
+  return sel + head + tail;
+}
+
+/* ------------------------------------------------------------------ state */
+const $ = (id) => document.getElementById(id);
+const say = (id, m, cls = 'muted') => { $(id).className = 'small ' + cls; $(id).innerHTML = m; };
+let account = null;
+let artifacts = null;
+const toWei = (eth) => BigInt(Math.round(Number(eth) * 1e18));
+
+const eth = (method, params = []) => window.ethereum.request({ method, params });
+
+$('connect').onclick = async () => {
+  if (!window.ethereum) return say('who', 'No wallet in this browser.', 'err');
+  try {
+    [account] = await eth('eth_requestAccounts');
+    const chainId = await eth('eth_chainId');
+    say('who', `Connected as <code>${account}</code> on chain <b>${BigInt(chainId)}</b>. `
+      + 'Everything below is signed by this wallet.', 'ok');
+    $('deploy').disabled = false;
+    $('release').disabled = false;
+  } catch (e) { say('who', 'Failed: ' + e.message, 'err'); }
+};
+
+async function loadArtifacts() {
+  if (artifacts) return artifacts;
+  const [prover, bridge] = await Promise.all([
+    fetch('/molibra/bridge/artifact/MolibraProver').then((r) => r.json()),
+    fetch('/molibra/bridge/artifact/MolibraTestBridge').then((r) => r.json()),
+  ]);
+  if (prover.error || bridge.error) {
+    throw new Error('the contracts have not been compiled yet — run '
+      + 'node bridge/build-and-test.mjs');
+  }
+  artifacts = { prover, bridge };
+  return artifacts;
+}
+
+async function send(tx) {
+  const hash = await eth('eth_sendTransaction', [{ from: account, ...tx }]);
+  // Wait for the receipt so an address is available to use immediately.
+  for (let i = 0; i < 120; i++) {
+    const receipt = await eth('eth_getTransactionReceipt', [hash]);
+    if (receipt) return receipt;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error('no receipt after four minutes — check the explorer for ' + hash);
+}
+
+$('deploy').onclick = async () => {
+  try {
+    $('deploy').disabled = true;
+    const { prover, bridge } = await loadArtifacts();
+    say('deployOut', 'Deploying the prover — confirm in your wallet…');
+    const proverReceipt = await send({ data: prover.bytecode });
+    const proverAddress = proverReceipt.contractAddress;
+    $('proverAddr').value = proverAddress;
+
+    say('deployOut', `Prover at <code>${proverAddress}</code>. Deploying the test bridge…`);
+    // constructor(MolibraProver, uint256) — two static words appended.
+    const ctor = String(proverAddress).replace(/^0x/, '').toLowerCase().padStart(64, '0')
+      + word($('minDiff').value || '0');
+    const bridgeReceipt = await send({
+      data: bridge.bytecode + ctor,
+      value: '0x' + toWei($('funding').value || '0').toString(16),
+    });
+    $('bridgeAddr').value = bridgeReceipt.contractAddress;
+    say('deployOut', `Prover <code>${proverAddress}</code><br>`
+      + `Bridge <code>${bridgeReceipt.contractAddress}</code>, funded with `
+      + `${$('funding').value} ETH.`, 'ok');
+  } catch (e) {
+    say('deployOut', 'Failed: ' + (e.message || e), 'err');
+  } finally { $('deploy').disabled = false; }
+};
+
+$('release').onclick = async () => {
+  try {
+    $('release').disabled = true;
+    const bridgeAddress = $('bridgeAddr').value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(bridgeAddress)) throw new Error('deploy the bridge first');
+
+    say('releaseOut', 'Fetching the proof from the Molibra node…');
+    const proof = await (await fetch('/molibra/proof/' + $('txHash').value.trim())).json();
+    if (proof.error) throw new Error(proof.error);
+    if (!proof.verdict.ok) throw new Error('this node will not vouch for it: '
+      + proof.verdict.reasons.join('; '));
+
+    const headerRlp = await (await fetch(
+      '/molibra/header-rlp/' + proof.blockHash)).json();
+    if (headerRlp.error) throw new Error(headerRlp.error);
+
+    const sel = await selector(
+      'release(bytes,bytes32,bytes32[],bool[],address,uint256)');
+    const data = encodeCall(sel,
+      ['bytes', 'bytes32', 'bytes32[]', 'bool[]', 'address', 'uint256'],
+      [headerRlp.rlp, proof.txHash, proof.siblings.map((s) => s.hash),
+       proof.siblings.map((s) => s.side === 'right'),
+       $('recipient').value.trim(), toWei($('amount').value || '0')]);
+
+    say('releaseOut', 'Proof built. Confirm in your wallet — the contract verifies it on chain…');
+    const receipt = await send({ to: bridgeAddress, data });
+    say('releaseOut', receipt.status === '0x1'
+      ? `Released. Ethereum tx <code>${receipt.transactionHash}</code> — the contract verified `
+        + `the Molibra header, its proof of work and the Merkle path itself.`
+      : `Reverted: <code>${receipt.transactionHash}</code>. The contract refused the proof.`,
+      receipt.status === '0x1' ? 'ok' : 'err');
+  } catch (e) {
+    say('releaseOut', 'Failed: ' + (e.message || e), 'err');
+  } finally { $('release').disabled = false; }
+};
+
+$('withdraw').onclick = async () => {
+  try {
+    const bridgeAddress = $('bridgeAddr').value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(bridgeAddress)) throw new Error('no bridge address');
+    const receipt = await send({ to: bridgeAddress, data: await selector('withdraw()') });
+    say('withdrawOut', receipt.status === '0x1'
+      ? 'Withdrawn to the owner.' : 'Reverted — only the owner may withdraw.',
+      receipt.status === '0x1' ? 'ok' : 'err');
+  } catch (e) { say('withdrawOut', 'Failed: ' + (e.message || e), 'err'); }
+};
+</script>
