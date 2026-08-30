@@ -40,3 +40,11 @@ coverage/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local operator tooling and internal analysis — never published.
+# ASSESSMENT-* holds company numbers, holdings and business findings.
+# scripts-bridge-prep/ writes a throwaway key into out/.
+ASSESSMENT-*.md
+scripts-bridge-prep/
+start-bridge-node.ps1
+*.log

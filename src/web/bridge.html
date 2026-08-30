@@ -172,12 +172,41 @@ const toWei = (eth) => BigInt(Math.round(Number(eth) * 1e18));
 
 const eth = (method, params = []) => window.ethereum.request({ method, params });
 
+/* Molibra's own chain id. The one network on which none of this can work:
+   Molibra has NO EVM - state.js keeps no code and no storage, so a deployment
+   here creates nothing and every later call reads garbage from an address that
+   was never a contract. Refuse it at the door rather than take the gas. */
+const MOLIBRA_CHAIN_ID = 20226n;
+
+/* A difficulty and a block number are integers. Sending `0.000001` - an ETH
+   amount typed into the wrong box - into BigInt() throws a bare TypeError that
+   says nothing about which field was wrong. Name the field instead. */
+function whole(id, label) {
+  const raw = String($(id).value || '').trim();
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error(`${label} must be a whole number, not "${raw}". `
+      + 'It is a count, not an amount of ETH.');
+  }
+  return BigInt(raw);
+}
+
 $('connect').onclick = async () => {
   if (!window.ethereum) return say('who', 'No wallet in this browser.', 'err');
   try {
     [account] = await eth('eth_requestAccounts');
-    const chainId = await eth('eth_chainId');
-    say('who', `Connected as <code>${account}</code> on chain <b>${BigInt(chainId)}</b>. `
+    const chainId = BigInt(await eth('eth_chainId'));
+    if (chainId === MOLIBRA_CHAIN_ID) {
+      $('deploy').disabled = true;
+      $('release').disabled = true;
+      $('deployRelay').disabled = true;
+      return say('who', `Connected as <code>${account}</code>, but this wallet is on `
+        + '<b>Molibra itself</b> (chain 20226). <b>Nothing here can be deployed to Molibra:</b> '
+        + 'it has no EVM - it is EVM-compatible in addressing, signing and RPC only, and keeps '
+        + 'no contract code or storage. This page proves a Molibra transaction <i>to a '
+        + 'different chain</i>. Switch your wallet to an Ethereum network you do not mind '
+        + '(a testnet with funded gas) and connect again.', 'err');
+    }
+    say('who', `Connected as <code>${account}</code> on chain <b>${chainId}</b>. `
       + 'Everything below is signed by this wallet.', 'ok');
     $('deploy').disabled = false;
     $('release').disabled = false;
@@ -213,6 +242,9 @@ async function send(tx) {
 $('deploy').onclick = async () => {
   try {
     $('deploy').disabled = true;
+    // Check every field BEFORE the first deployment. Validating between the two
+    // sends would leave the prover paid for and the bridge never built.
+    const minDifficulty = whole('minDiff', 'Minimum Molibra difficulty');
     const { prover, bridge } = await loadArtifacts();
     say('deployOut', 'Deploying the prover — confirm in your wallet…');
     const proverReceipt = await send({ data: prover.bytecode });
@@ -222,7 +254,7 @@ $('deploy').onclick = async () => {
     say('deployOut', `Prover at <code>${proverAddress}</code>. Deploying the test bridge…`);
     // constructor(MolibraProver, uint256) — two static words appended.
     const ctor = String(proverAddress).replace(/^0x/, '').toLowerCase().padStart(64, '0')
-      + word($('minDiff').value || '0');
+      + word(minDifficulty);
     const bridgeReceipt = await send({
       data: bridge.bytecode + ctor,
       value: '0x' + toWei($('funding').value || '0').toString(16),
@@ -276,6 +308,9 @@ $('release').onclick = async () => {
 $('deployRelay').onclick = async () => {
   try {
     $('deployRelay').disabled = true;
+    // Same rule as above: both counts are checked before anything is paid for.
+    const anchorAt = whole('anchor', 'Checkpoint block number');
+    const requiredWork = whole('required', 'Work piled on top');
     const arts = await loadArtifacts();
     const relayArt = await fetch('/molibra/bridge/artifact/MolibraRelay').then((r) => r.json());
     const bridgeArt = await fetch('/molibra/bridge/artifact/MolibraBridge').then((r) => r.json());
@@ -290,7 +325,7 @@ $('deployRelay').onclick = async () => {
 
     // The checkpoint: everything after it is verified, this one is taken on
     // faith. Read from the node so the numbers are the chain's, not typed.
-    const n = Number($('anchor').value || '1');
+    const n = Number(anchorAt);
     const block = await (await fetch('/molibra/block/' + n)).json();
     if (block.error) throw new Error(block.error);
     const cfg = await (await fetch('/molibra')).json();
@@ -308,7 +343,7 @@ $('deployRelay').onclick = async () => {
 
     say('relayOut', 'Relay at ' + relayAddress + '. Deploying the relay-backed bridge...');
     const bctor = relayAddress.replace(/^0x/, '').toLowerCase().padStart(64, '0')
-      + word($('required').value || '1');
+      + word(requiredWork);
     const rb = await send({
       data: bridgeArt.bytecode + bctor,
       value: '0x' + toWei($('funding').value || '0').toString(16),
@@ -326,7 +361,7 @@ $('submitHeaders').onclick = async () => {
   try {
     const relayAddress = $('relayAddr').value.trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(relayAddress)) throw new Error('deploy the relay first');
-    const from = Number($('anchor').value || '1') + 1;
+    const from = whole('anchor', 'Checkpoint block number') + 1n;
     const run = await (await fetch('/molibra/headers-rlp?from=' + from)).json();
     if (!run.headers || !run.headers.length) throw new Error('no headers after the checkpoint yet');
 

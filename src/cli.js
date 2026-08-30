@@ -107,15 +107,16 @@ const commands = {
     console.log(`  audit     : ${node.rpcUrl}/molibra`);
     if (node.peers.size) console.log(`  peers     : ${[...node.peers].join(', ')}`);
 
+    // ⛔ Keep following the chain, not one snapshot at startup.
+    //
+    // This used to be a single pass over the peers, and a joining node
+    // therefore synced once and then froze - looking joined, mining on a stale
+    // view, producing a fork nobody would accept. Found by running the
+    // README's own two-node instructions against a clean clone.
     if (node.peers.size) {
-      for (const peer of node.peers) {
-        try {
-          const adopted = await node.syncFrom(peer);
-          if (adopted) console.log(`  synced ${adopted} block(s) from ${peer}`);
-        } catch (error) {
-          console.log(`  sync from ${peer} failed: ${error.message}`);
-        }
-      }
+      const intervalMs = Number(args['sync-interval'] ?? 10) * 1000;
+      node.startSyncing({ intervalMs });
+      console.log(`  syncing   : every ${intervalMs / 1000}s from ${node.peers.size} peer(s)`);
     }
 
     // The chalkboard issuer: the publisher's side of "publisher pays, speaker

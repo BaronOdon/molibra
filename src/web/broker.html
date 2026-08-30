@@ -1,0 +1,370 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Corretora — WSRO / WETH</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0F0F2A;color:#E0E0E8;font:15px/1.6 system-ui,sans-serif;
+       max-width:780px;margin:30px auto;padding:0 20px}
+  h1{background:linear-gradient(96deg,#00F0FF,#B14AFF);-webkit-background-clip:text;
+     background-clip:text;color:transparent;font-size:30px;margin:0 0 4px}
+  h2{font-size:17px;margin:0 0 4px}
+  .card{background:#16162D;border:1px solid rgba(224,224,232,.12);border-radius:12px;
+        padding:17px;margin:13px 0}
+  button{background:linear-gradient(96deg,#00F0FF,#B14AFF);color:#0F0F2A;border:0;
+         border-radius:10px;padding:12px 20px;font:600 15px system-ui;cursor:pointer}
+  button.ghost{background:none;color:#9098B0;border:1px solid rgba(224,224,232,.2);
+               font-size:13px;padding:8px 13px;font-weight:500}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input{background:#0F0F2A;border:1px solid rgba(224,224,232,.2);border-radius:8px;
+        color:#E0E0E8;font:13px ui-monospace,Menlo,monospace;padding:10px;width:100%;
+        box-sizing:border-box;margin:5px 0}
+  label{font-size:13px;color:#9098B0;display:block;margin-top:9px}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#66F8FF;word-break:break-all}
+  .muted{color:#9098B0}.small{font-size:13px}.ok{color:#63E6A0}.err{color:#FF7A7A}
+  .stop{border-left:3px solid #FF7A7A;background:rgba(255,122,122,.08);
+        padding:12px 14px;border-radius:0 8px 8px 0;margin:14px 0;font-size:13px}
+  .warn{border-left:3px solid #FFB020;background:rgba(255,176,32,.07);
+        padding:11px 13px;border-radius:0 8px 8px 0;margin:10px 0;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:5px 0;border-bottom:1px solid rgba(224,224,232,.08)}
+  td:last-child{text-align:right;font-family:ui-monospace,Menlo,monospace;color:#66F8FF}
+  a{color:#00F0FF}
+  .lang{float:right;font-size:13px}
+</style>
+
+<p class="lang"><a href="#" id="toEn">English</a> · <a href="#" id="toPt">Português</a></p>
+<h1 data-i="title">Corretora WSRO / WETH</h1>
+<p class="muted" data-i="lede">Crie o mercado do WSRO (Coinspirit) emparelhando WETH com o WSRO
+já depositado. Sua carteira assina tudo; esta página não guarda chave nenhuma.</p>
+
+<div class="stop" data-i="stopper"><b>⛔ Leia antes de assinar.</b> Adicionar liquidez é a
+única operação aqui que <i>cria</i> mercado — e é também a única que pode perder valor.
+Enquanto o preço se mover dentro da sua faixa, sua posição é convertida entre WSRO e WETH;
+se o WSRO cair, você fica com WSRO. Isto não é rendimento e não é garantido. Comece com um
+valor que você aceita perder inteiro.</div>
+
+<div class="card">
+  <h2 data-i="h_state">1. Estado real do pool</h2>
+  <p class="muted small" data-i="p_state">Lido da blockchain agora, não de um cache.</p>
+  <table id="state"><tr><td data-i="loading">carregando…</td><td></td></tr></table>
+  <p><button class="ghost" id="refresh" data-i="b_refresh">Atualizar</button></p>
+</div>
+
+<div class="card">
+  <h2 data-i="h_wallet">2. Sua carteira</h2>
+  <p><button id="connect" data-i="b_connect">Conectar carteira</button></p>
+  <p id="who" class="small muted" data-i="not_connected">Não conectada.</p>
+  <table id="balances"></table>
+</div>
+
+<div class="card">
+  <h2 data-i="h_wrap">3. ETH → WETH</h2>
+  <p class="muted small" data-i="p_wrap">O pool negocia WETH, não ETH. Envolver é 1:1 e
+  reversível a qualquer momento.</p>
+  <label data-i="l_wrap">Quantidade de ETH a envolver</label>
+  <input id="wrapAmount" value="0.01">
+  <p><button id="wrap" disabled data-i="b_wrap">Envolver</button>
+     <button class="ghost" id="unwrap" disabled data-i="b_unwrap">Desenvolver</button></p>
+  <p id="wrapOut" class="small muted">&nbsp;</p>
+</div>
+
+<div class="card">
+  <h2 data-i="h_liq">4. Adicionar liquidez — isto é o que cria o mercado</h2>
+  <p class="muted small" data-i="p_liq">Cria uma posição de <b>faixa completa</b> no
+  SushiSwap V3. Faixa completa é deliberado: é a única faixa que nunca sai de alcance, e
+  portanto a única que não exige acompanhamento. Uma faixa estreita rende mais taxas e
+  para de negociar assim que o preço a deixa.</p>
+  <label data-i="l_wsro">WSRO a depositar</label>
+  <input id="amtWsro" value="144000">
+  <label data-i="l_weth">WETH a depositar</label>
+  <input id="amtWeth" value="0.01">
+  <label data-i="l_slip">Tolerância (%) — o mínimo que você aceita depositar de cada lado</label>
+  <input id="slippage" value="5">
+  <p><button id="approve" disabled data-i="b_approve">1. Aprovar os dois</button>
+     <button id="mint" disabled data-i="b_mint">2. Criar a posição</button></p>
+  <p id="liqOut" class="small muted">&nbsp;</p>
+  <div class="warn" data-i="w_price"><b>⚠ O preço atual do pool decide o que ele realmente
+  aceita.</b> Em faixa completa o pool puxa os dois lados na proporção do preço vigente, não
+  na que você digitou. Se um lado sobrar, ele volta para você na mesma transação.</div>
+</div>
+
+<div class="card">
+  <h2 data-i="h_swap">5. Trocar</h2>
+  <div class="warn" data-i="w_router"><b>⛔ Nenhum endereço de roteador vem embutido nesta
+  página.</b> Um roteador errado é uma aprovação dada a um contrato desconhecido, e isso é
+  perda total. Cole o roteador oficial do SushiSwap V3 você mesmo, conferido na documentação
+  oficial deles — eu não vou adivinhar por você.</div>
+  <label data-i="l_router">Endereço do roteador SushiSwap V3</label>
+  <input id="router" placeholder="0x…">
+  <p id="swapOut" class="small muted" data-i="p_swap">Trocas ficam disponíveis quando houver
+  liquidez em alcance e um roteador informado.</p>
+</div>
+
+<script type="module">
+/* ---------------------------------------------------------------- constants
+   Every address here was READ FROM CHAIN in this session, not copied from a
+   list: WSRO from the operator's own approve transaction, the pool from the
+   SushiSwap V3 factory's getPool, token0/token1 from the pool itself. The one
+   address that is NOT here is the swap router, deliberately - see the page. */
+const WSRO   = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+const WETH   = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+const POOL   = '0xfcaee25dd24c129a9069fcd2bedc7cd05798c47e';
+const NFPM   = '0x2214a42d8e2a1d20635c2cb0664422c528b6a432'; // SushiSwap V3 Positions NFT-V1
+const FEE    = 100;        // 0.01%, read from the pool
+const SPACING = 1;         // read from the pool
+const MAINNET = 1n;
+
+/* Full range, aligned to the pool's tick spacing. These are Uniswap V3's
+   MIN_TICK/MAX_TICK; with spacing 1 they need no rounding. A position outside
+   these cannot exist, and one inside them never goes out of range. */
+const MIN_TICK = -887272;
+const MAX_TICK = 887272;
+
+const $ = (id) => document.getElementById(id);
+const say = (id, m, cls = 'muted') => { $(id).className = 'small ' + cls; $(id).innerHTML = m; };
+
+/* ------------------------------------------------------------ ABI encoding
+   Hand-rolled, as everywhere else in this project: a page that moves somebody's
+   money should not fetch its own arithmetic from a CDN. */
+const word = (n) => {
+  let v = BigInt(n);
+  if (v < 0n) v += 1n << 256n;          // two's complement, for the int24 ticks
+  return v.toString(16).padStart(64, '0');
+};
+const addr = (a) => a.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+
+/** Decimal string -> integer of `d` decimals, without floating point. */
+function units(value, d = 18) {
+  const s = String(value).trim();
+  if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') throw new Error(`"${value}" is not a number`);
+  const [i, f = ''] = s.split('.');
+  if (f.length > d) throw new Error(`too many decimal places (max ${d})`);
+  return BigInt((i || '0') + f.padEnd(d, '0'));
+}
+function fmt(v, d = 18, places = 6) {
+  const s = BigInt(v).toString().padStart(d + 1, '0');
+  const i = s.slice(0, s.length - d).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const f = s.slice(s.length - d).replace(/0+$/, '').slice(0, places);
+  return f ? `${i}.${f}` : i;
+}
+
+const eth = (method, params = []) => window.ethereum.request({ method, params });
+const ethCall = (to, data) => eth('eth_call', [{ to, data }, 'latest']);
+
+let account = null;
+
+/* ------------------------------------------------------------------- state */
+async function readState() {
+  const out = [];
+  const push = (k, v) => out.push(`<tr><td>${k}</td><td>${v}</td></tr>`);
+  try {
+    const slot0 = await ethCall(POOL, '0x3850c7bd');
+    const sqrtP = BigInt('0x' + slot0.slice(2, 66));
+    let tick = BigInt('0x' + slot0.slice(66, 130));
+    if (tick > (1n << 255n)) tick -= (1n << 256n);
+    const liq = BigInt(await ethCall(POOL, '0x1a686502'));
+    const wsroIn = BigInt(await ethCall(WSRO, '0x70a08231' + addr(POOL)));
+    const wethIn = BigInt(await ethCall(WETH, '0x70a08231' + addr(POOL)));
+
+    // price of token0 (WSRO) in token1 (WETH) = (sqrtP / 2^96)^2
+    const priceX36 = (sqrtP * sqrtP * (10n ** 36n)) / (2n ** 192n);
+    const wethPerWsro = Number(priceX36) / 1e36;
+
+    push(T.pool, `<code>${POOL.slice(0, 10)}…</code>`);
+    push(T.initialised, sqrtP === 0n ? `<span class="err">${T.no}</span>` : T.yes);
+    push(T.tick, tick.toString());
+    push(T.price, wethPerWsro > 0
+      ? `${wethPerWsro.toExponential(4)} WETH / WSRO`
+      : '—');
+    push(T.inverse, wethPerWsro > 0
+      ? `${Math.round(1 / wethPerWsro).toLocaleString()} WSRO / WETH` : '—');
+    push(T.liquidity, liq === 0n
+      ? `<span class="err">0 — ${T.noTrade}</span>` : liq.toString());
+    push('WSRO ' + T.inPool, fmt(wsroIn));
+    push('WETH ' + T.inPool, wethIn === 0n
+      ? `<span class="err">0 — ${T.thisIsTheGap}</span>` : fmt(wethIn));
+  } catch (e) {
+    push(T.error, String(e.message || e));
+  }
+  $('state').innerHTML = out.join('');
+}
+
+/* ---------------------------------------------------------------- balances */
+async function readBalances() {
+  if (!account) return;
+  const rows = [];
+  const bal = async (token) => BigInt(await ethCall(token, '0x70a08231' + addr(account)));
+  const native = BigInt(await eth('eth_getBalance', [account, 'latest']));
+  rows.push(`<tr><td>ETH</td><td>${fmt(native)}</td></tr>`);
+  rows.push(`<tr><td>WETH</td><td>${fmt(await bal(WETH))}</td></tr>`);
+  rows.push(`<tr><td>WSRO</td><td>${fmt(await bal(WSRO))}</td></tr>`);
+  $('balances').innerHTML = rows.join('');
+}
+
+async function send(tx, label, outId) {
+  say(outId, `${T.confirm}…`);
+  const hash = await eth('eth_sendTransaction', [{ from: account, ...tx }]);
+  say(outId, `${label}: <code>${hash}</code> — ${T.waiting}…`);
+  for (let i = 0; i < 150; i++) {
+    const r = await eth('eth_getTransactionReceipt', [hash]);
+    if (r) {
+      if (r.status === '0x1') { say(outId, `${label} ✓ <code>${hash}</code>`, 'ok'); return r; }
+      throw new Error(`${T.reverted} — ${hash}`);
+    }
+    await new Promise((r2) => setTimeout(r2, 2000));
+  }
+  throw new Error(T.noReceipt);
+}
+
+/* ----------------------------------------------------------------- connect */
+$('connect').onclick = async () => {
+  if (!window.ethereum) return say('who', T.noWallet, 'err');
+  try {
+    [account] = await eth('eth_requestAccounts');
+    const chainId = BigInt(await eth('eth_chainId'));
+    if (chainId !== MAINNET) {
+      for (const b of ['wrap', 'unwrap', 'approve', 'mint']) $(b).disabled = true;
+      return say('who', T.wrongChain.replace('{n}', chainId), 'err');
+    }
+    say('who', `${T.connectedAs} <code>${account}</code>`, 'ok');
+    for (const b of ['wrap', 'unwrap', 'approve', 'mint']) $(b).disabled = false;
+    await readBalances();
+  } catch (e) { say('who', 'Erro: ' + e.message, 'err'); }
+};
+
+/* -------------------------------------------------------------- wrap ETH */
+$('wrap').onclick = async () => {
+  try {
+    const v = units($('wrapAmount').value);
+    if (v <= 0n) throw new Error(T.positive);
+    await send({ to: WETH, data: '0xd0e30db0', value: '0x' + v.toString(16) },
+      T.wrapped, 'wrapOut');            // deposit()
+    await readBalances();
+  } catch (e) { say('wrapOut', 'Erro: ' + (e.message || e), 'err'); }
+};
+
+$('unwrap').onclick = async () => {
+  try {
+    const v = units($('wrapAmount').value);
+    await send({ to: WETH, data: '0x2e1a7d4d' + word(v) },   // withdraw(uint256)
+      T.unwrapped, 'wrapOut');
+    await readBalances();
+  } catch (e) { say('wrapOut', 'Erro: ' + (e.message || e), 'err'); }
+};
+
+/* ------------------------------------------------------------- liquidity */
+$('approve').onclick = async () => {
+  try {
+    const wsro = units($('amtWsro').value);
+    const weth = units($('amtWeth').value);
+    // Approve exactly what is being deposited, never an unlimited allowance.
+    // An infinite approval to any contract is a standing permission to drain
+    // that token forever, and it is never necessary for a one-off deposit.
+    await send({ to: WSRO, data: '0x095ea7b3' + addr(NFPM) + word(wsro) },
+      'approve WSRO', 'liqOut');
+    await send({ to: WETH, data: '0x095ea7b3' + addr(NFPM) + word(weth) },
+      'approve WETH', 'liqOut');
+    say('liqOut', T.approved, 'ok');
+  } catch (e) { say('liqOut', 'Erro: ' + (e.message || e), 'err'); }
+};
+
+$('mint').onclick = async () => {
+  try {
+    const wsro = units($('amtWsro').value);
+    const weth = units($('amtWeth').value);
+    const tol = Number($('slippage').value);
+    if (!(tol >= 0 && tol <= 100)) throw new Error(T.badTolerance);
+    const minOf = (v) => (v * BigInt(Math.round((100 - tol) * 100))) / 10000n;
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+
+    // mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256))
+    // All eleven fields are static, so the struct encodes as eleven flat words.
+    const data = '0x88316456'
+      + addr(WSRO) + addr(WETH) + word(FEE)
+      + word(MIN_TICK) + word(MAX_TICK)
+      + word(wsro) + word(weth)
+      + word(minOf(wsro)) + word(minOf(weth))
+      + addr(account) + word(deadline);
+
+    await send({ to: NFPM, data }, T.positionCreated, 'liqOut');
+    await readState();
+    await readBalances();
+  } catch (e) { say('liqOut', 'Erro: ' + (e.message || e), 'err'); }
+};
+
+$('refresh').onclick = readState;
+
+/* ------------------------------------------------------------------ i18n
+   pt-BR first, en second - the project's rule for every public page. */
+const PT = {
+  title: 'Corretora WSRO / WETH', yes: 'sim', no: 'não',
+  pool: 'Pool', initialised: 'Inicializado', tick: 'Tick atual', price: 'Preço',
+  inverse: 'Inverso', liquidity: 'Liquidez em alcance', inPool: 'no pool',
+  noTrade: 'nenhuma troca pode ser executada', thisIsTheGap: 'esta é a lacuna',
+  error: 'Erro', confirm: 'Confirme na carteira', waiting: 'aguardando confirmação',
+  reverted: 'A transação reverteu', noReceipt: 'Sem recibo após cinco minutos',
+  noWallet: 'Nenhuma carteira neste navegador.',
+  wrongChain: 'Carteira na rede {n}. WSRO vive na Ethereum mainnet (1). Troque de rede.',
+  connectedAs: 'Conectada como', positive: 'A quantidade deve ser positiva',
+  wrapped: 'Envolvido', unwrapped: 'Desenvolvido',
+  approved: 'Os dois aprovados. Agora crie a posição.',
+  positionCreated: 'Posição criada', badTolerance: 'Tolerância deve ficar entre 0 e 100',
+};
+const EN = {
+  title: 'WSRO / WETH broker', yes: 'yes', no: 'no',
+  pool: 'Pool', initialised: 'Initialised', tick: 'Current tick', price: 'Price',
+  inverse: 'Inverse', liquidity: 'In-range liquidity', inPool: 'in pool',
+  noTrade: 'no swap can execute', thisIsTheGap: 'this is the gap',
+  error: 'Error', confirm: 'Confirm in your wallet', waiting: 'waiting for confirmation',
+  reverted: 'The transaction reverted', noReceipt: 'No receipt after five minutes',
+  noWallet: 'No wallet in this browser.',
+  wrongChain: 'Wallet is on chain {n}. WSRO lives on Ethereum mainnet (1). Switch networks.',
+  connectedAs: 'Connected as', positive: 'The amount must be positive',
+  wrapped: 'Wrapped', unwrapped: 'Unwrapped',
+  approved: 'Both approved. Now create the position.',
+  positionCreated: 'Position created', badTolerance: 'Tolerance must be between 0 and 100',
+};
+const COPY = {
+  pt: {
+    lede: 'Crie o mercado do WSRO (Coinspirit) emparelhando WETH com o WSRO já depositado. '
+      + 'Sua carteira assina tudo; esta página não guarda chave nenhuma.',
+    h_state: '1. Estado real do pool', h_wallet: '2. Sua carteira', h_wrap: '3. ETH → WETH',
+    h_liq: '4. Adicionar liquidez — isto é o que cria o mercado', h_swap: '5. Trocar',
+    b_connect: 'Conectar carteira', b_refresh: 'Atualizar', b_wrap: 'Envolver',
+    b_unwrap: 'Desenvolver', b_approve: '1. Aprovar os dois', b_mint: '2. Criar a posição',
+    l_wrap: 'Quantidade de ETH a envolver', l_wsro: 'WSRO a depositar',
+    l_weth: 'WETH a depositar',
+    l_slip: 'Tolerância (%) — o mínimo que você aceita depositar de cada lado',
+    l_router: 'Endereço do roteador SushiSwap V3', not_connected: 'Não conectada.',
+    loading: 'carregando…',
+  },
+  en: {
+    lede: 'Create the market for WSRO (Coinspirit) by pairing WETH against the WSRO already '
+      + 'deposited. Your wallet signs everything; this page holds no key.',
+    h_state: '1. What the pool actually holds', h_wallet: '2. Your wallet',
+    h_wrap: '3. ETH → WETH', h_liq: '4. Add liquidity — this is what creates the market',
+    h_swap: '5. Swap',
+    b_connect: 'Connect wallet', b_refresh: 'Refresh', b_wrap: 'Wrap',
+    b_unwrap: 'Unwrap', b_approve: '1. Approve both', b_mint: '2. Create the position',
+    l_wrap: 'ETH to wrap', l_wsro: 'WSRO to deposit', l_weth: 'WETH to deposit',
+    l_slip: 'Tolerance (%) — the least of each side you accept depositing',
+    l_router: 'SushiSwap V3 router address', not_connected: 'Not connected.',
+    loading: 'loading…',
+  },
+};
+let T = PT;
+function setLang(l) {
+  T = l === 'pt' ? PT : EN;
+  document.documentElement.lang = l === 'pt' ? 'pt-BR' : 'en';
+  for (const [k, v] of Object.entries(COPY[l])) {
+    for (const el of document.querySelectorAll(`[data-i="${k}"]`)) el.textContent = v;
+  }
+  document.title = T.title;
+  readState();
+}
+$('toEn').onclick = (e) => { e.preventDefault(); setLang('en'); };
+$('toPt').onclick = (e) => { e.preventDefault(); setLang('pt'); };
+
+readState();
+</script>

@@ -57,6 +57,7 @@ export class Node {
 
   async stop() {
     this.stopMining();
+    this.stopSyncing();
     if (this.server) await new Promise((resolve) => this.server.close(resolve));
   }
 
@@ -133,6 +134,80 @@ export class Node {
 
   addPeer(url) {
     this.peers.add(url.replace(/\/$/, ''));
+  }
+
+  /**
+   * ⛔⛔ Keep following the chain, forever - not once at startup.
+   *
+   * This exists because of a failure found by running the newcomer's own
+   * scenario against a clean clone of the published repository: a joining node
+   * synced 50 blocks, printed "synced 50 block(s)", and then **froze there
+   * permanently** while the miner it had joined climbed past 97. Every test
+   * passed the whole time. Two independent faults produced it, and both are
+   * fixed here:
+   *
+   *   1. **Nothing ever synced again.** `syncFrom` was called once, in a loop
+   *      at startup, and never afterwards.
+   *   2. **Peering is one-directional.** The joiner is given `--peers`, so it
+   *      knows the miner. The miner is told nothing, so its `broadcastBlock`
+   *      went to an empty set and the joiner was never pushed to either.
+   *
+   * A node that syncs once is worse than a node that cannot sync at all: it
+   * looks joined, mines on a stale view, and produces a fork nobody accepts.
+   *
+   * ⭐ **Pull is the primary mechanism, deliberately.** Most joining nodes are
+   * behind NAT and are not reachable from the miner, so a design that depends
+   * on being pushed to would work here and fail for the people who actually
+   * download this. Announcing is an optimisation on top, never the mechanism.
+   */
+  startSyncing({ intervalMs = 10000 } = {}) {
+    if (this.syncTimer || !this.peers.size) return false;
+    this.syncing = false;
+
+    const tick = async () => {
+      // Never overlap. Verifying blocks re-executes their transactions, so a
+      // slow catch-up must not have a second pass stacked behind it.
+      if (this.syncing) return;
+      this.syncing = true;
+      try {
+        for (const peer of this.peers) {
+          try {
+            const adopted = await this.syncFrom(peer);
+            if (adopted) {
+              console.log(`[molibra] synced ${adopted} block(s) from ${peer}`
+                + ` - height ${this.chain.height}`);
+            }
+            // Best effort, and unimportant if it fails: it only lets the peer
+            // push to us, which is latency, not correctness.
+            await this.announceTo(peer).catch(() => {});
+          } catch (error) {
+            // A peer being unreachable is normal and must never stop the loop.
+            if (!this.quietSync) {
+              console.warn(`[molibra] sync from ${peer} failed: ${error.message}`);
+            }
+          }
+        }
+      } finally {
+        this.syncing = false;
+      }
+    };
+
+    this.syncTimer = setInterval(tick, intervalMs);
+    this.syncTimer.unref?.();   // never hold the process open on this alone
+    tick();
+    return true;
+  }
+
+  stopSyncing() {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    this.syncTimer = null;
+  }
+
+  /** Tell a peer where to reach us, so it can push new blocks rather than
+   *  making us wait for the next poll. Harmless when it fails. */
+  async announceTo(peerUrl) {
+    if (!this.rpcUrl) return;
+    await this.post(peerUrl.replace(/\/$/, ''), '/molibra/announce', { url: this.rpcUrl });
   }
 
   async post(url, path, body) {

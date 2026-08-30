@@ -41,6 +41,11 @@ export class Chain {
     this.chainId = genesis.chainId;
     this.dataDir = dataDir;
     this.maxReorgDepth = limits.maxReorgDepth ?? MAX_REORG_DEPTH;
+    // Ethereum anchors, when a node is configured to follow them. Null means
+    // "not anchoring", and the fork choice then behaves exactly as it did
+    // before anchoring existed - so this is additive, never a silent rule
+    // change under an operator who did not ask for one. See src/anchor.js.
+    this.anchors = limits.anchors ?? null;
     this.maxMempoolSize = limits.maxMempoolSize ?? MAX_MEMPOOL_SIZE;
     this.maxMempoolPerSender = limits.maxMempoolPerSender ?? MAX_MEMPOOL_PER_SENDER;
     this.maxOrphans = limits.maxOrphans ?? MAX_ORPHANS;
@@ -547,6 +552,31 @@ export class Chain {
       // because this chain's total work is small enough to buy.
       const { ancestor } = this.pathToCanonical(entry);
       const depthBelowHead = Number(this.height - ancestor.header.number);
+
+      // ⛔⛔ The anchored floor, checked BEFORE the depth bound.
+      //
+      // Below a binding Ethereum anchor, accumulated work stops being the
+      // argument: rewriting that history here would require rewriting Ethereum.
+      // This is the one refusal in the fork choice that no amount of difficulty
+      // can buy past, and it is checked first so its reason is the one reported
+      // rather than a coincidental depth failure.
+      //
+      // It only ever TIGHTENS what the depth bound allows - a chain with no
+      // anchors behaves exactly as it did before this existed.
+      if (this.anchors) {
+        const verdict = this.anchors.permitsReorgFrom(ancestor.header.number);
+        if (!verdict.ok) {
+          this.refusedReorg = {
+            at: new Date().toISOString(), depth: depthBelowHead,
+            hash: entry.hash, height: Number(entry.header.number),
+            anchoredFloor: verdict.floor.toString(), reason: verdict.reason,
+          };
+          console.warn(`[molibra] REFUSED a reorg to ${entry.hash.slice(0, 12)} - ${verdict.reason}`);
+          if (persist) this.persist();
+          return { accepted: true, adopted: false, reorg: null, refusedReorg: this.refusedReorg };
+        }
+      }
+
       if (depthBelowHead > this.maxReorgDepth) {
         this.refusedReorg = {
           at: new Date().toISOString(), depth: depthBelowHead,

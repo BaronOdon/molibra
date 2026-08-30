@@ -16,7 +16,7 @@ import { toQuantity, normalizeAddress, keccak256, recoverAddress, fromHex, toHex
 import { intrinsicGas } from './tx.js';
 import { serializeBlock, encodeHeader } from './block.js';
 import { PURPOSE_LABELS } from './token.js';
-import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE } from './limits.js';
+import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
@@ -272,9 +272,13 @@ export function startRpcServer(node, { host, port }) {
       return;
     }
 
+    // ⛔ An explicit allowlist, not a prefix match: everything else falls
+    // through to JSON-RPC. A handler added below without a path added HERE is
+    // dead code that answers "method not found" - which is exactly what
+    // happened to /molibra/announce on its first outing.
     const POSTABLE = new Set([
       '/molibra/submit-block', '/molibra/submit-tx', '/molibra/verify-proof',
-      '/molibra/airdrop', '/molibra/earn', '/molibra/grant',
+      '/molibra/airdrop', '/molibra/earn', '/molibra/grant', '/molibra/announce',
     ]);
     if (POSTABLE.has(req.url)) {
       return handlePeerPost(node, req.url, payload, res);
@@ -395,6 +399,16 @@ function handleAudit(node, req, res) {
     } catch {
       return json(res, 404, { error: 'not found' });
     }
+    return;
+  }
+
+  // --- the WSRO/WETH broker ------------------------------------------------
+  // Served from the node for the same reason every other page here is: a page
+  // that moves money must not fetch its own arithmetic from a third party.
+  if (path === '/molibra/broker') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'broker.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
     return;
   }
 
@@ -710,6 +724,30 @@ function handlePeerPost(node, path, payload, res) {
     if (path === '/molibra/verify-proof') {
       return json(res, 200, { ok: true, proof: verifyLinkingProof(node, payload.code ?? payload) });
     }
+    /**
+     * A peer telling us where to reach it, so we can push blocks to it rather
+     * than leaving it to poll.
+     *
+     * ⛔ This is a public endpoint that grows a set this node iterates over on
+     * every mined block, so it is capped and shape-checked. Without the cap, a
+     * stranger could enlarge the peer set until every block broadcast becomes
+     * an outbound flood - turning this node into someone else's amplifier.
+     * Announcing is an optimisation; refusing one costs nothing but latency.
+     */
+    if (path === '/molibra/announce') {
+      const url = String(payload?.url ?? '').replace(/\/$/, '');
+      if (!/^https?:\/\/[^\s/]+$/i.test(url)) {
+        return json(res, 400, { error: 'url must be http(s)://host:port' });
+      }
+      if (url === node.rpcUrl) return json(res, 200, { peers: node.peers.size, self: true });
+      if (node.peers.has(url)) return json(res, 200, { peers: node.peers.size, known: true });
+      if (node.peers.size >= MAX_PEERS) {
+        return json(res, 429, { error: `peer set full (${MAX_PEERS})`, peers: node.peers.size });
+      }
+      node.addPeer(url);
+      return json(res, 200, { peers: node.peers.size, added: url });
+    }
+
     if (path === '/molibra/submit-block') {
       node.acceptPeerBlock(payload.block ?? payload);
       return json(res, 200, { ok: true, height: Number(node.chain.height) });

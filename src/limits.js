@@ -73,3 +73,14 @@ export const MAX_REORG_DEPTH = 128;
 export const SECP256K1_N =
   0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 export const SECP256K1_HALF_N = SECP256K1_N / 2n;
+
+/**
+ * How many peers this node will hold.
+ *
+ * Local policy, not consensus. It bounds the public `/molibra/announce`
+ * endpoint: the peer set is iterated on every mined block, so an uncapped one
+ * lets a stranger grow it until each block broadcast becomes an outbound flood
+ * and this node becomes somebody else's amplifier. Refusing an announcement
+ * costs a peer nothing but latency - it can still poll.
+ */
+export const MAX_PEERS = 64;

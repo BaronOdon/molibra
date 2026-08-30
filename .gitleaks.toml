@@ -1,0 +1,28 @@
+# Gitleaks configuration for Molibra.
+#
+# Extends the defaults; nothing is disabled. The entries below are ABI-encoded
+# words that appear in test assertions - a 32-byte EVM word is 64 hex
+# characters, which is the same shape as several API-key rules, so an entropy
+# heuristic that does not know what an ABI word is flags them.
+#
+# ⛔ Allowlisted as EXACT LITERALS, never as a pattern for 64-hex strings. A
+# broad rule would also hide a real private key, and catching exactly that is
+# the reason the scanner runs at all.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+ABI-encoded constants asserted in test/broker-page.mjs.
+
+  ...0d89e8  = uint256(887272), Uniswap/Sushi V3 MAX_TICK
+  ...c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2 = the WETH contract address,
+             left-padded to 32 bytes. Public, and printed in the README.
+
+Both have entropy under 3.1; a real key sits well above 4.
+"""
+regexes = [
+  '''0{58}d89e8''',
+  '''0{24}c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2''',
+]
