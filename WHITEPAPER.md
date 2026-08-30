@@ -138,7 +138,18 @@ and published with the token.
 **non-transferable**. It must be its own token rather than a denomination of MOLI, precisely
 because a denomination cannot differ from its parent on transferability. It borrows granularity
 from the wei convention, not identity: fine-grained, spent in small amounts across many
-questions, earned by mining, destroyed on use.
+questions, **earned**, destroyed on use.
+
+Earned, not bought and not received from another holder. GIZ reaches people by **issuance**,
+which runs one way only: the creator may issue, a holder can never pass a unit on. Transfer
+and issuance are different operations and only one of them creates a market — which is why
+the answer to "how does anybody get chalk?" is issuance rather than transferability. A person
+with nothing clicks one button, their browser does a few seconds of visible work, and the
+publisher issues chalk and the gas to spend it. Publisher pays; speaker earns.
+
+Supply is **uncapped**, minted on demand, because questions never stop being created. Each
+expression burns the token's declared cost — fixed for every mode but `weighted`, so nobody's
+expression can be larger than anyone else's.
 
 The separation is the whole point. A non-transferable token has **no market and therefore no
 price**, so nothing of economic value attaches to expressing a preference. A transferable,
@@ -151,9 +162,20 @@ unit no longer exists; the count is public and needs no trusted counter, since
 `minted − remaining = expressions cast`; and it is self-limiting, because a one-per-person
 token makes maximum turnout visible from the start.
 
-Token modes are immutable and disclosed on the token itself: `single` (one expression per
-wallet regardless of holdings), `capped(n)`, and `weighted` (one unit burned is one unit of
-weight — **plutocratic by construction, and labelled so wherever it appears**). Full
+Token modes are immutable and disclosed on the token itself: `quantum` (one expression per
+wallet per voting place — the GIZ rule), `single` (one expression per wallet regardless of
+holdings), `capped(n)`, and `weighted` (one unit burned is one unit of weight —
+**plutocratic by construction, and labelled so wherever it appears**).
+
+So is the token's **purpose**, which has no default: `market` (aferição de mercado),
+`behaviour` (comportamento do consumidor), `social` (comunicação social), `purchase`
+(**expressão pública de compra**) or `electoral` (matéria eleitoral). DataToalha is a movement
+of popular expression, from the people to the people: as consumers, people demand daily-use
+goods bearing the characteristics of the political figure they prefer, and as a free people
+they demand that the sale be public. The purchase *is* the expression. Anything running in an
+electoral period is declared `purchase` and **never called an enquete or a pesquisa** — under
+the TSE resolutions those are regulated objects, and this is not one of them. The chain
+refuses the words in the title rather than discouraging them in a document. Full
 specification in [SPEC-TOKENS.md](SPEC-TOKENS.md).
 
 ---

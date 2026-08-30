@@ -14,18 +14,40 @@ import { decodeTransaction, intrinsicGas } from './tx.js';
 import { State, applyTransaction } from './state.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
-  decodeTokenCreate, decodeExpress, normalizeTokenRecord, expressionKey,
+  decodeTokenCreate, decodeExpress, decodeIssue, normalizeTokenRecord,
+  expressionKey, expressionBurn,
 } from './token.js';
 import {
   ZERO_HASH, merkleRoot, blockHash, isValidSeal, mineHeader,
   nextDifficulty, serializeBlock, deserializeHeader, blockRewardAt,
+  assertHeaderBounds,
 } from './block.js';
+import {
+  MAX_FUTURE_DRIFT_SECONDS, MAX_TRANSACTIONS_PER_BLOCK, MAX_MEMPOOL_SIZE,
+  MAX_MEMPOOL_PER_SENDER, MAX_ORPHANS, MAX_ORPHAN_RESOLUTION_DEPTH,
+  MAX_REORG_DEPTH,
+} from './limits.js';
 
 export class Chain {
-  constructor(genesis, dataDir) {
+  /**
+   * `limits` overrides the LOCAL-POLICY bounds only - mempool caps, orphan
+   * caps, reorg depth. The consensus bounds in src/limits.js are deliberately
+   * not overridable here: a node that could be configured to accept a block
+   * its peers reject is a node that forks its operator off the network by
+   * config file.
+   */
+  constructor(genesis, dataDir, limits = {}) {
     this.genesis = genesis;
     this.chainId = genesis.chainId;
     this.dataDir = dataDir;
+    this.maxReorgDepth = limits.maxReorgDepth ?? MAX_REORG_DEPTH;
+    this.maxMempoolSize = limits.maxMempoolSize ?? MAX_MEMPOOL_SIZE;
+    this.maxMempoolPerSender = limits.maxMempoolPerSender ?? MAX_MEMPOOL_PER_SENDER;
+    this.maxOrphans = limits.maxOrphans ?? MAX_ORPHANS;
+    // The floor a transaction must pay to enter THIS node's mempool. Local
+    // policy, not consensus - a block carrying a cheaper transaction is still
+    // valid. Expressions are exempt; see submitRaw.
+    this.minGasPrice = BigInt(limits.minGasPrice ?? 0n);
 
     this.byHash = new Map();   // every known block, canonical or not
     this.canonical = [];       // canonical blocks, index === height
@@ -179,6 +201,28 @@ export class Chain {
       throw new Error('insufficient funds for value plus fee');
     }
 
+    // **Speaking is free, and everything else pays.**
+    //
+    // An expression may set gasPrice to zero. It is not a favour: the act
+    // already costs something - it burns the token's declared expressionCost -
+    // so the anti-spam property the fee provides is provided twice over, and
+    // charging MOLI on top would mean a person needs a transferable, priced
+    // asset in hand before they can say anything.
+    //
+    // That is the line doc 28 §8.7-8.8 draws and the reason this exemption
+    // exists rather than a stipend: handing somebody a transferable coin so
+    // they can register a political preference, in an election year, is
+    // exactly the shape Res.-TSE 23.610/2019 art. 29 §8º describes. The coin
+    // must not touch the ballot. So it does not: nothing is handed over,
+    // because nothing is needed.
+    //
+    // Every other transaction pays the floor, which is what keeps a free
+    // transaction class from becoming a free spam class.
+    if (this.minGasPrice > 0n && tx.gasPrice < this.minGasPrice && !decodeExpress(tx.data)) {
+      throw new Error(
+        `gas price ${tx.gasPrice} is below this node's minimum ${this.minGasPrice}`);
+    }
+
     // An expression of will is refused at the door when the wallet has already
     // spoken on that poll, or has an unmined one waiting. This is courtesy, not
     // consensus: applyTransaction enforces the same rule when the block is
@@ -212,6 +256,25 @@ export class Chain {
       normalizeTokenRecord(creation, tx.from, this.height + 1n);
     }
 
+    const issue = decodeIssue(tx.data);
+    if (issue) {
+      if (tx.value !== 0n) throw new Error('an issuance moves no value');
+      if (!tx.to) throw new Error('an issuance needs a recipient');
+      const token = this.state.getToken(issue.tokenId);
+      if (!token) throw new Error(`unknown token ${issue.tokenId}`);
+      if (!token.issuable) throw new Error(`token ${token.id} is not issuable`);
+      if (tx.from !== token.creator) {
+        throw new Error(
+          'only the creator may issue: issuance is one-directional, so a holder '
+          + 'passing units on would be a transfer by another name');
+      }
+      if (issue.amount <= 0n) throw new Error('an issuance must be positive');
+      const max = BigInt(token.maxSupply);
+      if (max > 0n && BigInt(token.minted) + issue.amount > max) {
+        throw new Error(`issuing ${issue.amount} would exceed the declared max supply ${max}`);
+      }
+    }
+
     const express = decodeExpress(tx.data);
     if (express) {
       if (tx.value !== 0n) throw new Error('an expression carries no value');
@@ -220,7 +283,10 @@ export class Chain {
       }
       const token = this.state.getToken(express.tokenId);
       if (!token) throw new Error(`unknown token ${express.tokenId}`);
-      if (this.state.tokenBalanceOf(token.id, tx.from) < 1n) {
+      // One rule, shared with applyTransaction rather than restated here -
+      // two copies of a consensus rule is two rules waiting to disagree.
+      const burn = expressionBurn(token, express.amount);
+      if (this.state.tokenBalanceOf(token.id, tx.from) < burn) {
         throw new Error('no units of this token to spend');
       }
       const scope = token.voteMode === 'quantum' ? express.pollId : token.id;
@@ -237,6 +303,32 @@ export class Chain {
           && this.state.expressionCount(key) >= BigInt(token.cap)) {
         throw new Error(`cap of ${token.cap} expressions reached for ${tx.from}`);
       }
+    }
+
+    // Mempool caps. Without them a funded sender - or anyone at all, since
+    // admission does not require the transaction ever to be mined - grows this
+    // map until the node dies. The per-sender cap matters as much as the
+    // total: one address filling 5,000 slots crowds out everybody else just
+    // as effectively as 5,000 addresses filling one each.
+    let fromSender = 0;
+    for (const pending of this.mempool.values()) {
+      if (pending.from === tx.from) fromSender++;
+    }
+    if (fromSender >= this.maxMempoolPerSender) {
+      throw new Error(`too many pending transactions from ${tx.from} (limit ${this.maxMempoolPerSender})`);
+    }
+    if (this.mempool.size >= this.maxMempoolSize) {
+      // Full: only a transaction that pays more than the cheapest one waiting
+      // gets in, and it displaces exactly that one. Paying to be included is
+      // the intended way to compete for space; flooding is not.
+      let cheapest = null;
+      for (const pending of this.mempool.values()) {
+        if (!cheapest || pending.gasPrice < cheapest.gasPrice) cheapest = pending;
+      }
+      if (!cheapest || tx.gasPrice <= cheapest.gasPrice) {
+        throw new Error('mempool is full and this transaction does not outbid the cheapest waiting');
+      }
+      this.mempool.delete(cheapest.hash);
     }
 
     this.mempool.set(tx.hash, tx);
@@ -324,8 +416,26 @@ export class Chain {
     if (header.number !== parent.header.number + 1n) {
       throw new Error(`bad height: got ${header.number}, parent is ${parent.header.number}`);
     }
+    assertHeaderBounds(header);
     if (header.timestamp <= parent.header.timestamp) {
       throw new Error('timestamp does not advance past parent');
+    }
+    // The time-warp guard. Difficulty falls whenever a block claims the target
+    // interval has elapsed, so an unbounded future timestamp is a free
+    // difficulty reduction, repeatable every block until the chain costs
+    // nothing to mine. Bounding the drift is what makes the claim cost
+    // something. Two minutes is loose enough for ordinary clock skew.
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    if (header.timestamp > now + MAX_FUTURE_DRIFT_SECONDS) {
+      throw new Error(
+        `timestamp is ${header.timestamp - now}s in the future, limit is ${MAX_FUTURE_DRIFT_SECONDS}s`);
+    }
+    if (block.transactions.length > MAX_TRANSACTIONS_PER_BLOCK) {
+      throw new Error(
+        `block carries ${block.transactions.length} transactions, limit is ${MAX_TRANSACTIONS_PER_BLOCK}`);
+    }
+    if (header.gasUsed > header.gasLimit) {
+      throw new Error('header claims more gas used than the block allows');
     }
     const expectedDifficulty = nextDifficulty(
       parent.header, header.timestamp,
@@ -349,6 +459,12 @@ export class Chain {
     let gasUsed = 0n;
     for (const tx of block.transactions) {
       const gas = intrinsicGas(tx);
+      // Checked BEFORE executing, not after: a block whose transactions
+      // overrun the gas limit is invalid, and discovering that only at the end
+      // means having done all the work the attacker wanted done.
+      if (gasUsed + gas > header.gasLimit) {
+        throw new Error('transactions exceed the block gas limit');
+      }
       const receipt = applyTransaction(state, tx, gas, header.miner, header.number);
       receipts.push(receipt);
       gasUsed += receipt.gasUsed;
@@ -380,12 +496,17 @@ export class Chain {
    * Returns { accepted, adopted, reorg } - `adopted` means the canonical head
    * moved to this block or a descendant of it.
    */
-  processBlock(block, { persist = true } = {}) {
+  processBlock(block, { persist = true, depth = 0 } = {}) {
     if (this.byHash.has(block.hash)) return { accepted: false, adopted: false, reason: 'known' };
 
     const parent = this.byHash.get(block.header.parentHash);
     if (!parent) {
-      // Arrived before its parent: hold it until the parent shows up.
+      // Arrived before its parent: hold it until the parent shows up. Bounded,
+      // because an unverifiable block costs a peer nothing to send and this
+      // map is the one place the node stores something it has NOT validated.
+      if (this.orphanCount() >= this.maxOrphans) {
+        return { accepted: false, adopted: false, reason: 'orphan pool full' };
+      }
       const waiting = this.orphans.get(block.header.parentHash) ?? [];
       waiting.push(block);
       this.orphans.set(block.header.parentHash, waiting);
@@ -399,18 +520,49 @@ export class Chain {
     // Heaviest chain wins. On an exact tie the incumbent keeps the head, so a
     // node does not flip-flop; whichever side is extended first settles it.
     if (entry.totalDifficulty > this.head.totalDifficulty) {
+      // Reorg depth guard. A branch that forks further back than this is
+      // refused however heavy it is - which is the defence against somebody
+      // mining a deeper chain in private and replacing settled history.
+      //
+      // The cost is real and is stated in src/limits.js: a node offline or
+      // partitioned for longer than the bound will refuse the honest heaviest
+      // chain and needs a manual resync. That is the trade, taken knowingly
+      // because this chain's total work is small enough to buy.
+      const { ancestor } = this.pathToCanonical(entry);
+      const depthBelowHead = Number(this.height - ancestor.header.number);
+      if (depthBelowHead > this.maxReorgDepth) {
+        this.refusedReorg = {
+          at: new Date().toISOString(), depth: depthBelowHead,
+          hash: entry.hash, height: Number(entry.header.number),
+        };
+        console.warn(`[molibra] REFUSED a ${depthBelowHead}-block reorg to ${entry.hash.slice(0, 12)}`
+          + ` - deeper than the ${this.maxReorgDepth}-block limit. The block is kept but not adopted.`);
+        if (persist) this.persist();
+        return { accepted: true, adopted: false, reorg: null, refusedReorg: this.refusedReorg };
+      }
       reorg = this.setHead(entry);
     }
 
-    // The parent's arrival may unblock children that came in early.
+    // The parent's arrival may unblock children that came in early. The depth
+    // bound is not decoration: this recursion is driven entirely by data a
+    // peer supplies, so a long enough orphan chain is a stack overflow that
+    // takes the node with it.
     const children = this.orphans.get(entry.hash);
-    if (children) {
+    if (children && depth < MAX_ORPHAN_RESOLUTION_DEPTH) {
       this.orphans.delete(entry.hash);
-      for (const child of children) this.processBlock(child, { persist: false });
+      for (const child of children) {
+        this.processBlock(child, { persist: false, depth: depth + 1 });
+      }
     }
 
     if (persist) this.persist();
     return { accepted: true, adopted: this.head.hash === entry.hash || this.isCanonical(entry.hash), reorg };
+  }
+
+  orphanCount() {
+    let total = 0;
+    for (const waiting of this.orphans.values()) total += waiting.length;
+    return total;
   }
 
   /** Walk back from a block to the canonical chain, returning the branch. */
@@ -465,6 +617,7 @@ export class Chain {
           voteKey: receipt.voteKey ?? null,
           pollId: receipt.pollId ?? null,
           tokenId: receipt.tokenId ?? null,
+          tokenAmount: receipt.tokenAmount ?? null,
           logs: [],
         });
       });

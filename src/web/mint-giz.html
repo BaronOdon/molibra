@@ -1,0 +1,137 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Create GIZ on Molibra</title>
+<style>
+  body{background:#0F0F2A;color:#E0E0E8;font:15px/1.6 system-ui,sans-serif;
+       max-width:640px;margin:40px auto;padding:0 20px}
+  h1{background:linear-gradient(96deg,#00F0FF,#B14AFF);-webkit-background-clip:text;
+     background-clip:text;color:transparent;font-size:32px;margin:0 0 4px}
+  h2{font-size:19px;margin:34px 0 6px}
+  .card{background:#16162D;border:1px solid rgba(224,224,232,.12);border-radius:12px;
+        padding:18px;margin:18px 0}
+  button{background:linear-gradient(96deg,#00F0FF,#B14AFF);color:#0F0F2A;border:0;
+         border-radius:10px;padding:13px 22px;font:600 15px system-ui;cursor:pointer}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input{background:#0F0F2A;border:1px solid rgba(224,224,232,.2);border-radius:8px;
+        color:#E0E0E8;font:13px ui-monospace,Menlo,monospace;padding:10px;width:100%;
+        box-sizing:border-box;margin:4px 0 10px}
+  code,pre{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#66F8FF;
+           word-break:break-all;white-space:pre-wrap}
+  .muted{color:#9098B0}
+  .warn{border-left:3px solid #FFB020;background:rgba(255,176,32,.07);
+        padding:12px 14px;border-radius:0 8px 8px 0}
+  dt{color:#9098B0;font-size:13px}dd{margin:0 0 10px;color:#E0E0E8}
+  label{font-size:13px;color:#9098B0}
+</style>
+
+<h1>Create GIZ</h1>
+<p class="muted">Chalk (GIZ) on Molibra &mdash; chain 20226. <b>Nothing is minted at
+creation.</b> Units reach people through issuance, which is one-directional: the creator
+can issue, a holder can never pass a unit on. That is what keeps GIZ marketless, and
+therefore priceless, and therefore outside art.&nbsp;29 §8º.</p>
+
+<div class="card">
+  <dl>
+    <dt>Token</dt><dd>Chalk (GIZ)</dd>
+    <dt>Mode</dt><dd><b>quantum</b> &mdash; one expression per voting place, unlimited places</dd>
+    <dt>Supply</dt><dd><b>uncapped</b>, minted on demand &mdash; questions never stop being created</dd>
+    <dt>Initial supply</dt><dd>0 &mdash; nobody, including the creator, starts holding any</dd>
+    <dt>Cost per expression</dt><dd>0.001 GIZ (10<sup>15</sup>) &mdash; wei granularity, so one
+      holding covers many questions</dd>
+    <dt>Purpose</dt><dd><b>expressão pública de compra</b> &mdash; a purchase made
+      public by the person who made it. Declared on the record, immutable. It is
+      <b>not</b> an enquete and <b>not</b> a pesquisa: those are regulated objects
+      under the TSE resolutions, and this is not one of them.</dd>
+    <dt>Flags</dt><dd><b>non-transferable</b> &middot; issuable</dd>
+  </dl>
+</div>
+
+<div class="warn">The record is <b>immutable once mined</b>. Mode, cost, ceiling and flags
+have no setter, by design. Creating this twice from the same wallet at the same block height
+is refused; at a different height it is a different token.</div>
+
+<p><button id="go">Connect wallet and create GIZ</button></p>
+<p id="out" class="muted">&nbsp;</p>
+<div class="card"><p class="muted" style="margin:0 0 6px">Transaction data</p>
+<pre id="data"></pre></div>
+
+<h2>Then: issue units to someone</h2>
+<p class="muted">Only the creator's wallet can do this, and the recipient can never pass the
+units on. Read the token id back from <code>/molibra/tokens</code> after the creation is mined
+&mdash; it is derived from creator, title and block height, so it cannot be known in advance.</p>
+<div class="card">
+  <label>Token id (0x… 32 bytes)</label>
+  <input id="tid" placeholder="0x…" spellcheck="false">
+  <label>Recipient address</label>
+  <input id="to" placeholder="0x…" spellcheck="false">
+  <label>Amount, in units of 10<sup>-18</sup> GIZ (20000000000000000 = 0.02 GIZ = 20 expressions)</label>
+  <input id="amt" value="20000000000000000" spellcheck="false">
+  <p><button id="issue">Issue</button></p>
+  <p id="iout" class="muted">&nbsp;</p>
+</div>
+
+<script>
+// Built by src/token.js: TOKEN_CREATE tag + utf8 JSON of the record.
+const DATA = '0x733062447b227469746c65223a224368616c6b202847495a29222c226f7074696f6e73223a5b226167726565222c226469736167726565222c226162737461696e225d2c22766f74654d6f6465223a227175616e74756d222c22696e697469616c537570706c79223a2230222c226d6178537570706c79223a2230222c2265787072657373696f6e436f7374223a2231303030303030303030303030303030222c226973737561626c65223a747275652c22707572706f7365223a227075726368617365222c227472616e7366657261626c65223a66616c73657d';
+const ISSUE_TAG = '0xa92abe37';
+const CHAIN = '0x4f02';
+document.getElementById('data').textContent = DATA;
+const out = (m) => document.getElementById('out').innerHTML = m;
+const iout = (m) => document.getElementById('iout').innerHTML = m;
+
+async function wallet(report) {
+  const eth = window.ethereum;
+  if (!eth) { report('No wallet detected in this browser.'); return null; }
+  const [from] = await eth.request({ method: 'eth_requestAccounts' });
+  const chainId = await eth.request({ method: 'eth_chainId' });
+  if (chainId !== CHAIN) {
+    report('Wrong network: wallet is on ' + chainId + ', Molibra is ' + CHAIN + ' (20226).');
+    return null;
+  }
+  return { eth, from };
+}
+
+const pad32 = (hex) => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+
+document.getElementById('go').onclick = async () => {
+  try {
+    const w = await wallet(out);
+    if (!w) return;
+    out('Confirm in your wallet&hellip;');
+    // Self-addressed, zero value: creating a token moves no money.
+    const hash = await w.eth.request({
+      method: 'eth_sendTransaction',
+      params: [{ from: w.from, to: w.from, value: '0x0', data: DATA, gas: '0x186a0' }],
+    });
+    out('Sent: <code>' + hash + '</code><br>Mines in ~15s. Read the token id at ' +
+        '<a style="color:#00F0FF" href="http://127.0.0.1:8545/molibra/tokens"' +
+        ' target="_blank">/molibra/tokens</a>');
+  } catch (e) {
+    out('Failed: ' + (e && e.message ? e.message : String(e)));
+  }
+};
+
+document.getElementById('issue').onclick = async () => {
+  try {
+    const w = await wallet(iout);
+    if (!w) return;
+    const id = document.getElementById('tid').value.trim();
+    const to = document.getElementById('to').value.trim();
+    const amount = BigInt(document.getElementById('amt').value.trim());
+    if (!/^0x[0-9a-fA-F]{64}$/.test(id)) return iout('Token id must be 32 bytes.');
+    if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return iout('Recipient must be an address.');
+    if (amount <= 0n) return iout('Amount must be positive.');
+    // ISSUE: tag + tokenId(32) + amount(32). The recipient is the transaction's
+    // `to`, so no address is duplicated on the wire.
+    const data = ISSUE_TAG + pad32(id) + pad32(amount.toString(16));
+    iout('Confirm in your wallet&hellip;');
+    const hash = await w.eth.request({
+      method: 'eth_sendTransaction',
+      params: [{ from: w.from, to, value: '0x0', data, gas: '0x186a0' }],
+    });
+    iout('Sent: <code>' + hash + '</code>');
+  } catch (e) {
+    iout('Failed: ' + (e && e.message ? e.message : String(e)));
+  }
+};
+</script>

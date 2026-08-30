@@ -17,11 +17,12 @@ import { Node } from '../src/node.js';
 import { signTransaction } from '../src/tx.js';
 import { encodeVoteData, toPollId, voteKey, VOTE_TAG } from '../src/vote.js';
 import {
-  encodeTokenCreate, encodeExpress, tokenId, expressionKey,
+  encodeTokenCreate, encodeExpress, encodeIssue, tokenId, expressionKey,
 } from '../src/token.js';
 import { applyTransaction, State } from '../src/state.js';
 import { fromHex, privateToAddress, toChecksumAddress, toHex } from '../src/crypto.js';
 import { blockHash, blockRewardAt } from '../src/block.js';
+import { solveWork, verifyWork } from '../src/work.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const GENESIS = join(ROOT, 'genesis.json');
@@ -506,7 +507,7 @@ async function main() {
     voteL.submitRaw(toHex(express(voteL, ALICE_KEY, ALICE, 0n, POLL_A))).startsWith('0x'));
 
   // ------------------------------------------------------------ GIZ / tokens
-  console.log('\n8. GIZ and user-created tokens');
+  console.log('\n8. GIZ: issuance, uncapped supply and wei-granular cost');
 
   const tk = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens')).init();
   for (let i = 0; i < 4; i++) tk.mine(ALICE);
@@ -514,152 +515,336 @@ async function main() {
   const COMMIT = '0x' + '5a'.repeat(32);
   const POLL_Q = toPollId('voting-place-alpha');
   const POLL_R = toPollId('voting-place-beta');
+  const POLL_S = toPollId('voting-place-gamma');
   const gasP = 1000000000n;
+  const COST = 10n ** 15n; // 0.001 of a unit - granularity borrowed from wei
   const send = (key, from, nonce, data, to = from) => signTransaction(
     { nonce, gasPrice: gasP, gasLimit: 300000n, to, value: 0n, data }, key, tk.chainId,
   );
 
+  // Nonces are tracked rather than counted by hand, and advanced only when a
+  // submission is ACCEPTED - a refused transaction consumes nothing, and a
+  // test that assumed otherwise would pass for the wrong reason.
+  let an = 0n;
+  let bn = 0n;
+  const tryAlice = (data, to = ALICE) => toHex(send(ALICE_KEY, ALICE, an, data, to));
+  const doAlice = (data, to = ALICE) => { const h = tk.submitRaw(tryAlice(data, to)); an++; return h; };
+  const tryBob = (data, to = BOB) => toHex(send(BOB_KEY, BOB, bn, data, to));
+  const doBob = (data, to = BOB) => { const h = tk.submitRaw(tryBob(data, to)); bn++; return h; };
+
   // --- creation -----------------------------------------------------------
   const gizRecord = {
     title: 'Chalk (GIZ) - the politics chalkboard',
-    options: ['agree', 'disagree'],
-    voteMode: 'single',
-    supply: '3',
-    electoral: true,
+    options: ['agree', 'disagree', 'abstain'],
+    voteMode: 'quantum',
+    initialSupply: '0',
+    maxSupply: '0',                    // uncapped: questions never stop being created
+    expressionCost: COST.toString(),
+    issuable: true,
+    purpose: 'purchase',               // expressao publica de compra - what the board records
     transferable: false,
   };
-  const createHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 0n, encodeTokenCreate(gizRecord))));
+  const createHash = doAlice(encodeTokenCreate(gizRecord));
   tk.mine(ALICE);
   const height = tk.txIndex.get(createHash).blockNumber;
   const GIZ = tokenId(ALICE, gizRecord.title, BigInt(height));
   const token = tk.state.getToken(GIZ);
 
   check('a token is created and its id is DERIVED, not chosen', token !== null, GIZ.slice(0, 18));
-  check('the whole supply is minted to the creator, and there is no other mint path',
-    tk.state.tokenBalanceOf(GIZ, ALICE) === 3n && token.supply === '3');
-  check('the mode is on the record, immutable and disclosed', token.voteMode === 'single');
+  check('the creator does NOT start holding the whole supply',
+    tk.state.tokenBalanceOf(GIZ, ALICE) === 0n && token.minted === '0',
+    'the 29 Aug dead end: whole supply to creator plus non-transferable meant nobody could ever express');
+  check('supply is UNCAPPED - minted on demand, no ceiling', token.maxSupply === '0');
+  check('the mode is on the record, immutable and disclosed', token.voteMode === 'quantum');
   check('GIZ is non-transferable - no market, therefore no price',
-    token.transferable === false && token.electoral === true);
+    token.transferable === false && token.purpose === 'purchase');
+  check('the purpose is DECLARED on the record, not asserted about it',
+    token.purpose === 'purchase' && token.electoral === false,
+    'expressao publica de compra - not an enquete, not a pesquisa');
+  check('the cost of expressing is on the record, in wei granularity',
+    token.expressionCost === COST.toString(), '0.001 of a unit, not one whole unit');
 
-  // --- the compliance keystone -------------------------------------------
+  // --- what consensus refuses at creation ---------------------------------
   let no;
   no = false;
   try {
-    tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 1n, encodeTokenCreate(
-      { ...gizRecord, title: 'electoral and tradable', electoral: true, transferable: true }))));
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'electoral and tradable', purpose: 'electoral', transferable: true })));
   } catch (e) { no = /never be transferable/.test(e.message); }
   check('an ELECTORAL token can never be TRANSFERABLE - refused by consensus', no);
 
   no = false;
   try {
-    tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 1n, encodeTokenCreate(
-      { ...gizRecord, voteMode: 'capped', cap: 0 }))));
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'the dead end', issuable: false, transferable: false })));
+  } catch (e) { no = /never reach a second holder/.test(e.message); }
+  check('a token neither issuable NOR transferable is refused at creation', no,
+    'the dead end is refused before the record becomes immutable');
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      // Purpose market: a social or electoral token can never be transferable,
+      // so that rule would refuse this record first and the check would pass
+      // for the wrong reason.
+      { ...gizRecord, title: 'nothing and no way to make any', purpose: 'market',
+        issuable: false, transferable: true, initialSupply: '0' })));
+  } catch (e) { no = /must be issuable/.test(e.message); }
+  check('a token with no supply and no issuance is refused', no);
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate({ ...gizRecord, voteMode: 'capped', cap: 0 })));
   } catch (e) { no = /cap of at least/.test(e.message); }
   check('capped mode without a cap is refused', no);
 
   no = false;
   try {
-    tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 1n, encodeTokenCreate(
-      { ...gizRecord, options: ['only one'] }))));
+    tk.submitRaw(tryAlice(encodeTokenCreate({ ...gizRecord, options: ['only one'] })));
   } catch (e) { no = /two options/.test(e.message); }
   check('a token with fewer than two options is refused', no);
 
-  // --- expressing burns ---------------------------------------------------
-  const eHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 1n, encodeExpress(GIZ, POLL_Q, COMMIT))));
-  tk.mine(ALICE);
-  check('expressing BURNS the unit rather than transferring it',
-    tk.state.tokenBalanceOf(GIZ, ALICE) === 2n
-    && tk.state.getToken(GIZ).burned === '1');
-  check('the burn IS the tally: minted minus remaining equals expressions cast',
-    BigInt(tk.state.getToken(GIZ).supply) - tk.state.tokenBalanceOf(GIZ, ALICE)
-      === BigInt(tk.state.getToken(GIZ).burned));
-  check('the receipt names the token', tk.receiptFor(eHash).tokenId === GIZ);
-  check('single mode recorded the per-wallet key',
-    tk.state.hasVoteKey(expressionKey(ALICE, GIZ)));
-
   no = false;
-  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 2n, encodeExpress(GIZ, POLL_Q, COMMIT)))); }
-  catch (e) { no = /already expressed/.test(e.message); }
-  check('single mode: a second expression from the same wallet is refused', no,
-    'holding 2 more units did not buy a second voice');
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'no purpose declared', purpose: undefined })));
+  } catch (e) { no = /must declare its purpose/.test(e.message); }
+  check('a token that declares no purpose is refused', no,
+    'no default, because a silent default on an immutable record is the trap');
 
   no = false;
   try {
-    tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 2n,
-      encodeExpress("0x" + "ff".repeat(32), POLL_Q, COMMIT))));
-  } catch (e) { no = /unknown token/.test(e.message); }
-  check('expressing on a token that does not exist is refused', no);
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'made-up purpose', purpose: 'whatever' })));
+  } catch (e) { no = /must declare its purpose/.test(e.message); }
+  check('a purpose outside the declared set is refused', no);
 
-  // BOB must be funded first, or this passes for the wrong reason: it would
-  // be refused for lacking MOLI rather than for lacking units of the token.
-  tk.submitRaw(toHex(signTransaction(
-    { nonce: 2n, gasPrice: gasP, gasLimit: 21000n, to: BOB,
-      value: 5n * 10n ** 18n, data: '0x' }, ALICE_KEY, tk.chainId)));
-  tk.mine(ALICE);
-  check('BOB is funded, so the next refusal is about units and nothing else',
-    tk.state.balanceOf(BOB) >= 5n * 10n ** 18n);
   no = false;
-  try { tk.submitRaw(toHex(send(BOB_KEY, BOB, 0n, encodeExpress(GIZ, POLL_Q, COMMIT)))); }
-  catch (e) { no = /no units of this token/.test(e.message); }
-  check('a funded wallet holding no UNITS still cannot express', no);
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'saying two things at once',
+        purpose: 'market', electoral: true })));
+  } catch (e) { no = /derived from purpose/.test(e.message); }
+  check('electoral cannot disagree with purpose - it is derived, not stated', no);
 
-  // --- capped(n) ----------------------------------------------------------
-  const capRec = { title: 'capped question', options: ['a', 'b'],
-                   voteMode: 'capped', cap: 2, supply: '5', transferable: false };
-  const capHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 3n, encodeTokenCreate(capRec))));
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'social and tradable', purpose: 'social', transferable: true })));
+  } catch (e) { no = /can never be transferable/.test(e.message); }
+  check('a COMUNICACAO SOCIAL token can never be transferable either', no,
+    'art. 29 8 guards the surface, not the label');
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'purchase and tradable', transferable: true })));
+  } catch (e) { no = /can never be transferable/.test(e.message); }
+  check('nor can EXPRESSAO PUBLICA DE COMPRA, which is the electoral-period surface', no);
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'Enquete: quem voce prefere?' })));
+  } catch (e) { no = /cannot be called an/.test(e.message); }
+  check('a purchase token CANNOT be called an enquete - refused by consensus', no,
+    'TSE 23.600/2019: an enquete is a regulated object, barred from 15 August');
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'Pesquisa de intencao de voto' })));
+  } catch (e) { no = /cannot be called an/.test(e.message); }
+  check('nor a pesquisa, which carries its own registration duty', no);
+
+  const okTitle = { ...gizRecord, title: 'Quem voce comprou hoje?' };
+  const okHash = doAlice(encodeTokenCreate(okTitle));
+  tk.mine(ALICE);
+  check('a purchase token named for what it actually records is accepted',
+    tk.state.getToken(tokenId(ALICE, okTitle.title,
+      BigInt(tk.txIndex.get(okHash).blockNumber))) !== null);
+
+  const marketRec = { ...gizRecord, title: 'a market question', purpose: 'market',
+                      transferable: true, initialSupply: (COST * 5n).toString() };
+  const mHash = doAlice(encodeTokenCreate(marketRec));
+  tk.mine(ALICE);
+  const MKT = tokenId(ALICE, marketRec.title, BigInt(tk.txIndex.get(mHash).blockNumber));
+  check('afericao de mercado is a different object and MAY be transferable',
+    tk.state.getToken(MKT).transferable === true
+    && tk.state.getToken(MKT).purpose === 'market');
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...gizRecord, title: 'free speech', expressionCost: '0' })));
+  } catch (e) { no = /cost must be positive/.test(e.message); }
+  check('a token whose expression costs nothing is refused', no,
+    'the act must cost something, or identities are free');
+
+  // --- issuance: the distribution path, and it is NOT transfer ------------
+  // BOB is funded in MOLI first, or the later refusals would pass for the
+  // wrong reason - lacking gas rather than lacking units.
+  tk.submitRaw(toHex(signTransaction(
+    { nonce: an, gasPrice: gasP, gasLimit: 21000n, to: BOB,
+      value: 5n * 10n ** 18n, data: '0x' }, ALICE_KEY, tk.chainId)));
+  an++;
+  tk.mine(ALICE);
+  check('BOB is funded, so the next refusals are about units and nothing else',
+    tk.state.balanceOf(BOB) >= 5n * 10n ** 18n);
+
+  doAlice(encodeIssue(GIZ, COST * 10n), BOB);
+  tk.mine(ALICE);
+  check('the creator ISSUES units to a holder, and that is how anyone gets GIZ',
+    tk.state.tokenBalanceOf(GIZ, BOB) === COST * 10n
+    && tk.state.getToken(GIZ).minted === (COST * 10n).toString());
+  check('issuance MINTS - the creator gave away nothing it was holding',
+    tk.state.tokenBalanceOf(GIZ, ALICE) === 0n);
+
+  no = false;
+  try { tk.submitRaw(tryBob(encodeIssue(GIZ, COST), CAROL)); }
+  catch (e) { no = /only the creator may issue/.test(e.message); }
+  check('a HOLDER cannot pass units on - issuance is one-directional', no,
+    'no secondary market, so no price, so art. 29 has nothing to bite on');
+
+  doAlice(encodeIssue(GIZ, COST * 4n), CAROL);
+  tk.mine(ALICE);
+  check('an uncapped token keeps minting on demand - no ceiling to hit',
+    tk.state.getToken(GIZ).minted === (COST * 14n).toString()
+    && tk.state.tokenBalanceOf(GIZ, CAROL) === COST * 4n);
+
+  // --- a declared ceiling is enforced -------------------------------------
+  const capSupply = { ...gizRecord, title: 'a question with a declared ceiling',
+                      maxSupply: (COST * 3n).toString() };
+  const csHash = doAlice(encodeTokenCreate(capSupply));
+  tk.mine(ALICE);
+  const CS = tokenId(ALICE, capSupply.title, BigInt(tk.txIndex.get(csHash).blockNumber));
+  doAlice(encodeIssue(CS, COST * 2n), BOB);
+  tk.mine(ALICE);
+  no = false;
+  try { tk.submitRaw(tryAlice(encodeIssue(CS, COST * 2n), CAROL)); }
+  catch (e) { no = /exceed the declared max supply/.test(e.message); }
+  check('a declared max supply is enforced on issuance, not merely displayed', no);
+
+  // --- expressing burns exactly the declared cost -------------------------
+  const eHash = doBob(encodeExpress(GIZ, POLL_Q, COMMIT, COST));
+  tk.mine(ALICE);
+  check('expressing BURNS the declared cost rather than one whole unit',
+    tk.state.tokenBalanceOf(GIZ, BOB) === COST * 9n
+    && tk.state.getToken(GIZ).burned === COST.toString(),
+    'wei granularity: one holding covers many questions');
+  check('the receipt names the token and the amount burned',
+    tk.receiptFor(eHash).tokenId === GIZ
+    && tk.receiptFor(eHash).tokenAmount === COST.toString());
+
+  no = false;
+  try { tk.submitRaw(tryBob(encodeExpress(GIZ, POLL_R, COMMIT, COST * 5n))); }
+  catch (e) { no = /burns exactly/.test(e.message); }
+  check('burning MORE than the cost buys no larger voice outside weighted mode', no,
+    'a fixed cost is what keeps quantum, single and capped egalitarian');
+
+  no = false;
+  try { tk.submitRaw(tryBob(encodeExpress(GIZ, POLL_R, COMMIT, COST / 2n))); }
+  catch (e) { no = /burns exactly/.test(e.message); }
+  check('burning less than the cost is refused too', no);
+
+  no = false;
+  try { tk.submitRaw(tryBob(encodeExpress(GIZ, POLL_Q, COMMIT, COST))); }
+  catch (e) { no = /already expressed in voting place/.test(e.message); }
+  check('it can NEVER return to the voting place it left', no,
+    'holding nine more units bought no second voice there');
+
+  doBob(encodeExpress(GIZ, POLL_R, COMMIT, COST));
+  tk.mine(ALICE);
+  check('but it CAN be in another macrobiotic quantum',
+    tk.state.getToken(GIZ).burned === (COST * 2n).toString()
+    && tk.state.tokenBalanceOf(GIZ, BOB) === COST * 8n,
+    'one currency, many voting places, once each');
+
+  check('quantum scopes to the VOTING PLACE, not the token',
+    tk.state.hasVoteKey(expressionKey(BOB, POLL_Q))
+    && tk.state.hasVoteKey(expressionKey(BOB, POLL_R))
+    && !tk.state.hasVoteKey(expressionKey(BOB, GIZ)));
+
+  const gizNow = tk.state.getToken(GIZ);
+  check('the burn IS the tally: minted minus every holding equals units burned',
+    BigInt(gizNow.minted)
+      - tk.state.tokenBalanceOf(GIZ, ALICE)
+      - tk.state.tokenBalanceOf(GIZ, BOB)
+      - tk.state.tokenBalanceOf(GIZ, CAROL)
+      === BigInt(gizNow.burned));
+  check('and the count of expressions is the burn divided by the fixed cost',
+    BigInt(gizNow.burned) / COST === BigInt(gizNow.expressions)
+    && gizNow.expressions === '2');
+
+  no = false;
+  try { tk.submitRaw(tryAlice(encodeExpress(GIZ, POLL_S, COMMIT, COST))); }
+  catch (e) { no = /no units of this token/.test(e.message); }
+  check('even the CREATOR cannot express without holding units', no,
+    'creating a question is publishing; expressing is speaking - separate acts');
+
+  // --- weighted: the one mode where the amount IS the weight --------------
+  const wRec = { ...gizRecord, title: 'a weighted question', voteMode: 'weighted',
+                 purpose: 'market', initialSupply: (COST * 100n).toString() };
+  const wHash = doAlice(encodeTokenCreate(wRec));
+  tk.mine(ALICE);
+  const WT = tokenId(ALICE, wRec.title, BigInt(tk.txIndex.get(wHash).blockNumber));
+  check('a weighted token may mint an initial supply to its creator',
+    tk.state.tokenBalanceOf(WT, ALICE) === COST * 100n);
+
+  doAlice(encodeExpress(WT, POLL_Q, COMMIT, COST * 5n));
+  tk.mine(ALICE);
+  doAlice(encodeExpress(WT, POLL_Q, COMMIT, COST * 3n));
+  tk.mine(ALICE);
+  check('weighted lets the burned amount vary - the amount IS the weight',
+    tk.state.getToken(WT).burned === (COST * 8n).toString()
+    && tk.state.getToken(WT).expressions === '2',
+    'plutocratic by construction, and labelled so wherever it appears');
+  check('units burned and expressions cast are DIFFERENT numbers under weighted',
+    tk.state.getToken(WT).burned !== tk.state.getToken(WT).expressions,
+    'so both are served, and no reader infers a count from an amount');
+
+  no = false;
+  try { tk.submitRaw(tryAlice(encodeExpress(WT, POLL_R, COMMIT, COST / 2n))); }
+  catch (e) { no = /must burn at least/.test(e.message); }
+  check('weighted still refuses less than the declared cost', no);
+
+  // --- single and capped keep the fixed cost ------------------------------
+  const sRec = { ...gizRecord, title: 'a single-mode question', voteMode: 'single',
+                 initialSupply: (COST * 10n).toString() };
+  const sHash = doAlice(encodeTokenCreate(sRec));
+  tk.mine(ALICE);
+  const SG = tokenId(ALICE, sRec.title, BigInt(tk.txIndex.get(sHash).blockNumber));
+  doAlice(encodeExpress(SG, POLL_Q, COMMIT, COST));
+  tk.mine(ALICE);
+  no = false;
+  try { tk.submitRaw(tryAlice(encodeExpress(SG, POLL_R, COMMIT, COST))); }
+  catch (e) { no = /already expressed on token/.test(e.message); }
+  check('single mode: one expression per wallet across every question', no,
+    'holding nine more units did not buy a second voice');
+  check('single mode recorded the per-wallet key',
+    tk.state.hasVoteKey(expressionKey(ALICE, SG)));
+
+  const capRec = { ...gizRecord, title: 'capped question', voteMode: 'capped', cap: 2,
+                   initialSupply: (COST * 10n).toString(), purpose: 'behaviour' };
+  const capHash = doAlice(encodeTokenCreate(capRec));
   tk.mine(ALICE);
   const CAP = tokenId(ALICE, capRec.title, BigInt(tk.txIndex.get(capHash).blockNumber));
-  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 4n, encodeExpress(CAP, POLL_Q, COMMIT))));
+  doAlice(encodeExpress(CAP, POLL_Q, COMMIT, COST));
   tk.mine(ALICE);
-  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 5n, encodeExpress(CAP, POLL_Q, COMMIT))));
+  doAlice(encodeExpress(CAP, POLL_R, COMMIT, COST));
   tk.mine(ALICE);
   check('capped(2) allows exactly two expressions',
-    tk.state.getToken(CAP).burned === '2');
+    tk.state.getToken(CAP).expressions === '2');
   no = false;
-  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 6n, encodeExpress(CAP, POLL_Q, COMMIT)))); }
+  try { tk.submitRaw(tryAlice(encodeExpress(CAP, POLL_S, COMMIT, COST))); }
   catch (e) { no = /cap of 2/.test(e.message); }
   check('capped(2) refuses the third', no);
 
-  // --- quantum: the GIZ rule ---------------------------------------------
-  // Each question is a macrobiotic quantum - a voting place. A unit that has
-  // left one can never return to it, but is free to enter another.
-  const gizRec = { title: 'Chalk (GIZ)', options: ['agree', 'disagree'],
-                   voteMode: 'quantum', supply: '100',
-                   electoral: true, transferable: false };
-  const gizHash = tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 6n, encodeTokenCreate(gizRec))));
-  tk.mine(ALICE);
-  const QGIZ = tokenId(ALICE, gizRec.title, BigInt(tk.txIndex.get(gizHash).blockNumber));
-  check('a quantum-mode token is accepted', tk.state.getToken(QGIZ)?.voteMode === 'quantum');
-
-  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 7n, encodeExpress(QGIZ, POLL_Q, COMMIT))));
-  tk.mine(ALICE);
-  check('a subquantum enters a voting place and burns',
-    tk.state.getToken(QGIZ).burned === '1'
-    && tk.state.tokenBalanceOf(QGIZ, ALICE) === 99n);
-
   no = false;
-  try { tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 8n, encodeExpress(QGIZ, POLL_Q, COMMIT)))); }
-  catch (e) { no = /already expressed in voting place/.test(e.message); }
-  check('it can NEVER return to the voting place it left', no,
-    'holding 99 more units bought no second voice there');
-
-  tk.submitRaw(toHex(send(ALICE_KEY, ALICE, 8n, encodeExpress(QGIZ, POLL_R, COMMIT))));
-  tk.mine(ALICE);
-  check('but it CAN be in another macrobiotic quantum',
-    tk.state.getToken(QGIZ).burned === '2'
-    && tk.state.tokenBalanceOf(QGIZ, ALICE) === 98n,
-    'one currency, many voting places, once each');
-
-  check('the burn is still the tally, now across every voting place',
-    BigInt(tk.state.getToken(QGIZ).supply)
-      - tk.state.tokenBalanceOf(QGIZ, ALICE)
-      === BigInt(tk.state.getToken(QGIZ).burned));
-
-  check('quantum scopes to the VOTING PLACE, not the token - which is the '
-    + 'whole difference from single',
-    tk.state.hasVoteKey(expressionKey(ALICE, POLL_Q))
-    && tk.state.hasVoteKey(expressionKey(ALICE, POLL_R))
-    && !tk.state.hasVoteKey(expressionKey(ALICE, QGIZ)));
+  try {
+    tk.submitRaw(tryAlice(encodeExpress('0x' + 'ff'.repeat(32), POLL_Q, COMMIT, COST)));
+  } catch (e) { no = /unknown token/.test(e.message); }
+  check('expressing on a token that does not exist is refused', no);
 
   // --- consensus ----------------------------------------------------------
   const tkMirror = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-b')).init();
@@ -668,23 +853,329 @@ async function main() {
   }
   check('a second node re-derives the identical token state',
     tkMirror.state.root() === tk.state.root()
-    && tkMirror.state.getToken(GIZ).burned === '1'
-    && tkMirror.state.tokenBalanceOf(GIZ, ALICE) === 2n);
+    && tkMirror.state.getToken(GIZ).burned === (COST * 2n).toString()
+    && tkMirror.state.tokenBalanceOf(GIZ, BOB) === COST * 8n,
+    'issuance, burn and counts all live in the root');
 
-  // A reorg must return the burned unit. Because tokens live in state, this
-  // comes for free - the same property the vote keys rely on.
+  // A reorg must return the burned units AND unwind the issuance. Because
+  // tokens live in state, this comes for free - the same property the vote
+  // keys rely on.
   const tkFork = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-fork')).init();
   for (let n = 1; n <= 4; n++) tkFork.appendSerialized(serializeBlock(tk.blockByNumber(n)));
   for (let n = 0; n <= Number(tk.height) - 4 + 1; n++) tkFork.mine(CAROL);
   for (let n = 5; n <= Number(tkFork.height); n++) {
     tk.appendSerialized(serializeBlock(tkFork.blockByNumber(n)));
   }
-  check('a reorg unwound the token entirely - creation and burn both',
-    tk.head.hash === tkFork.head.hash && tk.state.getToken(GIZ) === null,
+  check('a reorg unwound the token entirely - creation, issuance and burn',
+    tk.head.hash === tkFork.head.hash
+    && tk.state.getToken(GIZ) === null
+    && tk.state.tokenBalanceOf(GIZ, BOB) === 0n,
     'no side register to drift out of step');
 
+  // ----------------------------------------------------------- earning chalk
+  console.log('\n9. earning chalk: how a person with none gets some');
+
+  // The issuer is the publisher's side of "publisher pays, speaker earns".
+  // It runs on a node because it has to sign and broadcast a real ISSUE.
+  const iNode = new Node({ genesisPath: GENESIS, dataDir: scratch('issuer'), miner: ALICE });
+  for (let i = 0; i < 4; i++) iNode.chain.mine(ALICE);
+  const iRec = { title: 'Chalk (GIZ) on the earning node',
+                 options: ['agree', 'disagree'], voteMode: 'quantum',
+                 initialSupply: '0', maxSupply: '0', expressionCost: COST.toString(),
+                 issuable: true, purpose: 'social', transferable: false };
+  const iHash = iNode.chain.submitRaw(toHex(signTransaction(
+    { nonce: 0n, gasPrice: gasP, gasLimit: 300000n, to: ALICE, value: 0n,
+      data: encodeTokenCreate(iRec) }, ALICE_KEY, iNode.chain.chainId)));
+  iNode.chain.mine(ALICE);
+  const IGIZ = tokenId(ALICE, iRec.title, BigInt(iNode.chain.txIndex.get(iHash).blockNumber));
+
+  const issuer = iNode.enableIssuer({
+    tokenId: IGIZ, privateKey: ALICE_KEY, grantExpressions: 20, difficulty: 400,
+  });
+  check('the issuer signs as the token CREATOR, which is what makes ISSUE valid',
+    issuer.address === iNode.chain.state.getToken(IGIZ).creator);
+  check('one grant is enough chalk for twenty expressions',
+    issuer.grantAmount === COST * 20n);
+
+  // --- the work path: one button, a few seconds, no wallet management ------
+  const job = issuer.challengeFor(BOB);
+  check('a puzzle is issued, bound to the address that will receive',
+    job.address === BOB && job.difficulty === 400);
+  const solution = solveWork(job.challenge, BOB, job.difficulty);
+  check('the puzzle is solvable, and the solution verifies', solution !== null
+    && verifyWork(job.challenge, BOB, solution, job.difficulty),
+    `nonce ${solution}`);
+  check('the same solution does NOT verify for another address',
+    !verifyWork(job.challenge, CAROL, solution, job.difficulty),
+    'a solved challenge is worthless to anyone else');
+
+  const grant = issuer.redeem({ address: BOB, challenge: job.challenge, nonce: solution });
+  iNode.chain.mine(ALICE);
+  check('solving it earns chalk, mined as an ordinary ISSUE',
+    iNode.chain.state.tokenBalanceOf(IGIZ, BOB) === COST * 20n
+    && iNode.chain.receiptFor(grant.txHash).status === 1);
+  check('the grant hands over NO MOLI at all',
+    iNode.chain.state.balanceOf(BOB) === 0n && grant.stipendTx === null,
+    'a transferable coin given for registering a political preference is exactly '
+    + 'what art. 29 8 describes - so nothing is given');
+
+  refused = '';
+  try { issuer.redeem({ address: BOB, challenge: job.challenge, nonce: solution }); }
+  catch (e) { refused = e.message; }
+  check('a challenge is single-use', /unknown or already-used/.test(refused), refused);
+
+  refused = '';
+  try { issuer.challengeFor(BOB); } catch (e) { refused = e.message; }
+  check('no second grant while the address can still speak', /already hold enough/.test(refused),
+    'caps hoarding without knowing anything about the person');
+
+  const job2 = issuer.challengeFor(CAROL);
+  refused = '';
+  try { issuer.redeem({ address: CAROL, challenge: job2.challenge, nonce: 0 }); }
+  catch (e) { refused = e.message; }
+  check('a wrong nonce is refused', /does not solve/.test(refused), refused);
+
+  const job3 = issuer.challengeFor(CAROL);
+  const sol3 = solveWork(job3.challenge, CAROL, job3.difficulty);
+  refused = '';
+  try { issuer.redeem({ address: BOB, challenge: job3.challenge, nonce: sol3 }); }
+  catch (e) { refused = e.message; }
+  check("one address cannot redeem another's challenge",
+    /issued to another address/.test(refused), refused);
+
+  // --- the app path: a linking proof, and NO puzzle ------------------------
+  // The application must never solve the puzzle: mining inside a mobile app is
+  // banned by Apple 3.1.5(ii) and by Google Play, and the store position is
+  // what the compliance argument rests on.
+  const appGrant = issuer.grantForProof({ address: CAROL, appAccount: 'app-account-1' });
+  iNode.chain.mine(ALICE);
+  check('the app can ask for a grant on a linked address at the push of a button',
+    iNode.chain.state.tokenBalanceOf(IGIZ, CAROL) === COST * 20n
+    && appGrant.via === 'proof');
+
+  refused = '';
+  try { issuer.grantForProof({ address: CAROL }); } catch (e) { refused = e.message; }
+  check('the app path obeys the same eligibility rule as the puzzle',
+    /already hold enough/.test(refused), 'one rule, two doors');
+
+  // --- and the chalk earned is chalk that works ---------------------------
+  // Zero MOLI, zero gas price. Speaking is free; the burn is the cost.
+  const spend = iNode.chain.submitRaw(toHex(signTransaction(
+    { nonce: 0n, gasPrice: 0n, gasLimit: 300000n, to: BOB, value: 0n,
+      data: encodeExpress(IGIZ, POLL_Q, COMMIT, COST) }, BOB_KEY, iNode.chain.chainId)));
+  iNode.chain.mine(ALICE);
+  check('a wallet holding NO MOLI earned chalk and spoke with it',
+    iNode.chain.receiptFor(spend).status === 1
+    && iNode.chain.state.balanceOf(BOB) === 0n
+    && iNode.chain.state.tokenBalanceOf(IGIZ, BOB) === COST * 19n
+    && iNode.chain.state.getToken(IGIZ).expressions === '1',
+    'no funding, no purchase, no market, no priced asset changing hands');
+
+  // ...and the exemption is exactly that: an exemption for speaking, not an
+  // open door. Everything else still pays the floor.
+  const priced = new Chain(Chain.loadGenesis(GENESIS), scratch('fee'),
+    { minGasPrice: 1000000000n }).init();
+  for (let i = 0; i < 4; i++) priced.mine(ALICE);
+  let cheap = false;
+  try {
+    priced.submitRaw(toHex(signTransaction(
+      { nonce: 0n, gasPrice: 0n, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+      ALICE_KEY, priced.chainId)));
+  } catch (e) { cheap = /below this node's minimum/.test(e.message); }
+  check('an ordinary transaction at zero gas price is still refused', cheap,
+    'a free transaction class must not become a free spam class');
+
+  // -------------------------------------------------------------- hardening
+  console.log('\n10. network hardening (each one is an attack, not a lint)');
+
+  const { RLP } = await import('@ethereumjs/rlp');
+  const {
+    SECP256K1_N, MAX_EXTRA_DATA_BYTES, MAX_TRANSACTIONS_PER_BLOCK,
+    MAX_FUTURE_DRIFT_SECONDS, MAX_REQUEST_BYTES,
+  } = await import('../src/limits.js');
+  const { assertHeaderBounds, mineHeader, nextDifficulty } = await import('../src/block.js');
+  const { decodeTransaction } = await import('../src/tx.js');
+  const { bigToBytes, bytesToBig } = await import('../src/crypto.js');
+
+  const sec = new Chain(Chain.loadGenesis(GENESIS), scratch('sec'),
+    { maxReorgDepth: 3, maxMempoolPerSender: 4, maxMempoolSize: 6, maxOrphans: 2 }).init();
+  for (let i = 0; i < 6; i++) sec.mine(ALICE);
+
+  // --- signature malleability (EIP-2) -------------------------------------
+  // For every valid (r, s) the pair (r, n - s) signs the same message. Accept
+  // both and the same authorised transaction exists under two hashes, so a
+  // stranger can get a mutated copy mined and every client tracking its own
+  // transaction by hash is left watching one that will never appear.
+  const plain = signTransaction(
+    { nonce: 0n, gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+    ALICE_KEY, sec.chainId);
+  const parts = RLP.decode(plain);
+  const flipped = [...parts];
+  flipped[8] = bigToBytes(SECP256K1_N - bytesToBig(parts[8]));
+  let blocked = false;
+  try { decodeTransaction(RLP.encode(flipped), sec.chainId); }
+  catch (e) { blocked = /malleable/.test(e.message); }
+  check('a malleated signature (s -> n-s) is refused', blocked,
+    'EIP-2: the upper half of the curve order is not accepted');
+  check('and the original of that very transaction still decodes',
+    decodeTransaction(plain, sec.chainId).from === ALICE,
+    'the guard refuses the mutation, not the signature');
+
+  blocked = false;
+  const zeroS = [...parts];
+  zeroS[8] = new Uint8Array(0);
+  try { decodeTransaction(RLP.encode(zeroS), sec.chainId); }
+  catch (e) { blocked = /out of range/.test(e.message); }
+  check('a signature with s = 0 is refused', blocked);
+
+  // --- the time warp ------------------------------------------------------
+  // Difficulty falls whenever a block claims the target interval elapsed. An
+  // unbounded future timestamp is therefore a free difficulty cut, repeatable
+  // every block until the chain costs nothing to mine.
+  const parent = sec.head;
+  const farFuture = BigInt(Math.floor(Date.now() / 1000)) + MAX_FUTURE_DRIFT_SECONDS + 3600n;
+  const warpCandidate = sec.composeBlock(ALICE, parent);
+  const warpHeader = {
+    ...warpCandidate.header,
+    timestamp: farFuture,
+    difficulty: nextDifficulty(parent.header, farFuture,
+      sec.genesis.targetBlockSeconds, sec.genesis.minimumDifficulty),
+  };
+  const warpSealed = mineHeader(warpHeader);
+  blocked = false;
+  try {
+    sec.processBlock({ header: warpSealed, hash: blockHash(warpSealed),
+                       transactions: warpCandidate.transactions });
+  } catch (e) { blocked = /in the future/.test(e.message); }
+  check('a block timestamped far in the future is refused', blocked,
+    'closes the time-warp difficulty attack');
+  check('the warp block really did lower difficulty, which is why it matters',
+    warpHeader.difficulty < parent.header.difficulty,
+    `${parent.header.difficulty} -> ${warpHeader.difficulty}`);
+
+  // --- header field sizes -------------------------------------------------
+  blocked = false;
+  try {
+    assertHeaderBounds({ ...parent.header,
+      extraData: '0x' + 'aa'.repeat(MAX_EXTRA_DATA_BYTES + 1) });
+  } catch (e) { blocked = /extraData is/.test(e.message); }
+  check('oversized header extraData is refused', blocked,
+    'a field nobody bounds is a free place to put a megabyte, forever');
+
+  blocked = false;
+  try { assertHeaderBounds({ ...parent.header, nonce: 1n << 100n }); }
+  catch (e) { blocked = /nonce exceeds/.test(e.message); }
+  check('a header nonce beyond 64 bits is refused', blocked);
+
+  // --- block-level work bounds -------------------------------------------
+  // Checked before the proof of work is even looked at, so a block claiming
+  // absurd work costs the verifier nothing to throw away.
+  blocked = false;
+  try {
+    sec.verifyAgainstParent({
+      header: { ...parent.header, number: parent.header.number + 1n,
+                timestamp: parent.header.timestamp + 1n },
+      hash: parent.hash,
+      transactions: new Array(MAX_TRANSACTIONS_PER_BLOCK + 1).fill({ hash: '0x00' }),
+    }, parent);
+  } catch (e) { blocked = /transactions, limit is/.test(e.message); }
+  check('a block carrying more transactions than the limit is refused', blocked);
+
+  blocked = false;
+  try {
+    sec.verifyAgainstParent({
+      header: { ...parent.header, number: parent.header.number + 1n,
+                timestamp: parent.header.timestamp + 1n,
+                gasUsed: parent.header.gasLimit + 1n },
+      hash: parent.hash,
+      transactions: [],
+    }, parent);
+  } catch (e) { blocked = /more gas used than the block allows/.test(e.message); }
+  check('a block claiming more gas than its own limit is refused', blocked);
+
+  // --- mempool caps -------------------------------------------------------
+  const flood = new Chain(Chain.loadGenesis(GENESIS), scratch('flood'),
+    { maxMempoolPerSender: 4, maxMempoolSize: 6 }).init();
+  for (let i = 0; i < 4; i++) flood.mine(ALICE);
+  for (let i = 0; i < 4; i++) {
+    flood.submitRaw(toHex(signTransaction(
+      { nonce: BigInt(i), gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+      ALICE_KEY, flood.chainId)));
+  }
+  blocked = false;
+  try {
+    flood.submitRaw(toHex(signTransaction(
+      { nonce: 4n, gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+      ALICE_KEY, flood.chainId)));
+  } catch (e) { blocked = /too many pending transactions/.test(e.message); }
+  check('one sender cannot occupy the whole mempool', blocked,
+    'crowding everybody out from one address is as effective as from a thousand');
+
+  // Full mempool: only a higher bid gets in, and it displaces the cheapest.
+  const rich = new Chain(Chain.loadGenesis(GENESIS), scratch('rich'),
+    { maxMempoolSize: 2, maxMempoolPerSender: 8 }).init();
+  for (let i = 0; i < 4; i++) rich.mine(ALICE);
+  rich.submitRaw(toHex(signTransaction(
+    { nonce: 0n, gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+    ALICE_KEY, rich.chainId)));
+  rich.submitRaw(toHex(signTransaction(
+    { nonce: 1n, gasPrice: gasP * 3n, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+    ALICE_KEY, rich.chainId)));
+  blocked = false;
+  try {
+    rich.submitRaw(toHex(signTransaction(
+      { nonce: 2n, gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+      ALICE_KEY, rich.chainId)));
+  } catch (e) { blocked = /does not outbid the cheapest/.test(e.message); }
+  check('a full mempool refuses a transaction that does not outbid the cheapest', blocked);
+  const outbid = rich.submitRaw(toHex(signTransaction(
+    { nonce: 2n, gasPrice: gasP * 5n, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
+    ALICE_KEY, rich.chainId)));
+  check('but a higher bid gets in and displaces exactly one',
+    rich.mempool.has(outbid) && rich.mempool.size === 2,
+    'paying to be included is the intended way to compete for space');
+
+  // --- orphan pool --------------------------------------------------------
+  // The one place a node stores something it has NOT validated, so it is the
+  // one place an unverifiable block costs a peer nothing to plant.
+  const donor = new Chain(Chain.loadGenesis(GENESIS), scratch('donor')).init();
+  for (let i = 0; i < 6; i++) donor.mine(CAROL);
+  const orph = new Chain(Chain.loadGenesis(GENESIS), scratch('orph'), { maxOrphans: 2 }).init();
+  const results = [];
+  for (let n = 6; n >= 2; n--) results.push(orph.appendSerialized(serializeBlock(donor.blockByNumber(n))));
+  check('the orphan pool is capped',
+    orph.orphanCount() === 2 && results.some((r) => r.reason === 'orphan pool full'),
+    `${orph.orphanCount()} held, the rest refused`);
+
+  // --- deep reorg ---------------------------------------------------------
+  // A branch mined in private, deeper than the bound, is refused however heavy
+  // it is. The cost of this rule is stated in src/limits.js and is real.
+  const fork = new Chain(Chain.loadGenesis(GENESIS), scratch('deep')).init();
+  fork.appendSerialized(serializeBlock(sec.blockByNumber(1)));
+  for (let i = 0; i < 8; i++) fork.mine(CAROL);
+  let refusedDeep = null;
+  for (let n = 2; n <= Number(fork.height); n++) {
+    const r = sec.appendSerialized(serializeBlock(fork.blockByNumber(n)));
+    if (r.refusedReorg) refusedDeep = r.refusedReorg;
+  }
+  check('a reorg deeper than the limit is refused, however heavy the branch',
+    refusedDeep !== null && sec.head.hash !== fork.head.hash,
+    refusedDeep ? `refused at depth ${refusedDeep.depth}` : 'not refused');
+  check('the refused blocks are KEPT, not discarded',
+    sec.blockByHash(fork.head.hash) !== null,
+    'so an operator can inspect what was offered rather than guess');
+
+  // --- request size -------------------------------------------------------
+  const oversize = await fetch(nodeB.rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{"padding":"' + 'x'.repeat(MAX_REQUEST_BYTES + 1024) + '"}',
+  }).then((r) => r.status).catch(() => 'connection refused');
+  check('an oversized request body is refused rather than buffered',
+    oversize === 413 || oversize === 'connection refused', String(oversize));
+
   // ------------------------------------------------------------ persistence
-  console.log('\n9. persistence and revalidation from disk');
+  console.log('\n11. persistence and revalidation from disk');
   const dirA = nodeA.chain.dataDir;
   await nodeA.stop();
   const reloaded = new Node({ genesisPath: GENESIS, dataDir: dirA, miner: ALICE });

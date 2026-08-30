@@ -25,6 +25,77 @@ Molibra is an experimental network. There is no bug bounty.
 - Anything that causes a node to disclose a private key, or to write one anywhere but the
   operator's own datadir.
 
+## Implemented hardening
+
+Every bound below exists because something without it was unbounded, and anything unbounded on
+a public endpoint is a denial of service waiting for somebody bored enough. They live together
+in [`src/limits.js`](src/limits.js) so the posture can be read in one place, and each one is
+exercised against the actual attack shape in `test/run.js` §10 — not asserted.
+
+**Consensus rules.** A node applying these rejects a block another node would accept, so
+changing one is a fork.
+
+| Guard | The attack it closes |
+|---|---|
+| **Future-timestamp bound** (120 s) | The **time warp**. Difficulty falls whenever a block claims the target interval elapsed, so an unbounded future timestamp is a free difficulty cut, repeatable every block until the chain costs nothing to mine. |
+| **`extraData` ≤ 512 bytes** | A header field nobody bounds is a free place to put a megabyte that every node then stores and rehashes forever. |
+| **Header nonce ≤ 64 bits** | The PoW search space is 64 bits; a bignum nonce is work for every verifier and none for the miner. |
+| **Gas checked before execution** | A block whose transactions overrun the gas limit is invalid. Discovering that only after executing them means having done exactly the work the attacker wanted done. |
+| **≤ 2,000 transactions per block** | Belt and braces alongside the gas limit; rejected before the proof of work is even looked at. |
+| **Low-s signatures only (EIP-2)** | **Malleability.** For every valid `(r, s)` the pair `(r, n − s)` signs the same message, so the same authorised transaction can exist under two hashes. A stranger rebroadcasts the mutation, it is mined under a hash the sender never saw, and every client tracking its own transaction is left watching one that will never appear. |
+
+**Local policy.** These protect a node and never change what the chain says.
+
+| Guard | The attack it closes |
+|---|---|
+| **Request body ≤ 2 MB**, enforced while reading | Memory exhaustion from a body that is never allowed to finish arriving. |
+| **Block range ≤ 512 per response** | Making a node build a multi-megabyte JSON string on demand for a stranger. `syncFrom` pages, so a joining node still gets the whole chain. |
+| **Mempool: 5,000 total, 64 per sender** | Flooding. The per-sender cap matters as much as the total: one address filling every slot crowds everybody out just as effectively as thousands filling one each. When full, only a higher bid gets in, displacing the cheapest. |
+| **Orphan pool ≤ 256, resolution depth ≤ 128** | The orphan pool is the one place a node stores something it has **not** validated, so it is the one place an unverifiable block costs a peer nothing to plant. The depth bound stops a peer-supplied orphan chain becoming a stack overflow. |
+| **Reorg depth ≤ 128** | A branch mined in private and released to replace settled history. |
+| **Sync yields to the event loop** | A node that goes silent whenever it catches up looks down to every wallet pointed at it. Verifying re-executes every transaction, so it yields every 32 blocks — the same reason the mining loop grinds in slices. |
+
+### The reorg bound is a trade, not a win
+
+`MAX_REORG_DEPTH` refuses to reorganise more than 128 blocks. It closes the long-range
+rewrite, which is the attack a young chain with little cumulative work is most exposed to. The
+cost is real and is stated rather than buried: **a node offline or partitioned for longer than
+128 blocks will refuse the honest heaviest chain and needs a manual resync.** Bitcoin does not
+do this; several smaller chains do, precisely because they are small. Molibra is small. The
+refused blocks are kept, not discarded, so an operator can inspect what was offered.
+
+## Is this "better than the urna eletrônica"?
+
+On some axes yes, on others no, and the honest answer matters more than the flattering one.
+
+**Where this record is stronger:**
+
+- **Anyone can re-derive the tally.** Every node re-executes every transaction and arrives at
+  the same state root independently — proven in the tests by a second node reaching the same
+  root from the raw blocks. There is no totalisation step anybody has to be trusted about.
+- **A person can verify their own expression is included**, by hash, in a specific block.
+- **The rules cannot move after people have answered.** Mode, purpose, cost, ceiling and
+  transferability are immutable and hashed into the state root. There is no setter.
+- **The count needs no trusted counter**: burning *is* the tally.
+- **It is open, reproducible and permissionlessly replicable** by anyone with the source.
+
+**Where it is weaker, and cannot simply be parameterised into strength:**
+
+- **Coercion resistance.** The urna's ballot secrecy is strong. Molibra's is not: individual
+  verifiability *means* a receipt, and a receipt enables vote-buying. This is a genuine
+  trade-off between two properties that pull against each other, not an omission. See
+  [WHITEPAPER.md](WHITEPAPER.md) §8.1.
+- **One person, one voice.** The urna binds to an identified electorate. Molibra binds to
+  addresses, and addresses are free. The earning puzzle is a speed bump, not a Sybil defence.
+- **Availability.** A small proof-of-work network is far easier to disrupt than air-gapped
+  national infrastructure.
+
+**And the framing that matters most:** Molibra does not run elections and is not a voting
+system. What it carries is **expressão pública de compra** — a purchase, made public by the
+person who made it. It is not an enquete and not a pesquisa. Any comparison with the urna is a
+comparison of *record integrity*, not of electoral machinery, and it should never be presented
+as the latter.
+
 ## Known and accepted limitations
 
 These are documented, not defects. Please do not report them as vulnerabilities — but do
@@ -35,8 +106,12 @@ report anything that makes one of them *worse* than described.
   That enables vote-buying and coercion. It is the most serious open problem in the design and
   is discussed in [WHITEPAPER.md](WHITEPAPER.md) §8.
 - **Peering is HTTP push and pull, not a hardened gossip protocol.** It suits a known set of
-  nodes. It is not yet a hostile-network protocol, and it has no peer reputation, no rate
-  limiting worth the name, and no eclipse-attack resistance.
+  nodes. The bounds above stop a peer exhausting memory or CPU, but there is still **no peer
+  reputation, no authentication between peers, no per-IP rate limiting and no eclipse-attack
+  resistance**. Do not mistake the hardening table for a hostile-network protocol.
+- **The earning puzzle is a cost function, not a Sybil defence.** Somebody willing to run it
+  against a thousand fresh addresses gets a thousand grants, exactly as they could mine a
+  thousand times.
 - **Proof of work at a small network size is cheap to out-hash.** Cumulative-difficulty fork
   choice is correct; it is also exactly why the peer set matters while the network is small.
 - **`stateRoot` is not a Merkle-Patricia root**, so there are no light-client or inclusion
@@ -46,8 +121,14 @@ report anything that makes one of them *worse* than described.
 
 ## Key handling, for anyone running a node
 
-The node writes a private key to `<datadir>/treasury.key` when the treasury is enabled, and
-`molibra keys` prints one to your terminal. Both are secrets.
+The node writes a private key to `<datadir>/treasury.key` when the treasury is enabled, reads
+one from `<datadir>/issuer.key` when the chalkboard issuer is enabled, and `molibra keys`
+prints one to your terminal. All are secrets. The issuer key is the **token creator's** key —
+whoever holds it can issue chalk, so it is the more sensitive of the two.
+
+Binding the RPC to `0.0.0.0` exposes every route above, including the POST endpoints, to
+anything that can reach the host. Bind to `127.0.0.1` unless you intend to serve the public,
+and put a reverse proxy with real rate limiting in front of it if you do.
 
 `data/`, `data-*/` and `*.key` are in `.gitignore` for exactly this reason. If you fork this
 repository, keep them there. A private key committed to a public repository should be treated

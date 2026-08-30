@@ -12,6 +12,7 @@ import {
   keccak256, toHex, fromHex, bigToBytes, bytesToBig,
   sign, recoverAddress, normalizeAddress,
 } from './crypto.js';
+import { SECP256K1_N, SECP256K1_HALF_N } from './limits.js';
 
 /**
  * The payload that gets signed: rlp([nonce, gasPrice, gasLimit, to, value,
@@ -72,6 +73,23 @@ export function decodeTransaction(raw, chainId) {
   }
   const recovery = Number((vBig - 35n) % 2n);
 
+  // Signature hygiene, before anything expensive is done with it.
+  //
+  // secp256k1 signatures are malleable: for every valid (r, s) the pair
+  // (r, n - s) is equally valid over the same message. Accepting both means
+  // the SAME authorised transaction can exist under two different hashes, so
+  // a third party can rebroadcast a mutated copy, get it mined under a hash
+  // the sender never saw, and leave every client that tracks its own
+  // transaction by hash looking at one that will never appear. EIP-2 fixed
+  // this on Ethereum by refusing the high half; so does this.
+  const rBig = bytesToBig(r);
+  const sBig = bytesToBig(s);
+  if (rBig <= 0n || rBig >= SECP256K1_N) throw new Error('signature r out of range');
+  if (sBig <= 0n || sBig >= SECP256K1_N) throw new Error('signature s out of range');
+  if (sBig > SECP256K1_HALF_N) {
+    throw new Error('malleable signature: s is in the upper half of the curve order (EIP-2)');
+  }
+
   const tx = {
     nonce: bytesToBig(nonce),
     gasPrice: bytesToBig(gasPrice),
@@ -81,14 +99,14 @@ export function decodeTransaction(raw, chainId) {
     data: toHex(data),
   };
 
-  const from = recoverAddress(signingHash(tx, chainId), bytesToBig(r), bytesToBig(s), recovery);
+  const from = recoverAddress(signingHash(tx, chainId), rBig, sBig, recovery);
   if (!from) throw new Error('signature does not recover to a valid public key');
 
   return {
     ...tx,
     v: vBig,
-    r: bytesToBig(r),
-    s: bytesToBig(s),
+    r: rBig,
+    s: sBig,
     from,
     hash: toHex(keccak256(bytes)),
     raw: toHex(bytes),

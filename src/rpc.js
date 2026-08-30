@@ -15,6 +15,8 @@ import { randomBytes } from 'node:crypto';
 import { toQuantity, normalizeAddress, keccak256, recoverAddress, fromHex, bytesToBig } from './crypto.js';
 import { intrinsicGas } from './tx.js';
 import { serializeBlock } from './block.js';
+import { PURPOSE_LABELS } from './token.js';
+import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE } from './limits.js';
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
 
@@ -119,6 +121,8 @@ function receiptToRpc(receipt) {
     // everywhere else, so no client has to special-case them.
     voteKey: receipt.voteKey ?? null,
     pollId: receipt.pollId ?? null,
+    tokenId: receipt.tokenId ?? null,
+    tokenAmount: receipt.tokenAmount ?? null,
   };
 }
 
@@ -240,8 +244,23 @@ export function startRpcServer(node, { host, port }) {
       return handleAudit(node, req, res);
     }
 
+    // Bounded, and bounded WHILE reading rather than after. A body is
+    // attacker-controlled and arrives in pieces; the only moment at which
+    // refusing it costs nothing is before the next piece is buffered.
     let body = '';
-    for await (const chunk of req) body += chunk;
+    let size = 0;
+    let oversized = false;
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > MAX_REQUEST_BYTES) { oversized = true; break; }
+      body += chunk;
+    }
+    if (oversized) {
+      req.destroy();
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` }));
+      return;
+    }
 
     let payload;
     try {
@@ -252,7 +271,11 @@ export function startRpcServer(node, { host, port }) {
       return;
     }
 
-    if (req.url === '/molibra/submit-block' || req.url === '/molibra/submit-tx' || req.url === '/molibra/verify-proof' || req.url === '/molibra/airdrop') {
+    const POSTABLE = new Set([
+      '/molibra/submit-block', '/molibra/submit-tx', '/molibra/verify-proof',
+      '/molibra/airdrop', '/molibra/earn', '/molibra/grant',
+    ]);
+    if (POSTABLE.has(req.url)) {
       return handlePeerPost(node, req.url, payload, res);
     }
 
@@ -331,6 +354,76 @@ function handleAudit(node, req, res) {
     return;
   }
 
+  // The browser wallet, and the crypto it needs.
+  //
+  // Served from THIS node out of node_modules rather than pulled from a CDN.
+  // A page that mints somebody's private key must not fetch its own maths from
+  // a third party who can change it without telling anyone; self-hosting also
+  // means the page works with no internet beyond the node itself.
+  if (path === '/molibra/wallet.js') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'wallet.js');
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path.startsWith('/molibra/vendor/')) {
+    const rest = path.slice('/molibra/vendor/'.length);
+    const slash = rest.indexOf('/');
+    const pkg = slash === -1 ? rest : rest.slice(0, slash);
+    let file = slash === -1 ? '' : rest.slice(slash + 1);
+    // Only these two packages, only their ESM builds, and no traversal out of
+    // them. An open static route rooted in node_modules is a file-read
+    // primitive wearing a helpful hat.
+    if (!['hashes', 'curves'].includes(pkg) || !file || file.includes('..') || file.includes('\\')) {
+      return json(res, 404, { error: 'not found' });
+    }
+    if (!file.endsWith('.js')) file += '.js'; // bare specifiers carry no extension
+    if (!/^[A-Za-z0-9._\/-]+$/.test(file)) return json(res, 404, { error: 'not found' });
+    const base = join(dirname(fileURLToPath(import.meta.url)), '..',
+      'node_modules', '@noble', pkg, 'esm');
+    const target = join(base, file);
+    if (!target.startsWith(base)) return json(res, 404, { error: 'not found' });
+    try {
+      const body = readFileSync(target, 'utf8');
+      res.writeHead(200, {
+        'Content-Type': 'text/javascript; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600',
+      });
+      res.end(body);
+    } catch {
+      return json(res, 404, { error: 'not found' });
+    }
+    return;
+  }
+
+  if (path === '/molibra/chalk') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'chalk.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path === '/molibra/issuer') {
+    return json(res, 200, node.issuer
+      ? node.issuer.describe()
+      : { error: 'no issuer enabled on this node' });
+  }
+
+  // A puzzle to solve, bound to the address that will receive the grant.
+  // The refusal - "you already hold enough to speak" - is returned as a
+  // reason, so the page can say which rule stopped it rather than shrug.
+  if (path === '/molibra/earn') {
+    if (!node.issuer) return json(res, 400, { error: 'no issuer enabled on this node' });
+    const address = url.searchParams.get('address');
+    if (!address) return json(res, 400, { error: 'address is required' });
+    try {
+      return json(res, 200, node.issuer.challengeFor(address));
+    } catch (error) {
+      return json(res, 400, { error: error.message });
+    }
+  }
+
   if (path === '/molibra/challenge') {
     const nonce = '0x' + randomBytes(16).toString('hex');
     const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -345,17 +438,56 @@ function handleAudit(node, req, res) {
     // they are looking at one-person-one-voice or at weight bought with money.
     const describe = (t) => ({
       ...t,
-      remaining: (BigInt(t.supply) - BigInt(t.burned ?? 0)).toString(),
-      expressionsCast: String(t.burned ?? '0'),
+      // minted - remaining is the burn, and the burn is the tally. Under
+      // `weighted` the units burned and the number of expressions differ, so
+      // both are served: never let a reader infer a count from an amount.
+      remaining: (BigInt(t.minted) - BigInt(t.burned ?? 0)).toString(),
+      unitsBurned: String(t.burned ?? '0'),
+      expressionsCast: String(t.expressions ?? '0'),
+      supplyPolicy: BigInt(t.maxSupply) === 0n
+        ? 'uncapped: minted on demand, because questions never stop being created'
+        : `capped at ${t.maxSupply}`,
+      distribution: t.issuable
+        ? 'issuable by the creator, one-directional: a holder can never pass a unit on'
+        : 'fixed at creation',
+      // The purpose is served in the vocabulary of the mark it is scoped by,
+      // because a reader in Brazil needs to know whether they are looking at
+      // aferição de mercado or at matéria eleitoral, and those are the words
+      // the rule uses.
+      purposeLabel: PURPOSE_LABELS[t.purpose] ?? t.purpose,
       warnings: [
         t.voteMode === 'weighted'
           ? 'WEIGHTED: one unit burned is one unit of weight. This is '
             + 'plutocratic by construction.'
           : null,
         t.electoral
-          ? 'ELECTORAL SUBJECT: this token can never be made transferable.'
+          ? 'MATÉRIA ELEITORAL: this token can never be made transferable, and '
+            + 'a question on electoral preference carries its own registration '
+            + 'duties that this chain does not discharge.'
+          : null,
+        // Said plainly on every non-electoral token, because the whole point
+        // of declaring a purpose is that the declaration constrains use.
+        !t.electoral
+          ? `DECLARED PURPOSE: ${PURPOSE_LABELS[t.purpose] ?? t.purpose}. This is `
+            + 'not an electoral poll and must not be presented or used as a '
+            + 'measure of electoral preference.'
+          : null,
+        // The naming rule, served with the record. Under the TSE resolutions
+        // an enquete and a pesquisa are regulated objects; this is neither,
+        // and the words must not be used for it anywhere.
+        t.purpose === 'purchase'
+          ? 'EXPRESSÃO PÚBLICA DE COMPRA: a purchase, made public by the person '
+            + 'who made it. It is NOT an enquete and NOT a pesquisa, and must '
+            + 'not be called or presented as either.'
           : null,
         t.transferable ? 'TRANSFERABLE: this token has a market.' : null,
+        // Dilution only bites where holdings buy weight. Under single,
+        // quantum and capped a wallet's voice is the same size however much
+        // it holds, so uncapped issuance dilutes nothing.
+        t.issuable && t.voteMode === 'weighted'
+          ? 'UNCAPPED WEIGHT: the creator may issue more units at will, and in '
+            + 'this mode units are weight - every holder can be diluted at any moment.'
+          : null,
       ].filter(Boolean),
     });
 
@@ -381,15 +513,20 @@ function handleAudit(node, req, res) {
   }
 
   if (path === '/molibra/blocks') {
-    const from = Number(url.searchParams.get('from') ?? 0);
-    const to = Math.min(Number(url.searchParams.get('to') ?? chain.height), Number(chain.height));
+    const from = Math.max(0, Number(url.searchParams.get('from') ?? 0));
+    const asked = Math.min(Number(url.searchParams.get('to') ?? chain.height), Number(chain.height));
+    // Capped, and the cap is reported rather than silently applied - a caller
+    // that does not notice a truncated range syncs a partial chain and thinks
+    // it is done. `truncated` plus the real `to` is what lets syncFrom page.
+    const to = Math.min(asked, from + MAX_BLOCK_RANGE - 1);
     const decoded = url.searchParams.get('decoded') === '1';
     const blocks = [];
-    for (let i = Math.max(0, from); i <= to; i++) {
+    for (let i = from; i <= to; i++) {
       const block = chain.blockByNumber(i);
+      if (!block) break;
       blocks.push(decoded ? blockForExplorer(chain, block) : serializeBlock(block));
     }
-    return json(res, 200, { from, to, blocks });
+    return json(res, 200, { from, to, truncated: to < asked, height: Number(chain.height), blocks });
   }
 
   if (path.startsWith('/molibra/block/')) {
@@ -474,6 +611,20 @@ function handlePeerPost(node, path, payload, res) {
       if (!node.treasury) throw new Error('treasury not enabled on this node');
       const verified = verifyLinkingProof(node, payload.code ?? payload);
       return json(res, 200, { ok: true, claim: node.treasury.claim(verified) });
+    }
+    // Redeem a solved puzzle. This is the button on the chalk page.
+    if (path === '/molibra/earn') {
+      if (!node.issuer) throw new Error('no issuer enabled on this node');
+      return json(res, 200, { ok: true, grant: node.issuer.redeem(payload) });
+    }
+    // A grant against a linking proof. This is the button IN THE APP - the app
+    // never solves a puzzle, because mining inside a mobile app is banned by
+    // Apple 3.1.5(ii) and by Google Play, and the store position is what the
+    // whole compliance argument rests on.
+    if (path === '/molibra/grant') {
+      if (!node.issuer) throw new Error('no issuer enabled on this node');
+      const verified = verifyLinkingProof(node, payload.code ?? payload);
+      return json(res, 200, { ok: true, grant: node.issuer.grantForProof(verified) });
     }
     if (path === '/molibra/verify-proof') {
       return json(res, 200, { ok: true, proof: verifyLinkingProof(node, payload.code ?? payload) });

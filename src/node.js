@@ -12,10 +12,15 @@ import { startRpcServer } from './rpc.js';
 import { serializeBlock, mineHeader, blockHash } from './block.js';
 import { normalizeAddress } from './crypto.js';
 import { Treasury } from './faucet.js';
+import { Issuer } from './issuer.js';
 
 export class Node {
-  constructor({ genesisPath, dataDir, miner = null, peers = [], minGasPrice = 1000000000n }) {
-    this.chain = new Chain(Chain.loadGenesis(genesisPath), dataDir).init();
+  constructor({ genesisPath, dataDir, miner = null, peers = [], minGasPrice = 1000000000n,
+                limits = {} }) {
+    // The node's fee floor is the chain's mempool policy; passing it in one
+    // place stops the two disagreeing about what a cheap transaction is.
+    this.chain = new Chain(Chain.loadGenesis(genesisPath), dataDir,
+      { minGasPrice, ...limits }).init();
     this.miner = miner ? normalizeAddress(miner) : null;
     this.peers = new Set(peers.filter(Boolean));
     this.minGasPrice = BigInt(minGasPrice);
@@ -24,12 +29,24 @@ export class Node {
     this.challenges = new Map(); // nonce -> expiry, for wallet linking proofs
     this.server = null;
     this.treasury = null;
+    this.issuer = null;
     this._stopSignal = { stop: false };
   }
 
   enableTreasury(options = {}) {
     this.treasury = new Treasury(this, options);
     return this.treasury;
+  }
+
+  /**
+   * Run the chalkboard issuer: the publisher's side of "publisher pays,
+   * speaker earns". Needs the token's CREATOR key, because an ISSUE is only
+   * valid from the creator - that one-directionality is what keeps GIZ
+   * marketless.
+   */
+  enableIssuer(options = {}) {
+    this.issuer = new Issuer(this, options);
+    return this.issuer;
   }
 
   async start({ host = '127.0.0.1', port = 8545 } = {}) {
@@ -167,19 +184,41 @@ export class Node {
     const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(5000) })).json();
     const peerHeight = Number(head.header.number);
 
-    // Walk back far enough to cover a fork, not just the gap in height.
-    const from = 0;
-    const payload = await (await fetch(`${base}/molibra/blocks?from=${from}&to=${peerHeight}`, {
-      signal: AbortSignal.timeout(30000),
-    })).json();
-
+    // Walk back far enough to cover a fork, not just the gap in height, and
+    // PAGE through it. The peer caps how many blocks one response may carry,
+    // so a single request is not a sync - it is the first page of one. Asking
+    // for a whole chain in one response was also a way to make a node build a
+    // multi-megabyte JSON string on demand, which is a favour no public
+    // endpoint should do a stranger.
     const beforeHead = this.chain.head.hash;
     let accepted = 0;
-    for (const serialized of payload.blocks) {
-      if (Number(serialized.header.number) === 0) continue; // genesis is ours already
-      if (this.chain.blockByHash(serialized.hash)) continue;
-      const result = this.chain.appendSerialized(serialized);
-      if (result.accepted) accepted++;
+    let cursor = 0;
+    for (let page = 0; cursor <= peerHeight && page < 10000; page++) {
+      const payload = await (await fetch(`${base}/molibra/blocks?from=${cursor}&to=${peerHeight}`, {
+        signal: AbortSignal.timeout(30000),
+      })).json();
+      if (!payload.blocks?.length) break;
+      let sinceYield = 0;
+      for (const serialized of payload.blocks) {
+        if (Number(serialized.header.number) === 0) continue; // genesis is ours already
+        if (this.chain.blockByHash(serialized.hash)) continue;
+        const result = this.chain.appendSerialized(serialized);
+        if (result.accepted) accepted++;
+        // Yield periodically. Verifying a block re-executes every transaction
+        // in it, and doing a whole page without pause means the node answers
+        // nothing at all while it catches up - the same lesson as the mining
+        // loop, which grinds in bounded slices for exactly this reason. A
+        // node that goes silent whenever it syncs looks down to every wallet
+        // pointed at it.
+        if (++sinceYield >= 32) {
+          sinceYield = 0;
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      }
+      const last = Number(payload.to ?? cursor);
+      if (last < cursor) break; // no progress; stop rather than spin
+      cursor = last + 1;
+      if (!payload.truncated) break;
     }
     this.lastSyncReorg = this.chain.head.hash !== beforeHead ? this.chain.lastReorg : null;
     return accepted;

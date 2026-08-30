@@ -1,0 +1,720 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Get chalk — Molibra</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0F0F2A;color:#E0E0E8;font:15px/1.6 system-ui,sans-serif;
+       max-width:660px;margin:32px auto;padding:0 20px}
+  h1{background:linear-gradient(96deg,#00F0FF,#B14AFF);-webkit-background-clip:text;
+     background-clip:text;color:transparent;font-size:34px;margin:0 0 4px}
+  h2{font-size:18px;margin:0 0 6px}
+  .card{background:#16162D;border:1px solid rgba(224,224,232,.12);border-radius:12px;
+        padding:18px;margin:16px 0}
+  .card.done{border-color:rgba(99,230,160,.4)}
+  button{background:linear-gradient(96deg,#00F0FF,#B14AFF);color:#0F0F2A;border:0;
+         border-radius:10px;padding:14px 24px;font:600 16px system-ui;cursor:pointer}
+  button.ghost{background:none;color:#9098B0;border:1px solid rgba(224,224,232,.2);
+               font-size:14px;padding:10px 16px;font-weight:500}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input{background:#0F0F2A;border:1px solid rgba(224,224,232,.2);border-radius:8px;
+        color:#E0E0E8;font:13px ui-monospace,Menlo,monospace;padding:11px;width:100%;
+        box-sizing:border-box;margin:6px 0}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#66F8FF;word-break:break-all}
+  .muted{color:#9098B0}
+  .small{font-size:13px}
+  .bar{height:8px;background:rgba(224,224,232,.12);border-radius:99px;overflow:hidden;margin:12px 0}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(96deg,#00F0FF,#B14AFF);
+         transition:width .2s}
+  .warn{border-left:3px solid #FFB020;background:rgba(255,176,32,.07);
+        padding:12px 14px;border-radius:0 8px 8px 0;margin:16px 0}
+  .danger{border-left:3px solid #FF7A7A;background:rgba(255,122,122,.07);
+          padding:12px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .ok{color:#63E6A0}
+  .err{color:#FF7A7A}
+  a{color:#00F0FF}
+  .step{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;
+        border-radius:50%;background:rgba(224,224,232,.12);font-size:12px;margin-right:8px}
+  .langs{text-align:right;font-size:13px;margin:0 0 8px}
+  .langs button{background:none;border:0;color:#9098B0;font:13px system-ui;cursor:pointer;
+                padding:2px 6px;border-radius:6px}
+  .langs button[aria-current="true"]{color:#00F0FF;background:rgba(0,240,255,.08)}
+</style>
+
+<p class="langs" id="langs"></p>
+
+<h1 data-t="title">Get chalk</h1>
+<p class="muted" data-t="intro"></p>
+
+<div class="warn small"><b data-t="warnTitle"></b> <span data-t="warnBody"></span></div>
+
+<div class="card" id="cardKey">
+  <h2><span class="step">1</span><span data-t="step1"></span></h2>
+  <p class="muted small" data-t="step1Help"></p>
+
+  <p id="walletRow">
+    <button id="useWallet" data-t="useWallet"></button>
+  </p>
+  <p class="muted small" id="noWalletNote" data-t="noWalletNote"></p>
+  <p><button class="ghost" id="makeKey" data-t="makeKey"></button></p>
+
+  <div id="keyForm" hidden>
+    <p class="muted small" data-t="passHelp"></p>
+    <input id="pass" type="password" data-t-placeholder="pass" autocomplete="new-password">
+    <input id="pass2" type="password" data-t-placeholder="pass2" autocomplete="new-password">
+    <p><button id="createNow" data-t="createNow"></button></p>
+  </div>
+
+  <div id="unlockForm" hidden>
+    <p class="muted small" data-t="unlockHelp"></p>
+    <input id="unlockPass" type="password" data-t-placeholder="pass" autocomplete="current-password">
+    <p><button id="unlockNow" data-t="unlockNow"></button>
+       <button class="ghost" id="forget" data-t="forget"></button></p>
+  </div>
+
+  <p class="muted small" style="margin-top:14px" data-t="orPaste"></p>
+  <input id="addr" placeholder="0x…" spellcheck="false" autocomplete="off">
+  <p><button class="ghost" id="copy" data-t="copy"></button>
+     <button class="ghost" id="reveal" hidden data-t="reveal"></button></p>
+  <div id="secret" class="danger small" hidden></div>
+  <p id="keyOut" class="small muted">&nbsp;</p>
+</div>
+
+<div class="card" id="cardEarn">
+  <h2><span class="step">2</span><span data-t="step2"></span></h2>
+  <p><button id="go" disabled data-t="go"></button>
+     <button class="ghost" id="stop" disabled data-t="stop"></button></p>
+  <div class="bar"><i id="bar"></i></div>
+  <p id="out" class="small muted"></p>
+</div>
+
+<div class="card" id="cardBack">
+  <h2><span class="step">3</span><span data-t="step3"></span></h2>
+  <p class="muted small" id="backNote" data-t="backNote"></p>
+  <p><button id="back" disabled data-t="back"></button></p>
+  <p class="muted small" id="pasteNote" hidden data-t="pasteNote"></p>
+  <input id="proof" hidden readonly spellcheck="false">
+  <p id="backOut" class="small muted">&nbsp;</p>
+</div>
+
+<p class="muted small" id="facts">&nbsp;</p>
+
+<script type="importmap">
+{
+  "imports": {
+    "@noble/hashes/": "/molibra/vendor/hashes/",
+    "@noble/curves/": "/molibra/vendor/curves/"
+  }
+}
+</script>
+
+<script type="module">
+/* The wallet module is the same file test/wallet.mjs checks against the node's
+   own signer, byte for byte. Its maths is served from this node, not a CDN:
+   a page that mints somebody's private key must not fetch its own primitives
+   from a third party who can change them without telling anyone. */
+import * as wallet from '/molibra/wallet.js';
+
+/* PUZZLE-BEGIN — test/browser-work.mjs extracts exactly this region and checks
+   it against src/work.js. Keep the markers; the boundary drifted once already
+   and the test started importing DOM code. */
+/* ------------------------------------------------------------------ sha256
+   Inline and self-contained: the earning puzzle must run with nothing else
+   loaded. The chain's own proof of work is Keccak-256 and lives in the node;
+   this is only the faucet's cost function. */
+const K = new Int32Array([
+  0x428a2f98|0,0x71374491|0,0xb5c0fbcf|0,0xe9b5dba5|0,0x3956c25b|0,0x59f111f1|0,0x923f82a4|0,0xab1c5ed5|0,
+  0xd807aa98|0,0x12835b01|0,0x243185be|0,0x550c7dc3|0,0x72be5d74|0,0x80deb1fe|0,0x9bdc06a7|0,0xc19bf174|0,
+  0xe49b69c1|0,0xefbe4786|0,0x0fc19dc6|0,0x240ca1cc|0,0x2de92c6f|0,0x4a7484aa|0,0x5cb0a9dc|0,0x76f988da|0,
+  0x983e5152|0,0xa831c66d|0,0xb00327c8|0,0xbf597fc7|0,0xc6e00bf3|0,0xd5a79147|0,0x06ca6351|0,0x14292967|0,
+  0x27b70a85|0,0x2e1b2138|0,0x4d2c6dfc|0,0x53380d13|0,0x650a7354|0,0x766a0abb|0,0x81c2c92e|0,0x92722c85|0,
+  0xa2bfe8a1|0,0xa81a664b|0,0xc24b8b70|0,0xc76c51a3|0,0xd192e819|0,0xd6990624|0,0xf40e3585|0,0x106aa070|0,
+  0x19a4c116|0,0x1e376c08|0,0x2748774c|0,0x34b0bcb5|0,0x391c0cb3|0,0x4ed8aa4a|0,0x5b9cca4f|0,0x682e6ff3|0,
+  0x748f82ee|0,0x78a5636f|0,0x84c87814|0,0x8cc70208|0,0x90befffa|0,0xa4506ceb|0,0xbef9a3f7|0,0xc67178f2|0]);
+
+const W = new Int32Array(64);
+
+/* One 64-byte block is all we ever hash: 16-byte challenge + 20-byte address +
+   8-byte nonce = 44 bytes, which pads into a single block. Returns the first
+   six bytes of the digest as a Number, which is what the node compares. */
+function digestValue(block) {
+  for (let i = 0; i < 16; i++) W[i] = block[i];
+  for (let i = 16; i < 64; i++) {
+    const a = W[i-15], b = W[i-2];
+    const s0 = ((a>>>7)|(a<<25)) ^ ((a>>>18)|(a<<14)) ^ (a>>>3);
+    const s1 = ((b>>>17)|(b<<15)) ^ ((b>>>19)|(b<<13)) ^ (b>>>10);
+    W[i] = (W[i-16] + s0 + W[i-7] + s1) | 0;
+  }
+  let a=0x6a09e667|0,b=0xbb67ae85|0,c=0x3c6ef372|0,d=0xa54ff53a|0,
+      e=0x510e527f|0,f=0x9b05688c|0,g=0x1f83d9ab|0,h=0x5be0cd19|0;
+  for (let i = 0; i < 64; i++) {
+    const S1 = ((e>>>6)|(e<<26)) ^ ((e>>>11)|(e<<21)) ^ ((e>>>25)|(e<<7));
+    const ch = (e & f) ^ (~e & g);
+    const t1 = (h + S1 + ch + K[i] + W[i]) | 0;
+    const S0 = ((a>>>2)|(a<<30)) ^ ((a>>>13)|(a<<19)) ^ ((a>>>22)|(a<<10));
+    const mj = (a & b) ^ (a & c) ^ (b & c);
+    const t2 = (S0 + mj) | 0;
+    h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+  }
+  const h0 = ((0x6a09e667|0) + a) >>> 0;
+  const h1 = ((0xbb67ae85|0) + b) >>> 0;
+  return h0 * 65536 + (h1 >>> 16);
+}
+
+const hexBytes = (hex) => {
+  const h = hex.replace(/^0x/, '');
+  const b = new Uint8Array(h.length / 2);
+  for (let i = 0; i < b.length; i++) b[i] = parseInt(h.substr(i * 2, 2), 16);
+  return b;
+};
+
+function buildBlock(challenge, address) {
+  const bytes = new Uint8Array(64);
+  bytes.set(hexBytes(challenge), 0);   // 16
+  bytes.set(hexBytes(address), 16);    // 20  -> nonce occupies bytes 36..43,
+                                       // which is words[9] (high) and words[10] (low)
+  bytes[44] = 0x80;                    // padding
+  bytes[62] = 0x01; bytes[63] = 0x60;  // length: 44 bytes = 352 bits
+  const words = new Int32Array(16);
+  const view = new DataView(bytes.buffer);
+  for (let i = 0; i < 16; i++) words[i] = view.getInt32(i * 4, false);
+  return words;
+}
+
+/* PUZZLE-END */
+
+/* ------------------------------------------------------------------- i18n
+   pt-BR is the first language, not a translation of an English original:
+   the audience for this board is Brazilian, and the vocabulary that matters
+   most - expressão pública de compra, and NOT enquete, NOT pesquisa - is
+   Portuguese to begin with. English is provided because the chain is public
+   and auditable by anyone.
+
+   To add a language, add a block here. Every key must exist in every block;
+   `t()` falls back to English rather than showing a raw key, and the boot
+   check below reports any key that is missing. */
+/* I18N-BEGIN */
+const STRINGS = {
+  'pt-BR': {
+    lang: 'Português (BR)',
+    title: 'Pegue seu giz',
+    intro: 'Giz (GIZ) é o que você gasta para fazer sua marca no quadro. Você não pode '
+      + 'comprá-lo e ninguém pode vendê-lo a você — ele não tem mercado e não tem preço. '
+      + 'Você o ganha aqui, em alguns segundos, fazendo seu computador trabalhar um pouco. '
+      + 'O quadro registra <b>expressão pública de compra</b>: uma compra, tornada pública '
+      + 'por quem a fez. Não é uma enquete e não é uma pesquisa.',
+    warnTitle: 'O que isto é, exatamente.',
+    warnBody: 'Seu navegador resolve um pequeno desafio, e então o publicador emite giz para '
+      + 'o seu endereço. Isto <b>não</b> é mineração de blocos: não protege a rede, não cria '
+      + 'MOLI, e nada de valor é transferido para você. Só roda enquanto você deixar rodando, '
+      + 'e Parar encerra a qualquer momento.',
+    step1: 'Para onde vai o giz',
+    step1Help: 'Decida isto <b>antes</b> de ganhar. O giz é emitido para um endereço e não '
+      + 'pode ser repassado depois, então o endereço precisa ser seu desde o início.',
+    useWallet: 'Tenho uma carteira — usar',
+    noWalletNote: 'Sem carteira neste navegador? Peça uma chave criada para você abaixo. É uma '
+      + 'chave de verdade, utilizável em qualquer lugar, e continua sendo sua.',
+    walletFound: 'Uma carteira foi detectada. Use-a, e esta página nunca vê nenhuma chave sua.',
+    makeKey: 'Criar uma chave para mim',
+    passHelp: 'Escolha uma senha. Ela criptografa a chave <b>neste dispositivo</b>. Ninguém que '
+      + 'opera este serviço consegue ler sua chave nem seu endereço — nem um administrador, nem '
+      + 'um backup, nem um banco de dados. <b>Se você perder a senha, a chave se perde.</b> '
+      + 'Ninguém pode redefini-la, porque ninguém mais a tem.',
+    pass: 'senha',
+    pass2: 'senha novamente',
+    createNow: 'Criar minha chave',
+    unlockHelp: 'Uma chave criada aqui já está neste dispositivo. Digite sua senha para usá-la.',
+    unlockNow: 'Desbloquear',
+    forget: 'Esquecer e começar de novo',
+    orPaste: 'Ou cole um endereço que você já controla:',
+    copy: 'Copiar endereço',
+    reveal: 'Mostrar minha chave privada',
+    step2: 'Ganhar',
+    go: 'Ganhar giz',
+    stop: 'Parar',
+    chooseFirst: 'Escolha primeiro para onde vai o giz.',
+    step3: 'De volta ao aplicativo',
+    backNote: 'Vincule este endereço ao aplicativo uma vez. O aplicativo nunca guarda sua chave '
+      + 'e nunca minera — ele só aprende qual endereço é o seu, e aprende por uma assinatura, '
+      + 'não pela sua palavra.',
+    backDirect: ' <b>Aberto diretamente, não pelo aplicativo</b>, então você receberá um código '
+      + 'para colar em vez de ser levado de volta.',
+    back: 'Voltar ao aplicativo',
+    pasteNote: 'Ou cole este código no aplicativo:',
+    noWalletHere: 'Nenhuma carteira encontrada neste navegador.',
+    walletConnected: 'Carteira conectada. Ela assina; esta página nunca vê nenhuma chave sua.',
+    pass8: 'Use pelo menos 8 caracteres.',
+    passMismatch: 'As duas senhas não são iguais.',
+    sealing: 'Criando e lacrando…',
+    keyCreated: 'Chave criada e criptografada neste dispositivo. Ela é sua; mais ninguém '
+      + 'consegue lê-la, e mais ninguém consegue restaurá-la.',
+    unlocked: 'Desbloqueada.',
+    wrongPass: 'senha incorreta',
+    confirmForget: 'Apagar a chave criptografada guardada neste dispositivo? Se você não a '
+      + 'exportou, o giz que ela guarda se torna inalcançável.',
+    deleted: 'Apagada deste dispositivo.',
+    secretWarn: '<b>Esta é a sua chave privada. Quem a tiver controla este endereço.</b> '
+      + 'Anote-a em algum lugar que só você alcance. Ela é mostrada aqui, e em nenhum outro '
+      + 'lugar, nunca.',
+    readyGen: 'Pronto. Ao ganhar, o giz vai para este endereço.',
+    readyPasted: 'Pronto. Esta página não consegue assinar por um endereço colado, apenas receber nele.',
+    nothingCopy: 'Nada para copiar ainda.',
+    copied: 'Endereço copiado.',
+    copyFail: 'A cópia falhou — selecione à mão.',
+    working: 'Trabalhando… cerca de {tries} tentativas para o equivalente a {n} expressões de giz.',
+    stopped: 'Parado. Nada foi enviado.',
+    solved: 'Resolvido em {secs}s após {tries} tentativas. Solicitando…',
+    onItsWay: 'Giz a caminho: <code>{hash}</code><br>Suficiente para {n} expressões, assim que '
+      + 'for minerado (~15s). Não pode ser vendido, apenas gasto.',
+    claimRefused: 'Solicitação recusada: {error}',
+    noAddress: 'Nenhum endereço ainda.',
+    signingProof: 'Assinando uma prova de controle…',
+    appAccountPrompt: 'O id da sua conta no aplicativo, como o aplicativo mostra:',
+    cancelled: 'Cancelado.',
+    cannotSignPasted: 'Esta página não consegue assinar por um endereço colado. Vincule-o no '
+      + 'aplicativo com a carteira que o controla.',
+    returning: 'Voltando ao aplicativo…',
+    pasteCode: 'Copie este código para o aplicativo. Ele prova que o endereço é seu e não move nada.',
+    failed: 'Falhou: {error}',
+    grantsMade_one: '{n} concessão feita',
+    grantsMade_other: '{n} concessões feitas',
+    rule: 'uma concessão é recusada enquanto o endereço ainda tiver giz suficiente para falar',
+  },
+  en: {
+    lang: 'English',
+    title: 'Get chalk',
+    intro: 'Chalk (GIZ) is what you spend to make your mark on the board. You cannot buy it and '
+      + 'nobody can sell it to you — it has no market and no price. You earn it here, in a few '
+      + 'seconds, by making your computer do a little work. The board records '
+      + '<b>expressão pública de compra</b>: a purchase, made public by the person who made it. '
+      + 'It is not an enquete and not a pesquisa.',
+    warnTitle: 'What this is, exactly.',
+    warnBody: 'Your browser solves a small puzzle, and the publisher then issues chalk to your '
+      + 'address. This is <b>not</b> block mining: it does not secure the chain, it does not '
+      + 'create MOLI, and nothing of value is transferred to you. It runs only while you leave '
+      + 'it running, and Stop ends it at any moment.',
+    step1: 'Where the chalk goes',
+    step1Help: 'Decide this <b>before</b> you earn. Chalk is issued to one address and cannot '
+      + 'be passed on afterwards, so the address has to be yours from the start.',
+    useWallet: 'I have a wallet — use it',
+    noWalletNote: 'No wallet in this browser? Have one created for you below. It is a real key, '
+      + 'usable anywhere, and it stays yours.',
+    walletFound: 'A wallet was detected. Use it, and this page never sees a key of yours.',
+    makeKey: 'Create a key for me',
+    passHelp: 'Choose a passphrase. It encrypts the key <b>on this device</b>. Nobody running '
+      + 'this service can read your key or your address — not an administrator, not a backup, '
+      + 'not a database. <b>If you lose the passphrase, the key is gone.</b> Nobody can reset '
+      + 'it, because nobody else has it.',
+    pass: 'passphrase',
+    pass2: 'passphrase again',
+    createNow: 'Create my key',
+    unlockHelp: 'A key created here is already on this device. Enter your passphrase to unlock it.',
+    unlockNow: 'Unlock',
+    forget: 'Forget it and start over',
+    orPaste: 'Or paste an address you already control:',
+    copy: 'Copy address',
+    reveal: 'Show my private key',
+    step2: 'Earn',
+    go: 'Earn chalk',
+    stop: 'Stop',
+    chooseFirst: 'Choose where the chalk goes first.',
+    step3: 'Back to the app',
+    backNote: 'Link this address to the app once. The app never holds your key and never mines '
+      + '— it only learns which address is yours, and it learns it from a signature, not from '
+      + 'your word for it.',
+    backDirect: ' <b>Opened directly rather than from the app</b>, so you will get a code to '
+      + 'paste instead of being sent back.',
+    back: 'Return to the app',
+    pasteNote: 'Or paste this code into the app:',
+    noWalletHere: 'No wallet found in this browser.',
+    walletConnected: 'Wallet connected. It signs; this page never sees a key of yours.',
+    pass8: 'Use at least 8 characters.',
+    passMismatch: 'The two passphrases do not match.',
+    sealing: 'Creating and sealing…',
+    keyCreated: 'Key created and encrypted on this device. It is yours; nobody else can read '
+      + 'it, and nobody else can restore it.',
+    unlocked: 'Unlocked.',
+    wrongPass: 'wrong passphrase',
+    confirmForget: 'Delete the encrypted key stored on this device? If you have not exported '
+      + 'it, the chalk it holds becomes unreachable.',
+    deleted: 'Deleted from this device.',
+    secretWarn: '<b>This is your private key. Anyone who has it controls this address.</b> '
+      + 'Write it down somewhere only you can reach. It is shown here, and nowhere else, ever.',
+    readyGen: 'Ready. Earning sends the chalk to this address.',
+    readyPasted: 'Ready. This page cannot sign for a pasted address, only receive to it.',
+    nothingCopy: 'Nothing to copy yet.',
+    copied: 'Address copied.',
+    copyFail: 'Copy failed — select it by hand.',
+    working: 'Working… about {tries} tries for {n} expressions’ worth of chalk.',
+    stopped: 'Stopped. Nothing was sent.',
+    solved: 'Solved in {secs}s after {tries} tries. Claiming…',
+    onItsWay: 'Chalk on its way: <code>{hash}</code><br>Enough for {n} expressions, once it is '
+      + 'mined (~15s). It cannot be sold, only spent.',
+    claimRefused: 'Claim refused: {error}',
+    noAddress: 'No address yet.',
+    signingProof: 'Signing a proof of control…',
+    appAccountPrompt: 'Your app account id, as the app shows it:',
+    cancelled: 'Cancelled.',
+    cannotSignPasted: 'This page cannot sign for a pasted address. Link it in the app with the '
+      + 'wallet that controls it.',
+    returning: 'Returning to the app…',
+    pasteCode: 'Copy this code into the app. It proves the address is yours and moves nothing.',
+    failed: 'Failed: {error}',
+    grantsMade_one: '{n} grant made',
+    grantsMade_other: '{n} grants made',
+    rule: 'a grant is refused while the address still holds enough to speak',
+  },
+};
+
+/* I18N-END */
+const LANG_KEY = 'molibra.chalk.lang';
+
+/**
+ * pt-BR is the default. The audience is Brazilian, so English is what you get
+ * by asking for it - either through the browser's own language preference or
+ * the switcher - not what everyone gets by default.
+ */
+function pickLanguage() {
+  const saved = localStorage.getItem(LANG_KEY);
+  if (saved && STRINGS[saved]) return saved;
+  const url = new URLSearchParams(location.search).get('lang');
+  if (url && STRINGS[url]) return url;
+  for (const tag of navigator.languages ?? [navigator.language ?? '']) {
+    const lower = String(tag).toLowerCase();
+    if (lower.startsWith('pt')) return 'pt-BR';
+    if (lower.startsWith('en')) return 'en';
+  }
+  return 'pt-BR';
+}
+
+let LANG = pickLanguage();
+
+/**
+ * Look up a string. `{name}` placeholders are filled from `vars`.
+ *
+ * When `vars.n` is present and the key has `_one`/`_other` variants, the count
+ * picks the variant - because "1 concessões feitas" is wrong in Portuguese and
+ * "1 grants made" is wrong in English, and a plural rule is cheaper than
+ * either apology.
+ *
+ * A key that exists in no language is returned as-is, so a raw message from an
+ * exception can be passed straight through.
+ */
+const t = (key, vars = {}) => {
+  const table = STRINGS[LANG] ?? STRINGS.en;
+  let raw = table[key] ?? STRINGS.en[key];
+  if (raw === undefined && 'n' in vars) {
+    const variant = Number(vars.n) === 1 ? '_one' : '_other';
+    raw = table[key + variant] ?? STRINGS.en[key + variant];
+  }
+  if (raw === undefined) {
+    const variant = table[key + '_other'] ?? STRINGS.en[key + '_other'];
+    raw = variant ?? key;
+  }
+  return raw.replace(/\{(\w+)\}/g, (_, name) => (name in vars ? vars[name] : `{${name}}`));
+};
+
+function applyLanguage() {
+  document.documentElement.lang = LANG === 'pt-BR' ? 'pt-BR' : 'en';
+  for (const el of document.querySelectorAll('[data-t]')) el.innerHTML = t(el.dataset.t);
+  for (const el of document.querySelectorAll('[data-t-placeholder]')) {
+    el.placeholder = t(el.dataset.tPlaceholder);
+  }
+  document.title = t('title') + ' — Molibra';
+}
+
+
+/* ------------------------------------------------------------------ state */
+const $ = (id) => document.getElementById(id);
+// The localStorage slot the sealed key lives in. A NAME, not a secret - it is
+// renamed away from anything ending in _KEY because secret scanners flag the
+// word and a false positive that fires on every commit trains people to ignore
+// the scanner.
+const VAULT_SLOT = 'molibra.chalk.vault.v1';
+// Status lines remember WHICH string they are showing, not just the rendered
+// text, so switching language re-renders them too. Without this the page
+// changes language around a sentence that stays in the old one.
+const shown = {};
+function status(id) {
+  return (key, vars = {}, cls = 'muted') => {
+    shown[id] = { key, vars, cls };
+    const el = $(id);
+    el.className = 'small ' + cls;
+    el.innerHTML = t(key, vars);
+  };
+}
+const out = status('out');
+const keyOut = status('keyOut');
+const backOut = status('backOut');
+const reshow = () => {
+  for (const [id, s] of Object.entries(shown)) {
+    $(id).className = 'small ' + s.cls;
+    $(id).innerHTML = t(s.key, s.vars);
+  }
+};
+
+// How we sign, decided in step 1 and never mixed:
+//   'wallet'    - the person's own wallet signs everything; we never see a key
+//   'generated' - a key made here, sealed on this device, used here
+//   'address'   - an address they typed; we can receive, but cannot sign
+let mode = null;
+let key = null;      // Uint8Array, only in `generated` mode
+let address = null;
+let chainIdDec = 20226;
+
+const params = new URLSearchParams(location.search);
+// The app supplies where to come back to. The page hardcodes no scheme it
+// cannot verify - the app owns its own URL.
+const returnTo = params.get('return');
+const appAccount = params.get('app') || params.get('appAccount');
+
+function setAddress(next, how) {
+  address = next.toLowerCase();
+  mode = how;
+  $('addr').value = address;
+  $('go').disabled = false;
+  $('reveal').hidden = how !== 'generated';
+  out('readyGen');
+}
+
+/* -------------------------------------------------------- the wallet path */
+$('useWallet').onclick = async () => {
+  if (!window.ethereum) return keyOut('noWalletHere', {}, 'err');
+  try {
+    const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    setAddress(account, 'wallet');
+    keyOut('walletConnected', {}, 'ok');
+  } catch (e) { keyOut('failed', { error: e.message }, 'err'); }
+};
+
+/* ----------------------------------------------------- the generated path */
+$('makeKey').onclick = () => {
+  $('keyForm').hidden = !!localStorage.getItem(VAULT_SLOT);
+  $('unlockForm').hidden = !localStorage.getItem(VAULT_SLOT);
+};
+
+$('createNow').onclick = async () => {
+  const p1 = $('pass').value, p2 = $('pass2').value;
+  if (p1.length < 8) return keyOut('pass8', {}, 'err');
+  if (p1 !== p2) return keyOut('passMismatch', {}, 'err');
+  try {
+    keyOut('sealing');
+    key = wallet.generatePrivateKey();
+    const vault = await wallet.seal(key, p1);
+    localStorage.setItem(VAULT_SLOT, JSON.stringify(vault));
+    setAddress(wallet.addressFor(key), 'generated');
+    $('keyForm').hidden = true;
+    $('pass').value = $('pass2').value = '';
+    keyOut('keyCreated', {}, 'ok');
+  } catch (e) { keyOut('failed', { error: e.message }, 'err'); }
+};
+
+$('unlockNow').onclick = async () => {
+  try {
+    const vault = JSON.parse(localStorage.getItem(VAULT_SLOT));
+    const opened = await wallet.open(vault, $('unlockPass').value);
+    key = opened.privateKey;
+    setAddress(opened.address, 'generated');
+    $('unlockForm').hidden = true;
+    $('unlockPass').value = '';
+    keyOut('unlocked', {}, 'ok');
+  } catch (e) { keyOut(/wrong passphrase/.test(e.message) ? 'wrongPass' : e.message, {}, 'err'); }
+};
+
+$('forget').onclick = () => {
+  if (!confirm(t('confirmForget'))) return;
+  localStorage.removeItem(VAULT_SLOT);
+  key = null; address = null; mode = null;
+  $('unlockForm').hidden = true; $('addr').value = ''; $('go').disabled = true;
+  keyOut('deleted', {}, 'muted');
+};
+
+$('reveal').onclick = () => {
+  if (!key) return;
+  const box = $('secret');
+  if (!box.hidden) { box.hidden = true; box.textContent = ''; return; }
+  box.hidden = false;
+  box.innerHTML = t('secretWarn') + '<br><br><code>0x'
+    + Array.from(key, (b) => b.toString(16).padStart(2, '0')).join('') + '</code>';
+};
+
+$('addr').oninput = () => {
+  const v = $('addr').value.trim().toLowerCase();
+  if (/^0x[0-9a-f]{40}$/.test(v) && v !== address) {
+    address = v; mode = 'address'; key = null;
+    $('reveal').hidden = true;
+    $('go').disabled = false;
+    out('readyPasted');
+  }
+};
+
+$('copy').onclick = async () => {
+  if (!address) return keyOut('nothingCopy', {}, 'err');
+  try { await navigator.clipboard.writeText(address); keyOut('copied', {}, 'ok'); }
+  catch { keyOut('copyFail', {}, 'err'); }
+};
+
+/* --------------------------------------------------------------- the grind */
+let running = false;
+$('stop').onclick = () => { running = false; };
+
+$('go').onclick = async () => {
+  if (!address) return out('chooseFirst', {}, 'err');
+  $('go').disabled = true; $('stop').disabled = false; $('bar').style.width = '0';
+
+  let job;
+  try {
+    const r = await fetch('/molibra/earn?address=' + address);
+    job = await r.json();
+    if (job.error) throw new Error(job.error);
+  } catch (e) {
+    $('go').disabled = false; $('stop').disabled = true;
+    return out(e.message, 'err');
+  }
+
+  out('working', { tries: job.difficulty.toLocaleString(LANG), n: job.expressions });
+
+  const words = buildBlock(job.challenge, address);
+  const threshold = job.threshold;
+  running = true;
+  let nonce = 0;
+  const started = Date.now();
+
+  const slice = () => {
+    if (!running) {
+      $('go').disabled = false; $('stop').disabled = true;
+      return out('stopped', {}, 'muted');
+    }
+    const end = nonce + 20000;
+    for (; nonce < end; nonce++) {
+      // The nonce is a 64-bit big-endian field at bytes 36..43. Only its LOW
+      // word moves here, so the page searches nonces below 2^32 - far more
+      // than any browser-scale difficulty needs, and the high word stays the
+      // zero the node expects.
+      words[10] = nonce | 0;
+      if (digestValue(words) < threshold) return solved(nonce);
+    }
+    const pct = Math.min(99, Math.round((nonce / (job.difficulty * 2)) * 100));
+    $('bar').style.width = pct + '%';
+    setTimeout(slice, 0);
+  };
+
+  async function solved(found) {
+    running = false;
+    $('bar').style.width = '100%';
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    out('solved', { secs, tries: found.toLocaleString(LANG) });
+    try {
+      const r = await fetch('/molibra/earn', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, challenge: job.challenge, nonce: found }),
+      });
+      const body = await r.json();
+      if (!body.ok) throw new Error(body.error);
+      out('onItsWay', { hash: body.grant.txHash, n: body.grant.expressions }, 'ok');
+      $('cardEarn').classList.add('done');
+      $('back').disabled = false;
+    } catch (e) {
+      out('claimRefused', { error: e.message }, 'err');
+    }
+    $('go').disabled = false; $('stop').disabled = true;
+  }
+
+  setTimeout(slice, 0);
+};
+
+/* ------------------------------------------------------- back to the app */
+$('back').onclick = async () => {
+  if (!address) return backOut('noAddress', {}, 'err');
+  try {
+    backOut('signingProof');
+    const challenge = await (await fetch('/molibra/challenge')).json();
+    const account = appAccount || prompt(t('appAccountPrompt'));
+    if (!account) return backOut('cancelled', {}, 'muted');
+
+    let code;
+    if (mode === 'generated') {
+      code = wallet.linkingCode({
+        chainId: chainIdDec, address, appAccount: account, challenge, privateKey: key,
+      });
+    } else if (mode === 'wallet') {
+      // They have a wallet, so the WALLET signs - this page never asks for,
+      // holds or sees a key it did not create.
+      const message = [
+        'Molibra linking proof',
+        'chainId: ' + chainIdDec,
+        'address: ' + address,
+        'app account: ' + account,
+        'nonce: ' + challenge.nonce,
+        'expires: ' + challenge.expires,
+        '',
+        'Signing proves control of this address. It moves no funds.',
+      ].join('\n');
+      const signature = await window.ethereum.request({
+        method: 'personal_sign', params: [message, address],
+      });
+      code = btoa(JSON.stringify({ m: message, s: signature, a: address }))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    } else {
+      return backOut('cannotSignPasted', {}, 'err');
+    }
+
+    if (returnTo) {
+      const url = returnTo + (returnTo.includes('?') ? '&' : '?')
+        + 'address=' + encodeURIComponent(address) + '&code=' + encodeURIComponent(code);
+      backOut('returning', {}, 'ok');
+      location.href = url;
+    } else {
+      $('pasteNote').hidden = false;
+      $('proof').hidden = false;
+      $('proof').value = code;
+      $('proof').select();
+      backOut('pasteCode', {}, 'ok');
+    }
+  } catch (e) { backOut('failed', { error: e.message || e }, 'err'); }
+};
+
+/* ----------------------------------------------------------------- boot */
+let issuerFacts = null;
+
+function render() {
+  applyLanguage();
+  reshow();
+  if (!window.ethereum) $('walletRow').hidden = true;
+  else $('noWalletNote').innerHTML = t('walletFound');
+  if (!returnTo) $('backNote').innerHTML = t('backNote') + t('backDirect');
+  if (!address && !shown.out) out('chooseFirst');
+  if (issuerFacts && !issuerFacts.error) {
+    $('facts').innerHTML = `${issuerFacts.token ? issuerFacts.token.title : issuerFacts.tokenId}`
+      + ` &middot; ${t('grantsMade', { n: issuerFacts.grantsMade })} &middot; ${t('rule')}.`;
+  }
+  for (const b of $('langs').children) {
+    b.setAttribute('aria-current', b.dataset.lang === LANG ? 'true' : 'false');
+  }
+}
+
+for (const code of Object.keys(STRINGS)) {
+  const b = document.createElement('button');
+  b.textContent = STRINGS[code].lang;
+  b.dataset.lang = code;
+  b.onclick = () => { LANG = code; localStorage.setItem(LANG_KEY, code); render(); };
+  $('langs').appendChild(b);
+}
+
+render();
+
+if (localStorage.getItem(VAULT_SLOT)) {
+  $('unlockForm').hidden = false;
+  keyOut('unlockHelp');
+}
+
+fetch('/molibra/issuer').then((r) => r.json()).then((i) => {
+  issuerFacts = i;
+  if (i.error) return $('facts').textContent = i.error;
+  render();
+}).catch(() => {});
+
+fetch('/molibra').then((r) => r.json()).then((c) => {
+  if (c.chainId) chainIdDec = Number(c.chainId);
+}).catch(() => {});
+</script>

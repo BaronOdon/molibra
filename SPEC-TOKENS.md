@@ -1,6 +1,9 @@
-# Molibra — user-created tokens (draft specification)
+# Molibra — user-created tokens (specification)
 
-**Status:** design, not implemented. Written 29 Aug 2026.
+**Status:** implemented and tested. Written 29 Aug 2026; the distribution,
+supply and cost model was reworked on **30 Aug 2026** after the operator found
+three faults in the first implementation, and §1–§3, §5 and §6 below describe
+what the code now does rather than what was once planned.
 
 A token on Molibra is not primarily an asset. It is an **instrument for expressing will**: one
 question, its options, and the rule by which people may speak on it. Holding a unit is
@@ -38,9 +41,10 @@ being a one-shot ticket.
 | Symbol | **GIZ** (Chalk) |
 | Scope | Specific to the DataToalha app — the politics chalkboard |
 | Transferable | **No.** Displayed as non-transferable wherever it appears |
-| Obtained by | Mining |
-| Granularity | Fine — spendable in small units across many questions |
-| Spent on | Expressing will; burned on use |
+| Obtained by | **Issuance** — earned by work or granted against a linking proof; never bought, never passed on |
+| Supply | **Uncapped**, minted on demand |
+| Granularity | Fine — 18 decimals; spendable in small amounts across many questions |
+| Spent on | Expressing will; burned on use, at the token's declared `expressionCost` |
 
 **This is what makes the electoral surface clean, and it is a better answer than sponsoring
 fees.** A non-transferable token has no market and therefore no price. Nothing of economic
@@ -74,9 +78,20 @@ more voice in `single` mode — it only pays for more separate questions.
 pays its gas in MOLI. Mining earns it.
 
 The one act deliberately kept free of any priced asset is **a person expressing their will on
-an electoral question** — and GIZ being non-transferable is what achieves that, not a fee
-exemption. Optionally the gas for such an expression can also be sponsored by the treasury, so
-nobody needs MOLI in hand to make a mark; that is a usability choice now, not a compliance one.
+an electoral question** — and two things achieve it together. GIZ is non-transferable, so the
+instrument for speaking has no price; and **an expression may be signed with `gasPrice` zero**,
+so speaking costs no MOLI either. Nobody needs to hold a transferable asset before they can say
+something, and nobody has to be given one.
+
+That second half is a **compliance rule, not a convenience**. The alternative considered first
+— sending each person a small MOLI stipend so they could pay the fee — was withdrawn: MOLI is
+transferable and therefore priced, and handing a priced asset to somebody for registering a
+political preference in an election year is the shape Res.-TSE 23.610/2019 art. 29 §8º
+describes. The transferable coin must not touch the ballot, so nothing is handed over.
+
+The free class is exactly the act of speaking. Every other transaction pays the node's
+`minGasPrice`, which is what keeps it from becoming a free spam class — and the expression is
+not free of cost in any case, since it burns the token's declared `expressionCost`.
 
 The underlying distinction is worth keeping in view. Creating a chalkboard is *publishing*:
 the creator puts a question to the public and pays the network to carry it, which no rule
@@ -89,19 +104,66 @@ something anyone can buy. Publisher pays; speaker earns.
 
 ```
 Token {
-  id            H(creator ‖ title ‖ createdAt)   // deterministic, collision-resistant
-  creator       address
-  title         the question
-  options       [string]                          // what may be chosen
-  voteMode      single | capped(n) | weighted     // §2 — immutable, disclosed
-  supply        §3 — immutable, disclosed
-  transferable  false by default                  // §6 — opt-in, disclosed
-  createdAt     block number
+  id              H(creator ‖ title ‖ createdAt)  // deterministic, collision-resistant
+  creator         address
+  title           the question
+  options         [string]                        // what may be chosen
+  voteMode        single | quantum | capped(n) | weighted   // §2 — immutable, disclosed
+  purpose         market | behaviour | social | purchase | electoral  // §1a — immutable
+  initialSupply   minted to the creator at creation; normally 0    // §3
+  maxSupply       0 means UNCAPPED                                 // §3
+  expressionCost  what one expression burns, in wei granularity    // §5
+  issuable        may the creator issue more, one-directionally    // §3
+  transferable    false by default                // §6 — opt-in, disclosed
+  electoral       DERIVED from purpose, never stated separately
+  createdAt       block number
 }
 ```
 
+Running accounting kept alongside the record and hashed into the state root:
+`minted`, `burned`, `expressions`. Under `weighted` the last two differ, so both
+are published and no reader has to infer a count from an amount.
+
 The token id is derived, not chosen, so nobody can squat a name or impersonate another
 token's identity.
+
+---
+
+## 1a. Purpose — what the question is for
+
+**Declared at creation, immutable, published with the token, and there is no default.**
+A silent default on an immutable record is exactly the trap this field closes.
+
+| Value | Label served with the record |
+|---|---|
+| `market` | aferição de mercado |
+| `behaviour` | comportamento do consumidor |
+| `social` | comunicação social |
+| `purchase` | **expressão pública de compra** |
+| `electoral` | matéria eleitoral |
+
+The DataToalha mark is registered for **pesquisa e comunicação social**, and that
+inscription is the scope: a question carried here is market measurement, consumer
+behaviour, social communication, or a purchase publicly expressed. Declaring which,
+on the record, is what makes the scope checkable rather than asserted.
+
+### `purchase` — and why the name is the point
+
+DataToalha is a **movement of popular expression, from the people to the people**. As
+consumers, people demand daily-use goods bearing the characteristics of the political
+figure they prefer; as a free people, they demand that the sale of those goods be
+**public**. They do not merely permit the publicity — they ask for it. The purchase *is*
+the expression, made by the buyer, about themselves.
+
+Anything running in an electoral period is therefore declared `purchase` and **never as
+an enquete or a pesquisa**, to be compliant with the TSE resolutions. Under
+Res.-TSE 23.600/2019 an enquete is a regulated object, barred outright from 15 August of
+an election year, and a pesquisa carries its own registration duty. A purchase publicly
+expressed by the person who made it is neither.
+
+**This is enforced, not documented:** `normalizeTokenRecord` refuses a `purchase` token
+whose title contains *enquete* or *pesquisa*, and the read routes serve the disclosure
+"it is NOT an enquete and NOT a pesquisa" with the record itself.
 
 ---
 
@@ -128,19 +190,46 @@ can move after people have answered is not a record of anything.
 
 ---
 
-## 3. Availability (supply)
+## 3. Availability (supply) and distribution
 
-| Policy | Meaning |
-|---|---|
-| **`fixed(N)`** | *N* units minted at creation. Never any more. |
-| **`scheduled(N, rate)`** | Up to *N* total, released at a declared rate. Predictable, capped. |
-| **`open`** | The creator may mint more at will. |
+Two numbers, not one: `initialSupply` is what exists at creation, `maxSupply` is the ceiling
+on what may ever exist, and **`maxSupply: 0` means uncapped**. GIZ is uncapped deliberately:
+questions never stop being created, so demand for the instrument to answer them is unbounded
+over time. `minted − remaining` is still the burn, and the burn is still the tally.
 
-`open` must carry a visible warning wherever the token appears: the creator can dilute every
-holder's weight at any moment. Most honest questions want `fixed`.
+**Distribution is issuance, and issuance is not transfer.** This is the load-bearing
+distinction, and the reason the first implementation was wrong:
 
-For a `single`-mode token, supply is really an eligibility list: one unit is distributed to
-each eligible participant, so supply *is* the electorate.
+| | Direction | Creates a market? |
+|---|---|---|
+| **Transfer** | holder ↔ holder | **Yes** — a buyer can receive and resell, so a price forms |
+| **Issue** | creator → user, one-directional | **No** — recipients cannot pass it on |
+
+The first implementation minted the whole supply to the creator and made GIZ
+non-transferable, which together meant **nobody except the creator could ever express**. The
+fix is emphatically *not* transferability, which would dismantle the whole art. 29 §8º
+position within a day. The fix is an `issuable` flag and an ISSUE transaction that only the
+creator may sign.
+
+Consensus refuses the dead end at creation: a token that is **neither issuable nor
+transferable** can never reach a second holder, and is rejected before its record becomes
+immutable. So is a token with no initial supply and no way to issue any.
+
+An `issuable` token carries a disclosure wherever it appears. Dilution only bites where
+holdings buy weight, so the warning is raised for `weighted` and not for the modes in which
+a wallet's voice is the same size however much it holds.
+
+**Getting chalk into a hand.** `src/issuer.js` is the publisher's side of this: a person
+clicks one button, their browser solves a small puzzle bound to their address, and the node
+issues. A grant carries a small **gas stipend** alongside the chalk, because an expression is
+still a transaction and still pays gas in MOLI — chalk alone cannot speak. A grant is refused
+while the address still holds enough to speak, which caps hoarding without knowing anything
+about the person. It is a speed bump, not a Sybil defence (§8.1 of the white paper says so).
+
+⛔ **The puzzle must never run inside the mobile application.** Mining in an app is banned by
+Apple 3.1.5(ii) and by Google Play outright. The app's button is the other door: a grant
+against a linking proof the app already holds, which is not mining and moves no value the
+person owns.
 
 ---
 
@@ -164,7 +253,15 @@ mint path. A token with `fixed` supply is mathematically incapable of inflating.
 
 ## 5. Burn — and why the burn *is* the tally
 
-**Expressing will burns the unit spent.** The unit is destroyed, not transferred.
+**Expressing will burns the token's declared `expressionCost`.** The amount is destroyed,
+not transferred.
+
+The cost is denominated in wei granularity (`10**15` is 0.001 of a unit), never as one whole
+unit — that is what makes a single holding cover many questions rather than being a one-shot
+ticket. It is **fixed** for `single`, `quantum` and `capped`: nobody's expression can be
+larger than anyone else's, which is what keeps those modes egalitarian. Only `weighted` lets
+the burned amount vary, because there the amount *is* the weight — which is precisely why
+that mode is plutocratic by construction and labelled so wherever it appears.
 
 This gives four properties at once:
 
@@ -203,8 +300,12 @@ The reasoning is the same one that shapes the rest of Molibra:
   that grants a say on candidates walks directly into Res.-TSE 23.610/2019 art. 29, § 8º —
   economic advantage, direct or indirect, tied to political-electoral participation.
 
-**Therefore:** transferability must be unavailable for tokens whose subject is electoral, and
-opt-in with disclosure everywhere else. This is the same decoupling as
+**Therefore:** transferability is unavailable — refused by consensus — for `electoral`,
+`social` and `purchase` tokens alike. Comunicação social on public affairs, and a purchase
+publicly expressed in an electoral period, are the same surface art. 29 §8º guards; a priced
+instrument for speaking there attaches economic value to political participation just as
+directly as one labelled electoral would. `market` and `behaviour` are a different object and
+remain opt-in with disclosure. This is the same decoupling as
 `A:\datatoalha_legal\28_molibra_*` § 8.8 — the transferable coin must not touch the ballot —
 applied one level down, to tokens.
 
@@ -230,9 +331,14 @@ burned unit automatically — the same property the vote-key design already reli
 
 ## 8. Open decisions for the operator
 
-- **MOLI issuance:** halving or tail emission? (§4 — needs deciding, not defaulting.)
-- **Fee burn:** on or off, and what fraction?
-- **`single`-mode distribution:** who receives the one unit, and how is eligibility
-  established without re-identifying people?
-- **Transferability for non-electoral tokens:** allowed at all, or off across the board for
-  simplicity and a cleaner regulatory posture?
+- ~~**MOLI issuance**~~ — **settled 29 Aug: tail emission** to a permanent 0.25 MOLI floor.
+- ~~**Fee burn**~~ — **settled 29 Aug: off**, declared in genesis rather than left silent.
+- ~~**Distribution**~~ — **settled 30 Aug: issuance**, one-directional, plus a gas stipend.
+- **`single`-mode eligibility:** who receives the one unit, and how is that established
+  without building the register of identified political preferences the design refuses?
+  Still open, and still the hard one. `quantum`, `capped(n)` and `weighted` ship without it.
+- **Coercion resistance:** expressions are individually verifiable, so the person who
+  expressed holds a receipt and can prove how they expressed. Not fixable by a parameter.
+- **The grant rule:** "refused while you still hold enough to speak" is a speed bump. If the
+  board needs more than that, it needs something that identifies people, and that trade is
+  the operator's to make — not a default to drift into.

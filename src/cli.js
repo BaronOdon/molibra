@@ -118,6 +118,23 @@ const commands = {
       }
     }
 
+    // The chalkboard issuer: the publisher's side of "publisher pays, speaker
+    // earns". It signs as the token's CREATOR, so the key is the creator's -
+    // there is nothing to generate here.
+    if (args.chalk) {
+      const issuer = node.enableIssuer({
+        tokenId: args.chalk,
+        keyFile: args['chalk-key'] ? resolve(args['chalk-key']) : undefined,
+        grantExpressions: args['chalk-grant'] ? Number(args['chalk-grant']) : undefined,
+        difficulty: args['chalk-difficulty'] ? Number(args['chalk-difficulty']) : undefined,
+        gasStipend: args['chalk-stipend'] ? BigInt(args['chalk-stipend']) : undefined,
+      });
+      const d = issuer.describe();
+      console.log(`  chalk     : ${d.tokenId}${d.error ? ' (' + d.error + ')' : ''}`);
+      console.log(`  issuing   : ${d.expressions} expressions per grant, from ${d.issuer}`);
+      console.log(`  earn page : ${node.rpcUrl}/molibra/chalk`);
+    }
+
     if (args.mine) {
       if (!node.miner) throw new Error('--mine needs --miner 0x...');
       console.log(`  mining    : to ${node.miner}`);

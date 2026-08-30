@@ -121,6 +121,14 @@ Everything a third party needs in order to check the chain themselves, over plai
 | `GET /molibra/tx/{hash}` | A transaction with its receipt |
 | `GET /molibra/theories` | Attribution and theoretical basis, plus the sealed genesis bytes |
 | `GET /molibra/peers` | Known peers |
+| `GET /molibra/tokens`, `/molibra/token/{id}` | Token records with mode, purpose, live supply, burn count and the disclosures |
+| `GET /molibra/issuer` | The chalkboard issuer: what it issues, how much, and the rule it applies |
+| `GET /molibra/earn?address=` | A puzzle to solve, bound to that address |
+| `POST /molibra/earn` | Redeem a solved puzzle; the publisher issues chalk and the gas to spend it |
+| `POST /molibra/grant` | A grant against a linking proof — the application's one button, with no puzzle |
+| `GET /molibra/chalk` | The page a person clicks to earn chalk (pt-BR first, en second) |
+| `GET /molibra/wallet.js` | The in-page wallet: key generation, sealing, signing |
+| `GET /molibra/vendor/{hashes,curves}/…` | The crypto that page needs, served from this node rather than a CDN |
 
 Add **`?decoded=1`** to either block route to get transactions as objects instead of raw RLP
 hex. The default is the *replication* payload — the exact bytes a joining node consumes — so
@@ -200,8 +208,21 @@ Honest about what is and is not here:
 
 Issuance is **settled**: 2 MOLI per block, halving every 2,102,400 blocks to a permanent floor
 of **0.25 MOLI**, forever. No hard cap, deliberately — see [WHITEPAPER.md](WHITEPAPER.md) §8.3.
-Fee burn is **off**. The remaining open problems, including coercion resistance and
-`single`-mode eligibility, are §8.
+Fee burn is **off**. Distribution is **settled**: GIZ is issuable one-directionally by its
+creator and never transferable, with supply uncapped and each expression burning the token's
+declared cost. The remaining open problems, including coercion resistance and `single`-mode
+eligibility, are §8.
+
+**Speaking is free.** An expression may be signed with `gasPrice: 0`: the act already burns the
+token's declared `expressionCost`, so the anti-spam property a fee would provide is provided
+twice over, and nobody needs to hold a transferable asset before they can say something. Every
+other transaction pays the node's `minGasPrice`, so a free transaction class does not become a
+free spam class.
+
+The earning puzzle at `/molibra/chalk` is **not block mining**: it does not secure the chain
+and it creates no MOLI. It is a cost function for a faucet, and the page says so in those
+words. It must never be shipped inside the mobile application — mining in an app is banned by
+Apple 3.1.5(ii) and by Google Play, and the app's path is the linking-proof grant instead.
 
 ## Not financial advice
 

@@ -4,6 +4,7 @@
 
 import { RLP } from '@ethereumjs/rlp';
 import { keccak256, toHex, fromHex, bigToBytes, bytesToBig, concatBytes } from './crypto.js';
+import { MAX_EXTRA_DATA_BYTES, MAX_HEADER_NONCE_BYTES } from './limits.js';
 
 export const ZERO_HASH = '0x' + '00'.repeat(32);
 
@@ -50,6 +51,24 @@ export function sealDigest(header) {
 }
 
 const TWO_256 = 1n << 256n;
+
+/**
+ * Header fields whose SIZE is consensus, checked before the header is hashed.
+ *
+ * A field nobody bounds is a free place to put a megabyte, and every node on
+ * the network then stores and rehashes it forever. Applied to every block
+ * except genesis, whose extraData carries the sealed attribution and is never
+ * verified against a parent.
+ */
+export function assertHeaderBounds(header) {
+  const extra = fromHex(header.extraData ?? '0x');
+  if (extra.length > MAX_EXTRA_DATA_BYTES) {
+    throw new Error(`extraData is ${extra.length} bytes, limit is ${MAX_EXTRA_DATA_BYTES}`);
+  }
+  if (bigToBytes(header.nonce ?? 0n).length > MAX_HEADER_NONCE_BYTES) {
+    throw new Error('header nonce exceeds 64 bits');
+  }
+}
 
 /** Difficulty -> the value the seal hash must fall under. */
 export function targetFor(difficulty) {

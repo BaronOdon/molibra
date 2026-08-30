@@ -14,7 +14,8 @@
 import { keccak256, toHex, normalizeAddress } from './crypto.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
-  decodeTokenCreate, decodeExpress, normalizeTokenRecord, expressionKey,
+  decodeTokenCreate, decodeExpress, decodeIssue, normalizeTokenRecord,
+  expressionKey, expressionBurn,
 } from './token.js';
 
 export class State {
@@ -49,9 +50,19 @@ export class State {
     return this.tokens.get(String(id).toLowerCase()) ?? null;
   }
 
+  /**
+   * Register a token. `minted`, `burned` and `expressions` are the running
+   * accounting: minted grows with every issuance, burned with every
+   * expression, and `expressions` counts the acts rather than the units - the
+   * two differ under `weighted`, where one expression may burn any amount.
+   */
   putToken(record) {
-    this.tokens.set(String(record.id).toLowerCase(),
-      { ...record, burned: record.burned ?? '0' });
+    this.tokens.set(String(record.id).toLowerCase(), {
+      ...record,
+      minted: record.minted ?? record.initialSupply ?? '0',
+      burned: record.burned ?? '0',
+      expressions: record.expressions ?? '0',
+    });
   }
 
   tokenBalanceOf(id, address) {
@@ -65,6 +76,25 @@ export class State {
     else this.tokenBalances.set(k, BigInt(amount));
   }
 
+  /**
+   * Mint units into an address. The ONLY path by which units come into
+   * existence, used by creation and by ISSUE alike, so `maxSupply` is checked
+   * in exactly one place and cannot be bypassed by adding a caller.
+   */
+  mintToken(id, address, amount) {
+    const rec = this.getToken(id);
+    if (!rec) throw new Error(`unknown token ${id}`);
+    const asked = BigInt(amount);
+    if (asked <= 0n) throw new Error('an issuance must be positive');
+    const minted = BigInt(rec.minted ?? 0) + asked;
+    const max = BigInt(rec.maxSupply ?? 0);
+    if (max > 0n && minted > max) {
+      throw new Error(`issuing ${asked} would exceed the declared max supply ${max}`);
+    }
+    rec.minted = minted.toString();
+    this.setTokenBalance(id, address, this.tokenBalanceOf(id, address) + asked);
+  }
+
   /** Destroyed, not transferred - which is what makes the burn the tally. */
   burnToken(id, address, amount) {
     const held = this.tokenBalanceOf(id, address);
@@ -72,6 +102,7 @@ export class State {
     this.setTokenBalance(id, address, held - BigInt(amount));
     const rec = this.getToken(id);
     rec.burned = (BigInt(rec.burned ?? 0) + BigInt(amount)).toString();
+    rec.expressions = (BigInt(rec.expressions ?? 0) + 1n).toString();
   }
 
   expressionCount(key) {
@@ -182,8 +213,13 @@ export class State {
     // tokens existed still hashes to exactly the same root.
     for (const id of [...this.tokens.keys()].sort()) {
       const t = this.tokens.get(id);
-      lines.push(`token:${id}:${t.voteMode}:${t.supply}:${t.burned}:`
-        + `${t.transferable ? 1 : 0}${t.electoral ? 1 : 0}`);
+      // Every field a node could disagree about is in here: the immutable
+      // rules (mode, cap, ceiling, cost, flags) and the running accounting
+      // (minted, burned, expressions). An issuance that one node counted and
+      // another did not must break the root, not drift quietly.
+      lines.push(`token:${id}:${t.voteMode}:${t.purpose}:${t.cap}:${t.maxSupply}:`
+        + `${t.minted}:${t.burned}:${t.expressions}:${t.expressionCost}:`
+        + `${t.transferable ? 1 : 0}${t.electoral ? 1 : 0}${t.issuable ? 1 : 0}`);
     }
     for (const k of [...this.tokenBalances.keys()].sort()) {
       lines.push(`tbal:${k}:${this.tokenBalances.get(k).toString(16)}`);
@@ -242,8 +278,35 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     }
   }
 
+  // An issuance: creator → holder, one-directional. This is NOT a transfer.
+  // A holder cannot pass a unit on, so no secondary market can form and no
+  // price exists - which is the property the whole electoral position rests
+  // on. Refusing it here, before any mutation, keeps a rejected issuance from
+  // leaving a trace.
+  const issue = decodeIssue(tx.data);
+  let issued = null;
+  if (issue) {
+    if (tx.value !== 0n) throw new Error('an issuance moves no value');
+    if (!tx.to) throw new Error('an issuance needs a recipient');
+    const token = state.getToken(issue.tokenId);
+    if (!token) throw new Error(`unknown token ${issue.tokenId}`);
+    if (!token.issuable) throw new Error(`token ${token.id} is not issuable`);
+    if (tx.from !== token.creator) {
+      throw new Error(
+        'only the creator may issue: issuance is one-directional, so a holder '
+        + 'passing units on would be a transfer by another name');
+    }
+    if (issue.amount <= 0n) throw new Error('an issuance must be positive');
+    const max = BigInt(token.maxSupply);
+    if (max > 0n && BigInt(token.minted) + issue.amount > max) {
+      throw new Error(`issuing ${issue.amount} would exceed the declared max supply ${max}`);
+    }
+    issued = { token, to: tx.to, amount: issue.amount };
+  }
+
   const express = decodeExpress(tx.data);
   let expressed = null;
+  let burnAmount = 0n;
   if (express) {
     if (tx.value !== 0n) throw new Error('an expression carries no value');
     if (!tx.to || tx.to !== tx.from) {
@@ -251,7 +314,11 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     }
     const token = state.getToken(express.tokenId);
     if (!token) throw new Error(`unknown token ${express.tokenId}`);
-    if (state.tokenBalanceOf(token.id, tx.from) < 1n) {
+    // What it costs is on the record, in wei granularity - not a hardcoded
+    // whole unit. Fixed for every mode but `weighted`, where the amount IS
+    // the weight.
+    burnAmount = expressionBurn(token, express.amount);
+    if (state.tokenBalanceOf(token.id, tx.from) < burnAmount) {
       throw new Error('no units of this token to spend');
     }
     // The scope IS the rule. `quantum` keys to the voting place, so a wallet
@@ -275,7 +342,7 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     }
     // `weighted` has no per-wallet limit by design - weight is whatever the
     // holder burns. It is plutocratic by construction and labelled so.
-    expressed = { token, key };
+    expressed = { token, key, amount: burnAmount };
   }
 
   state.debit(tx.from, total);
@@ -286,16 +353,24 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
   if (key) state.recordVoteKey(key);
 
   if (record) {
-    // The whole supply is minted to the creator at creation. There is no other
-    // mint path, so a `fixed` token is mathematically incapable of inflating.
+    // Only the declared initial supply exists at creation - which for a
+    // question board is normally none at all. Units reach people by ISSUE,
+    // the single mint path, so a token with a declared `maxSupply` cannot
+    // exceed it and an uncapped one grows only by an act the creator signs.
     state.putToken(record);
-    state.setTokenBalance(record.id, record.creator, BigInt(record.supply));
+    if (BigInt(record.initialSupply) > 0n) {
+      state.setTokenBalance(record.id, record.creator, BigInt(record.initialSupply));
+    }
+  }
+
+  if (issued) {
+    state.mintToken(issued.token.id, issued.to, issued.amount);
   }
 
   if (expressed) {
-    // Burn, do not transfer: the unit is destroyed, so it cannot be replayed
-    // and `minted - burned` is the count anyone can verify.
-    state.burnToken(expressed.token.id, tx.from, 1n);
+    // Burn, do not transfer: the units are destroyed, so they cannot be
+    // replayed and `minted - remaining` is what anyone can verify.
+    state.burnToken(expressed.token.id, tx.from, expressed.amount);
     if (expressed.token.voteMode === 'single'
         || expressed.token.voteMode === 'quantum') {
       state.recordVoteKey(expressed.key);
@@ -309,6 +384,8 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     status: 1,
     voteKey: key ?? expressed?.key ?? null,
     pollId: expression?.pollId ?? null,
-    tokenId: record?.id ?? expressed?.token.id ?? null,
+    tokenId: record?.id ?? expressed?.token.id ?? issued?.token.id ?? null,
+    tokenAmount: expressed ? expressed.amount.toString()
+      : (issued ? issued.amount.toString() : null),
   };
 }
