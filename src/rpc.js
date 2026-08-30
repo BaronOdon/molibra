@@ -430,6 +430,21 @@ function handleAudit(node, req, res) {
     return json(res, 200, { blockHash: block.hash, rlp: encodeHeader(block.header) });
   }
 
+  // A run of header RLPs, which is what a relay on another chain consumes.
+  // Capped by the same range limit as any other bulk read.
+  if (path === '/molibra/headers-rlp') {
+    const from = Math.max(0, Number(url.searchParams.get('from') ?? 0));
+    const asked = Math.min(Number(url.searchParams.get('to') ?? chain.height), Number(chain.height));
+    const to = Math.min(asked, from + MAX_BLOCK_RANGE - 1);
+    const out = [];
+    for (let i = from; i <= to; i++) {
+      const block = chain.blockByNumber(i);
+      if (!block) break;
+      out.push({ number: i, blockHash: block.hash, rlp: encodeHeader(block.header) });
+    }
+    return json(res, 200, { from, to, truncated: to < asked, headers: out });
+  }
+
   // Selector helper for a page that has no hash function of its own. Takes
   // text, returns its keccak - it reads nothing and decides nothing.
   if (path === '/molibra/keccak') {

@@ -65,17 +65,42 @@ compliance file requires.</div>
 </div>
 
 <div class="card">
-  <h2>3. Prove a Molibra transaction and release</h2>
+  <h2>3. Relay Molibra's headers</h2>
+  <p class="muted small">This is what makes the bridge worth more than one block of work. The
+  relay checks every header against Molibra's own retarget rule from a checkpoint, follows the
+  heaviest chain by accumulated work, and treats a transaction as settled only once enough work
+  is piled on top of it.</p>
+  <label>Checkpoint block number to anchor at</label>
+  <input id="anchor" value="1">
+  <label>Work that must be piled on top before a transaction counts</label>
+  <input id="required" value="1">
+  <p><button id="deployRelay" disabled>Deploy relay + bridge</button>
+     <button class="ghost" id="submitHeaders">Submit headers to the tip</button></p>
+  <p id="relayOut" class="small muted">&nbsp;</p>
+  <label>relay</label><input id="relayAddr" placeholder="0x...">
+  <label>relay-backed bridge</label><input id="rbridgeAddr" placeholder="0x...">
+</div>
+
+<div class="card">
+  <h2>4. Prove a Molibra transaction and release</h2>
   <p class="muted small">Any mined Molibra transaction hash. The proof is fetched from this
   node, but nothing about it is trusted — the contract re-derives the block hash, checks the
   proof of work, and folds the Merkle path itself.</p>
   <label>Molibra transaction hash</label>
   <input id="txHash" placeholder="0x…">
+  <p class="muted small">Through the relay the recipient and the amount are <b>not</b> yours to
+  choose here: they are read out of the Molibra transaction itself, which its sender signed.
+  Build one with <code>encodeBridgeOut</code> in <code>src/bridge.js</code>. The single-header
+  rig below still takes them as arguments, which is exactly why it is only a rig.</p>
+  <p><button id="releaseRelay" disabled>Verify against the relay and release</button></p>
+  <p id="relayReleaseOut" class="small muted">&nbsp;</p>
+  <hr style="border:0;border-top:1px solid rgba(224,224,232,.12);margin:16px 0">
+  <p class="muted small">Single-header test rig — worth one block of work, see the warning above:</p>
   <label>Send ETH to</label>
   <input id="recipient" placeholder="0x…">
   <label>Amount in ETH</label>
   <input id="amount" value="0.001">
-  <p><button id="release" disabled>Verify and release</button></p>
+  <p><button id="release" disabled>Verify and release (rig)</button></p>
   <p id="releaseOut" class="small muted">&nbsp;</p>
 </div>
 
@@ -156,6 +181,7 @@ $('connect').onclick = async () => {
       + 'Everything below is signed by this wallet.', 'ok');
     $('deploy').disabled = false;
     $('release').disabled = false;
+    $('deployRelay').disabled = false;
   } catch (e) { say('who', 'Failed: ' + e.message, 'err'); }
 };
 
@@ -244,6 +270,110 @@ $('release').onclick = async () => {
   } catch (e) {
     say('releaseOut', 'Failed: ' + (e.message || e), 'err');
   } finally { $('release').disabled = false; }
+};
+
+/* --------------------------------------------------------------- the relay */
+$('deployRelay').onclick = async () => {
+  try {
+    $('deployRelay').disabled = true;
+    const arts = await loadArtifacts();
+    const relayArt = await fetch('/molibra/bridge/artifact/MolibraRelay').then((r) => r.json());
+    const bridgeArt = await fetch('/molibra/bridge/artifact/MolibraBridge').then((r) => r.json());
+    if (relayArt.error || bridgeArt.error) throw new Error(relayArt.error || bridgeArt.error);
+
+    let proverAddress = $('proverAddr').value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(proverAddress)) {
+      say('relayOut', 'Deploying the prover first...');
+      proverAddress = (await send({ data: arts.prover.bytecode })).contractAddress;
+      $('proverAddr').value = proverAddress;
+    }
+
+    // The checkpoint: everything after it is verified, this one is taken on
+    // faith. Read from the node so the numbers are the chain's, not typed.
+    const n = Number($('anchor').value || '1');
+    const block = await (await fetch('/molibra/block/' + n)).json();
+    if (block.error) throw new Error(block.error);
+    const cfg = await (await fetch('/molibra')).json();
+
+    say('relayOut', 'Deploying the relay, anchored at block ' + n + '...');
+    const ctor = [
+      proverAddress.replace(/^0x/, '').toLowerCase().padStart(64, '0'),
+      block.hash.replace(/^0x/, ''),
+      word(block.header.number), word(block.header.timestamp), word(block.header.difficulty),
+      block.header.txRoot.replace(/^0x/, ''),
+      word(cfg.targetBlockSeconds || 15), word(cfg.minimumDifficulty || 1000),
+    ].join('');
+    const relayAddress = (await send({ data: relayArt.bytecode + ctor })).contractAddress;
+    $('relayAddr').value = relayAddress;
+
+    say('relayOut', 'Relay at ' + relayAddress + '. Deploying the relay-backed bridge...');
+    const bctor = relayAddress.replace(/^0x/, '').toLowerCase().padStart(64, '0')
+      + word($('required').value || '1');
+    const rb = await send({
+      data: bridgeArt.bytecode + bctor,
+      value: '0x' + toWei($('funding').value || '0').toString(16),
+    });
+    $('rbridgeAddr').value = rb.contractAddress;
+    $('releaseRelay').disabled = false;
+    say('relayOut', 'Relay <code>' + relayAddress + '</code><br>Bridge <code>'
+      + rb.contractAddress + '</code> - now submit headers, so there is work above your '
+      + 'transaction.', 'ok');
+  } catch (e) { say('relayOut', 'Failed: ' + (e.message || e), 'err'); }
+  finally { $('deployRelay').disabled = false; }
+};
+
+$('submitHeaders').onclick = async () => {
+  try {
+    const relayAddress = $('relayAddr').value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(relayAddress)) throw new Error('deploy the relay first');
+    const from = Number($('anchor').value || '1') + 1;
+    const run = await (await fetch('/molibra/headers-rlp?from=' + from)).json();
+    if (!run.headers || !run.headers.length) throw new Error('no headers after the checkpoint yet');
+
+    // submit(bytes[]) - an array of dynamic bytes: one offset each, then the
+    // encodings. Hand-rolled for the same reason as everything else here.
+    const sel = await selector('submit(bytes[])');
+    const parts = run.headers.map((h) => {
+      const body = h.rlp.replace(/^0x/, '');
+      return word(body.length / 2) + padRight(body);
+    });
+    let offsets = '';
+    let running = parts.length * 32;
+    for (const part of parts) { offsets += word(running); running += part.length / 2; }
+    const data = sel + word(32) + word(parts.length) + offsets + parts.join('');
+
+    say('relayOut', 'Submitting ' + run.headers.length + ' headers - each checked against the '
+      + 'retarget rule on chain...');
+    const receipt = await send({ to: relayAddress, data });
+    say('relayOut', receipt.status === '0x1'
+      ? 'Relayed ' + run.headers.length + ' headers up to block ' + run.to + '.'
+      : 'Reverted - a header failed the retarget rule, or its parent is unknown.',
+      receipt.status === '0x1' ? 'ok' : 'err');
+  } catch (e) { say('relayOut', 'Failed: ' + (e.message || e), 'err'); }
+};
+
+$('releaseRelay').onclick = async () => {
+  try {
+    const bridgeAddress = $('rbridgeAddr').value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(bridgeAddress)) throw new Error('deploy the relay bridge first');
+    say('relayReleaseOut', 'Fetching the proof...');
+    const proof = await (await fetch('/molibra/proof/' + $('txHash').value.trim())).json();
+    if (proof.error) throw new Error(proof.error);
+
+    const sel = await selector('release(bytes32,bytes,bytes32[],bool[])');
+    const data = encodeCall(sel, ['bytes32', 'bytes', 'bytes32[]', 'bool[]'],
+      [proof.blockHash, proof.raw, proof.siblings.map((x) => x.hash),
+        proof.siblings.map((x) => x.side === 'right')]);
+
+    say('relayReleaseOut', 'Confirm - the contract asks the relay, then reads the recipient '
+      + 'and amount out of the Molibra transaction itself...');
+    const receipt = await send({ to: bridgeAddress, data });
+    say('relayReleaseOut', receipt.status === '0x1'
+      ? 'Released. <code>' + receipt.transactionHash + '</code>'
+      : 'Reverted <code>' + receipt.transactionHash + '</code> - not settled yet, not a '
+        + 'bridgeOut transaction, or already claimed.',
+      receipt.status === '0x1' ? 'ok' : 'err');
+  } catch (e) { say('relayReleaseOut', 'Failed: ' + (e.message || e), 'err'); }
 };
 
 $('withdraw').onclick = async () => {
