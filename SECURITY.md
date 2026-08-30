@@ -105,6 +105,34 @@ report anything that makes one of them *worse* than described.
   who made it holds a receipt and can prove to a third party how they expressed themselves.
   That enables vote-buying and coercion. It is the most serious open problem in the design and
   is discussed in [WHITEPAPER.md](WHITEPAPER.md) §8.
+
+  ⛔ **Hiding the address in the explorer is not a fix, and must never be shipped as one.**
+  The explorer is a *view*. The chain is public and replicated on purpose: `/molibra/block/{id}`
+  serves the raw signed transactions, every node holds them, and anyone with `curl` reads the
+  sender. Obscuring the address in one explorer while every node publishes it is a curtain, not
+  a lock — and it is worse than doing nothing, because people would rely on it.
+
+  Coercion resistance is also stricter than privacy: it requires the person to be **unable to
+  prove** how they expressed *even when they want to*. Holding their own key, they always can.
+
+  What would actually work, in order of cost:
+
+  1. **Optional participation.** If publishing on-chain is opt-in, "I never put mine on the
+     chain" stays credible, because not everyone's is. Real, partial, and cheap — deniability
+     at the level of participation rather than of content.
+  2. **A fresh address per voting place**, derived from the master key so the association is
+     *recomputable only by the key holder* and stored nowhere. This is the right primitive for
+     "only the owner knows which address is theirs" — derivation, not encryption. ⚠ On its own
+     it **breaks one-address-one-voice**: a person can derive unlimited addresses and take one
+     grant each, which lands on the open eligibility problem.
+  3. **Blind-signature credentials with per-poll nullifiers.** The publisher blind-signs an
+     eligibility credential; the person expresses from an unlinked address presenting it; the
+     nullifier refuses a second expression in that voting place without revealing whose it is.
+     **Unlinkable and unique at once.** Implementable without zero-knowledge machinery, but it
+     is a consensus change of real size — the validator would key uniqueness on the nullifier
+     instead of on the sender.
+  4. **Coercion resistance proper** needs more still: re-voting (JCJ-style) or a mixnet, so
+     that no receipt is meaningful. Nothing short of that earns the phrase.
 - **Peering is HTTP push and pull, not a hardened gossip protocol.** It suits a known set of
   nodes. The bounds above stop a peer exhausting memory or CPU, but there is still **no peer
   reputation, no authentication between peers, no per-IP rate limiting and no eclipse-attack
