@@ -1,0 +1,63 @@
+# One public Molibra node.
+#
+# Deliberately NOT the two-node compose at the repository root: that one exists
+# to prove replication on a laptop, runs two miners, and publishes two ports.
+# A public node is a different thing - one process, one port, and a volume that
+# outlives the image.
+#
+#   docker compose -f deploy/docker-compose.public.yml up -d --build
+#
+# ⛔ There is no --treasury and no --chalk here, and that is the point. Those
+# flags enable POST /molibra/airdrop, /earn and /grant, which hand out value to
+# whoever asks. Correct on a private node; a faucet for strangers on this one.
+#
+# MINER is an ADDRESS, never a key, so this file and this image hold no secret.
+# Put it in a .env beside this file. Mining is optional - but see the note about
+# idle reclamation in public-node.md if you are on an always-free tier.
+
+services:
+  molibra:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: molibra:0.1.0
+    container_name: molibra-public
+    restart: unless-stopped
+    ports:
+      # Bind to localhost when a reverse proxy terminates TLS in front of this;
+      # use "8545:8545" only while the node is meant to be reachable directly.
+      - "${BIND:-0.0.0.0}:8545:8545"
+    volumes:
+      - molibra-public:/data
+    command:
+      - node
+      - --host
+      - "0.0.0.0"          # inside the container; the host binding is above
+      - --port
+      - "8545"
+      - --datadir
+      - /data
+      # An unset PEERS is harmless: the CLI treats an empty value as "no peers"
+      # and serves only its own genesis. Set it to follow the network.
+      - --peers
+      - "${PEERS:-}"
+
+    # ⛔ Mining is OPT-IN, and deliberately not in the command above.
+    #
+    # `--mine` with an empty `--miner` is a hard error - "--mine needs --miner
+    # 0x..." - and with `restart: unless-stopped` that becomes a crash loop for
+    # anyone who brings this up before setting MINER. A node that will not start
+    # is a worse first experience than one that starts without mining.
+    #
+    # To mine, add these four lines to the command above and set MINER in .env.
+    # The miner is an ADDRESS, never a key, so nothing secret enters this file:
+    #
+    #   - --miner
+    #   - "${MINER}"
+    #   - --mine
+    #
+    # ⚠ On an always-free tier, read the idle-reclamation note in
+    # deploy/public-node.md before deciding NOT to mine.
+
+volumes:
+  molibra-public:

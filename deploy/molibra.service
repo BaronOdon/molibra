@@ -1,0 +1,42 @@
+# A public Molibra node, without Docker.
+#
+# Install:
+#   sudo cp deploy/molibra.service /etc/systemd/system/
+#   sudo sed -i "s|__USER__|$USER|; s|__DIR__|$PWD|" /etc/systemd/system/molibra.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now molibra
+#
+# ⛔ No --treasury and no --chalk: those hand out value to whoever asks.
+# Add --peers http://<node>:8545 to follow the network, and --miner 0x... --mine
+# to mine. The miner is an ADDRESS, never a key.
+
+[Unit]
+Description=Molibra node
+Documentation=https://github.com/BaronOdon/molibra
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/env node src/cli.js node --host 0.0.0.0 --port 8545 --datadir %S/molibra
+Restart=always
+RestartSec=5
+
+# The node needs nothing but its datadir. Everything else is closed off, so a
+# flaw in it cannot become a flaw in the host.
+StateDirectory=molibra
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryDenyWriteExecute=false
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
