@@ -98,6 +98,7 @@ check('page-signed and node-signed bytes are identical for the same input',
 // is issued chalk, and speaks with it. No funding by hand at any point.
 const COST = 10n ** 15n;
 const record = {
+  kind: 'expression',
   title: 'Chalk (GIZ) for the wallet test', options: ['a', 'b'], voteMode: 'quantum',
   initialSupply: '0', maxSupply: '0', expressionCost: COST.toString(),
   issuable: true, purpose: 'purchase', transferable: false,

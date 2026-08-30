@@ -14,8 +14,8 @@ import { decodeTransaction, intrinsicGas } from './tx.js';
 import { State, applyTransaction } from './state.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
-  decodeTokenCreate, decodeExpress, decodeIssue, normalizeTokenRecord,
-  expressionKey, expressionBurn,
+  decodeTokenCreate, decodeExpress, decodeIssue, decodeTransfer,
+  normalizeTokenRecord, expressionKey, expressionBurn,
 } from './token.js';
 import {
   ZERO_HASH, merkleRoot, blockHash, isValidSeal, mineHeader,
@@ -272,6 +272,23 @@ export class Chain {
       const max = BigInt(token.maxSupply);
       if (max > 0n && BigInt(token.minted) + issue.amount > max) {
         throw new Error(`issuing ${issue.amount} would exceed the declared max supply ${max}`);
+      }
+    }
+
+    const transfer = decodeTransfer(tx.data);
+    if (transfer) {
+      if (tx.value !== 0n) throw new Error('a token transfer moves no MOLI');
+      if (!tx.to) throw new Error('a transfer needs a recipient');
+      const token = this.state.getToken(transfer.tokenId);
+      if (!token) throw new Error(`unknown token ${transfer.tokenId}`);
+      if (!token.transferable) {
+        throw new Error(
+          `token ${token.id} is not transferable: it has no market and no price, `
+          + 'which is the property it was created to have');
+      }
+      if (transfer.amount <= 0n) throw new Error('a transfer must be positive');
+      if (this.state.tokenBalanceOf(token.id, tx.from) < transfer.amount) {
+        throw new Error('insufficient token balance');
       }
     }
 

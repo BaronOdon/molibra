@@ -1,12 +1,33 @@
 /**
  * Molibra - user-created tokens, and Chalk (GIZ).
  *
- * Three transaction shapes, all ordinary signed transactions tagged in `data`,
+ * Four transaction shapes, all ordinary signed transactions tagged in `data`,
  * so a standard wallet can produce any of them with no custom client:
  *
  *   TOKEN_CREATE   tag(4) ‖ utf8 JSON record
  *   ISSUE          tag(4) ‖ tokenId(32) ‖ amount(32)          to = recipient
+ *   TRANSFER       tag(4) ‖ tokenId(32) ‖ amount(32)          to = recipient
  *   EXPRESS        tag(4) ‖ tokenId(32) ‖ pollId(32) ‖ commitment(32) ‖ amount(32)
+ *
+ * ## Two kinds of token, and the chain is not only for one of them
+ *
+ * A token here is declared as one of two **kinds**, fixed at creation:
+ *
+ *   - **`expression`** - a question: its options, the rule by which people may
+ *     speak on it, and what speaking costs. Chalk (GIZ) is one of these.
+ *   - **`asset`** - an ordinary fungible token, with a symbol and decimals,
+ *     held and **sent between people** like a token on any other chain.
+ *
+ * The chalk properties - non-transferable, spent to speak, burned on use - are
+ * available to any token that wants them; they are not what a token has to be.
+ * Molibra is a general-purpose chain that happens to carry an instrument for
+ * expression, exactly as MOLI is a general-purpose coin that happens to pay
+ * for one.
+ *
+ * ⛔ **One rule does not bend for either kind.** A token whose purpose is
+ * `social`, `purchase` or `electoral` can never be transferable, whatever kind
+ * it is. That is the whole art. 29 §8º position and it is enforced here, not
+ * described somewhere else.
  *
  * The load-bearing rules, all enforced by consensus rather than by interface:
  *
@@ -43,8 +64,15 @@ const fromUtf8 = (b) => new TextDecoder().decode(b);
 export const TOKEN_CREATE_TAG = toHex(keccak256(utf8('createToken(bytes)'))).slice(0, 10);
 export const EXPRESS_TAG = toHex(keccak256(utf8('express(bytes32,bytes32)1'))).slice(0, 10);
 export const ISSUE_TAG = toHex(keccak256(utf8('issue(bytes32,uint256)'))).slice(0, 10);
+export const TRANSFER_TAG = toHex(keccak256(utf8('transfer(bytes32,uint256)'))).slice(0, 10);
 
 export const VOTE_MODES = ['single', 'quantum', 'capped', 'weighted'];
+
+/** What a token IS. Declared at creation, immutable, and there is no default. */
+export const KINDS = ['expression', 'asset'];
+
+/** Symbols are short, loud and unambiguous, like every other chain's. */
+const SYMBOL_SHAPE = /^[A-Z0-9]{2,11}$/;
 
 /**
  * What a question is FOR - declared at creation, immutable, and published with
@@ -157,6 +185,16 @@ export function encodeIssue(id, amount) {
 }
 
 /**
+ * Build the `data` for a TRANSFER: holder → holder, for a token that declared
+ * itself transferable. Same shape as an issuance on the wire and a completely
+ * different act in the ledger - which is why the validator checks which one it
+ * is looking at before it moves anything.
+ */
+export function encodeTransfer(id, amount) {
+  return toHex(concatBytes(fromHex(TRANSFER_TAG), b32(id, 'tokenId'), u256(amount)));
+}
+
+/**
  * Build the `data` for an EXPRESS.
  *
  * `pollId` names the macrobiotic quantum — the voting place. It is carried on
@@ -205,6 +243,18 @@ export function decodeIssue(data) {
   };
 }
 
+export function decodeTransfer(data) {
+  if (!data || !String(data).toLowerCase().startsWith(TRANSFER_TAG)) return null;
+  const hex = String(data).toLowerCase();
+  if (hex.length !== 2 + 8 + 128) {
+    throw new Error('malformed transfer: expected tag + tokenId + amount');
+  }
+  return {
+    tokenId: '0x' + hex.slice(10, 74),
+    amount: BigInt('0x' + hex.slice(74, 138)),
+  };
+}
+
 export function decodeExpress(data) {
   if (!data || !String(data).toLowerCase().startsWith(EXPRESS_TAG)) return null;
   const hex = String(data).toLowerCase();
@@ -228,17 +278,48 @@ export function decodeExpress(data) {
  * well-formed.
  */
 export function normalizeTokenRecord(raw, creator, createdAt) {
+  // The kind is declared, never guessed from which fields happen to be
+  // present. Guessing would mean a typo in `options` silently turns somebody's
+  // question into a currency, and the record is immutable.
+  const kind = String(raw?.kind ?? '');
+  if (!KINDS.includes(kind)) {
+    throw new Error(`a token must declare its kind (${KINDS.join(', ')})`);
+  }
+  const isExpression = kind === 'expression';
+
   const title = String(raw?.title ?? '').trim();
-  if (!title) throw new Error('token needs a title: it is the question');
+  if (!title) {
+    throw new Error(isExpression ? 'token needs a title: it is the question' : 'token needs a name');
+  }
   if (title.length > 200) throw new Error('token title too long (max 200)');
 
-  const options = Array.isArray(raw?.options) ? raw.options.map((o) => String(o).trim()) : [];
-  if (options.length < 2) throw new Error('token needs at least two options');
-  if (options.length > 64) throw new Error('too many options (max 64)');
+  // A symbol is required of an asset and optional on a question: an asset is
+  // going to appear in wallets and lists next to other people's tokens, and a
+  // question is not.
+  const symbol = String(raw?.symbol ?? '').trim();
+  if (symbol && !SYMBOL_SHAPE.test(symbol)) {
+    throw new Error('symbol must be 2-11 characters, A-Z and 0-9');
+  }
+  if (!isExpression && !symbol) throw new Error('an asset needs a symbol');
 
-  const voteMode = String(raw?.voteMode ?? 'single');
-  if (!VOTE_MODES.includes(voteMode)) {
-    throw new Error(`unknown vote mode ${voteMode}; expected ${VOTE_MODES.join(', ')}`);
+  const decimals = Number(raw?.decimals ?? 18);
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) {
+    throw new Error('decimals must be a whole number from 0 to 18');
+  }
+
+  const options = Array.isArray(raw?.options) ? raw.options.map((o) => String(o).trim()) : [];
+  const voteMode = isExpression ? String(raw?.voteMode ?? 'single') : '';
+  if (isExpression) {
+    if (options.length < 2) throw new Error('token needs at least two options');
+    if (options.length > 64) throw new Error('too many options (max 64)');
+    if (!VOTE_MODES.includes(voteMode)) {
+      throw new Error(`unknown vote mode ${voteMode}; expected ${VOTE_MODES.join(', ')}`);
+    }
+  } else {
+    // An asset has no question to answer, so carrying the machinery for one
+    // would be a record that lies about what it is.
+    if (options.length) throw new Error('an asset has no options: it is not a question');
+    if (raw?.voteMode) throw new Error('an asset has no vote mode: nothing is voted on');
   }
   const cap = voteMode === 'capped' ? BigInt(raw?.cap ?? 0) : 0n;
   if (voteMode === 'capped' && cap < 1n) {
@@ -257,19 +338,34 @@ export function normalizeTokenRecord(raw, creator, createdAt) {
     throw new Error('initial supply exceeds max supply');
   }
 
-  const expressionCost = BigInt(raw?.expressionCost ?? DEFAULT_EXPRESSION_COST);
-  if (expressionCost <= 0n) throw new Error('expression cost must be positive');
+  const expressionCost = isExpression
+    ? BigInt(raw?.expressionCost ?? DEFAULT_EXPRESSION_COST) : 0n;
+  if (isExpression && expressionCost <= 0n) {
+    throw new Error('expression cost must be positive');
+  }
+  if (!isExpression && raw?.expressionCost !== undefined) {
+    throw new Error('an asset has no expression cost: it is not spent to speak');
+  }
 
   // The purpose is declared, never inferred, and there is no default: a
   // silent default on an immutable record is exactly the trap this field
   // exists to close.
+  //
+  // A QUESTION must declare one - it is the thing being asked, and the mark's
+  // inscription is the scope. An ASSET may declare one and usually should not:
+  // it is not a question, so "what is this question for" has no answer. An
+  // asset that DOES declare a political purpose is held to the same rule as a
+  // question, which is the point - the label is not a way around anything.
   const purpose = String(raw?.purpose ?? '');
-  if (!PURPOSES.includes(purpose)) {
+  if (isExpression && !PURPOSES.includes(purpose)) {
     throw new Error(
       `a token must declare its purpose (${PURPOSES.join(', ')}): the mark is `
       + 'registered for pesquisa e comunicação social, and which of those a '
       + 'question is has to be on the record rather than asserted',
     );
+  }
+  if (!isExpression && purpose && !PURPOSES.includes(purpose)) {
+    throw new Error(`unknown purpose ${purpose}; expected ${PURPOSES.join(', ')}`);
   }
   // The naming rule, enforced. A question declared as expressão pública de
   // compra cannot carry the name of a regulated object it is not.
@@ -291,7 +387,9 @@ export function normalizeTokenRecord(raw, creator, createdAt) {
       `electoral is derived from purpose: purpose ${purpose} implies electoral=${electoral}`);
   }
 
-  const transferable = Boolean(raw?.transferable);
+  // An asset that nobody can send is a curiosity, so transferability is the
+  // default there and opt-in on a question. Either way the rule below governs.
+  const transferable = raw?.transferable === undefined ? !isExpression : Boolean(raw.transferable);
   const issuable = raw?.issuable === undefined ? true : Boolean(raw.issuable);
 
   // The rule that carries the whole compliance argument. Not a warning, not a
@@ -317,10 +415,18 @@ export function normalizeTokenRecord(raw, creator, createdAt) {
   // could ever express on it. That is not a strict token, it is a token
   // nobody can use, and it would be discovered only after the record became
   // immutable.
-  if (!issuable && !transferable) {
+  // The more specific message first: on a question, the failure is that nobody
+  // could ever SPEAK, which is what the creator actually cares about.
+  if (isExpression && !issuable && !transferable) {
     throw new Error(
       'a token that is neither issuable nor transferable can never reach a '
       + 'second holder: nobody but the creator could ever express on it',
+    );
+  }
+  if (!issuable && !transferable && initialSupply === 0n) {
+    throw new Error(
+      'a token that is neither issuable nor transferable, with no initial '
+      + 'supply, can never reach anybody at all',
     );
   }
   if (!issuable && initialSupply === 0n) {
@@ -330,7 +436,10 @@ export function normalizeTokenRecord(raw, creator, createdAt) {
   return {
     id: tokenId(creator, title, createdAt),
     creator: normalizeAddress(creator),
+    kind,
     title,
+    symbol,
+    decimals,
     options,
     voteMode,
     cap: cap.toString(),

@@ -17,6 +17,7 @@ import { intrinsicGas } from './tx.js';
 import { serializeBlock } from './block.js';
 import { PURPOSE_LABELS } from './token.js';
 import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE } from './limits.js';
+import { transactionProof, verifyTransactionProof } from './proof.js';
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
 
@@ -445,6 +446,11 @@ function handleAudit(node, req, res) {
     // they are looking at one-person-one-voice or at weight bought with money.
     const describe = (t) => ({
       ...t,
+      // What it IS, said first, because everything else means something
+      // different depending on the answer.
+      kindLabel: t.kind === 'asset'
+        ? 'asset: held and sent, like a token on any other chain'
+        : 'question: held to speak with, and burned when spent',
       // minted - remaining is the burn, and the burn is the tally. Under
       // `weighted` the units burned and the number of expressions differ, so
       // both are served: never let a reader infer a count from an amount.
@@ -463,6 +469,10 @@ function handleAudit(node, req, res) {
       // the rule uses.
       purposeLabel: PURPOSE_LABELS[t.purpose] ?? t.purpose,
       warnings: [
+        t.kind === 'asset' && t.transferable
+          ? 'TRANSFERABLE ASSET: this token has a market and therefore a price. '
+            + 'It carries no voting semantics and must never be used as one.'
+          : null,
         t.voteMode === 'weighted'
           ? 'WEIGHTED: one unit burned is one unit of weight. This is '
             + 'plutocratic by construction.'
@@ -542,6 +552,16 @@ function handleAudit(node, req, res) {
     if (!block) return json(res, 404, { error: 'block not found' });
     const decoded = url.searchParams.get('decoded') === '1';
     return json(res, 200, decoded ? blockForExplorer(chain, block) : serializeBlock(block));
+  }
+
+  // An inclusion proof anyone can check without trusting this node. The
+  // foundation of connecting to another network - and the only half of that
+  // job that holds nothing and moves nothing.
+  if (path.startsWith('/molibra/proof/')) {
+    const hash = path.slice('/molibra/proof/'.length);
+    const proof = transactionProof(chain, hash);
+    if (!proof) return json(res, 404, { error: 'no mined transaction with that hash' });
+    return json(res, 200, { ...proof, verdict: verifyTransactionProof(proof) });
   }
 
   if (path.startsWith('/molibra/tx/')) {

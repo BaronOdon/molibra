@@ -127,7 +127,8 @@ Everything a third party needs in order to check the chain themselves, over plai
 | `POST /molibra/earn` | Redeem a solved puzzle; the publisher issues chalk and the gas to spend it |
 | `POST /molibra/grant` | A grant against a linking proof — the application's one button, with no puzzle |
 | `GET /molibra/chalk` | The page a person uses to release chalk to their address (pt-BR first, en second) |
-| `GET /molibra/create` | Create a question: the form, with the chain's own rules checked as you type |
+| `GET /molibra/create` | Create a token — a question or an ordinary asset — with the chain's own rules checked as you type |
+| `GET /molibra/proof/{txHash}` | An inclusion proof anyone can verify against the header, without trusting this node |
 | `GET /molibra/wallet.js` | The in-page wallet: key generation, sealing, signing |
 | `GET /molibra/vendor/{hashes,curves}/…` | The crypto that page needs, served from this node rather than a CDN |
 

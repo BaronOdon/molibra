@@ -17,7 +17,7 @@ import { Node } from '../src/node.js';
 import { signTransaction } from '../src/tx.js';
 import { encodeVoteData, toPollId, voteKey, VOTE_TAG } from '../src/vote.js';
 import {
-  encodeTokenCreate, encodeExpress, encodeIssue, tokenId, expressionKey,
+  encodeTokenCreate, encodeExpress, encodeIssue, encodeTransfer, tokenId, expressionKey,
 } from '../src/token.js';
 import { applyTransaction, State } from '../src/state.js';
 import { fromHex, privateToAddress, toChecksumAddress, toHex } from '../src/crypto.js';
@@ -534,6 +534,8 @@ async function main() {
 
   // --- creation -----------------------------------------------------------
   const gizRecord = {
+    kind: 'expression',
+    symbol: 'GIZ',
     title: 'Chalk (GIZ) - the politics chalkboard',
     options: ['agree', 'disagree', 'abstain'],
     voteMode: 'quantum',
@@ -846,6 +848,89 @@ async function main() {
   } catch (e) { no = /unknown token/.test(e.message); }
   check('expressing on a token that does not exist is refused', no);
 
+  // --- assets: an ordinary token, held and sent -------------------------
+  // The chain is not only for questions. A token may be a plain fungible
+  // asset with a symbol, transferable like one on any other network - and the
+  // chalk properties are then something a creator CHOOSES, not something
+  // every token is stuck with.
+  const assetRec = {
+    kind: 'asset',
+    title: 'Feira Token',
+    symbol: 'FEIRA',
+    decimals: 18,
+    initialSupply: (1000n * 10n ** 18n).toString(),
+    maxSupply: '0',
+    issuable: true,
+    transferable: true,
+  };
+  const assetHash = doAlice(encodeTokenCreate(assetRec));
+  tk.mine(ALICE);
+  const FEIRA = tokenId(ALICE, assetRec.title, BigInt(tk.txIndex.get(assetHash).blockNumber));
+  const asset = tk.state.getToken(FEIRA);
+  check('an ordinary transferable token can be created',
+    asset !== null && asset.kind === 'asset' && asset.symbol === 'FEIRA'
+    && asset.transferable === true,
+    'the chalk properties are a choice, not a cage');
+  check('its initial supply is minted to its creator',
+    tk.state.tokenBalanceOf(FEIRA, ALICE) === 1000n * 10n ** 18n
+    && asset.minted === (1000n * 10n ** 18n).toString());
+  check('an asset carries no question machinery',
+    asset.options.length === 0 && asset.voteMode === '' && asset.expressionCost === '0',
+    'a record that carried the parts of a question it is not would lie about itself');
+
+  // --- transfer: holder to holder ---------------------------------------
+  doAlice(encodeTransfer(FEIRA, 250n * 10n ** 18n), BOB);
+  tk.mine(ALICE);
+  check('a transferable token moves from holder to holder',
+    tk.state.tokenBalanceOf(FEIRA, ALICE) === 750n * 10n ** 18n
+    && tk.state.tokenBalanceOf(FEIRA, BOB) === 250n * 10n ** 18n);
+  check('and a transfer mints nothing - the supply is untouched',
+    tk.state.getToken(FEIRA).minted === (1000n * 10n ** 18n).toString(),
+    'issuance creates, transfer only moves');
+
+  // BOB, who is merely a holder, can pass them on - which is exactly what
+  // ISSUE refuses and exactly what makes this a market.
+  doBob(encodeTransfer(FEIRA, 100n * 10n ** 18n), CAROL);
+  tk.mine(ALICE);
+  check('a holder who is not the creator can pass units on',
+    tk.state.tokenBalanceOf(FEIRA, BOB) === 150n * 10n ** 18n
+    && tk.state.tokenBalanceOf(FEIRA, CAROL) === 100n * 10n ** 18n,
+    'this is the difference between transfer and issuance, in one check');
+
+  no = false;
+  try { tk.submitRaw(tryBob(encodeTransfer(FEIRA, 10000n * 10n ** 18n), CAROL)); }
+  catch (e) { no = /insufficient token balance/.test(e.message); }
+  check('a transfer of more than the holder has is refused', no);
+
+  // --- and the keystone still holds -------------------------------------
+  no = false;
+  try { tk.submitRaw(tryAlice(encodeTransfer(GIZ, COST), BOB)); }
+  catch (e) { no = /not transferable/.test(e.message); }
+  check('GIZ still cannot be transferred, whatever anyone asks', no,
+    'transferability is now a real operation, and it is still refused here');
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...assetRec, title: 'a tradable political token', purpose: 'electoral' })));
+  } catch (e) { no = /can never be transferable/.test(e.message); }
+  check('an ASSET declaring a political purpose cannot be transferable either', no,
+    'calling it an asset is not a way around the rule');
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate({ ...assetRec, title: 'no symbol', symbol: '' })));
+  } catch (e) { no = /needs a symbol/.test(e.message); }
+  check('an asset without a symbol is refused', no);
+
+  no = false;
+  try {
+    tk.submitRaw(tryAlice(encodeTokenCreate(
+      { ...assetRec, title: 'asset with options', options: ['a', 'b'] })));
+  } catch (e) { no = /no options/.test(e.message); }
+  check('an asset carrying options is refused', no,
+    'the kind is declared, not guessed from which fields turned up');
+
   // --- consensus ----------------------------------------------------------
   const tkMirror = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-b')).init();
   for (let n = 1; n <= Number(tk.height); n++) {
@@ -856,6 +941,9 @@ async function main() {
     && tkMirror.state.getToken(GIZ).burned === (COST * 2n).toString()
     && tkMirror.state.tokenBalanceOf(GIZ, BOB) === COST * 8n,
     'issuance, burn and counts all live in the root');
+  check('including every transfer, re-executed from the raw blocks',
+    tkMirror.state.tokenBalanceOf(FEIRA, BOB) === 150n * 10n ** 18n
+    && tkMirror.state.tokenBalanceOf(FEIRA, CAROL) === 100n * 10n ** 18n);
 
   // A reorg must return the burned units AND unwind the issuance. Because
   // tokens live in state, this comes for free - the same property the vote
@@ -879,7 +967,7 @@ async function main() {
   // It runs on a node because it has to sign and broadcast a real ISSUE.
   const iNode = new Node({ genesisPath: GENESIS, dataDir: scratch('issuer'), miner: ALICE });
   for (let i = 0; i < 4; i++) iNode.chain.mine(ALICE);
-  const iRec = { title: 'Chalk (GIZ) on the earning node',
+  const iRec = { kind: 'expression', title: 'Chalk (GIZ) on the earning node',
                  options: ['agree', 'disagree'], voteMode: 'quantum',
                  initialSupply: '0', maxSupply: '0', expressionCost: COST.toString(),
                  issuable: true, purpose: 'social', transferable: false };

@@ -14,8 +14,8 @@
 import { keccak256, toHex, normalizeAddress } from './crypto.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
-  decodeTokenCreate, decodeExpress, decodeIssue, normalizeTokenRecord,
-  expressionKey, expressionBurn,
+  decodeTokenCreate, decodeExpress, decodeIssue, decodeTransfer,
+  normalizeTokenRecord, expressionKey, expressionBurn,
 } from './token.js';
 
 export class State {
@@ -93,6 +93,20 @@ export class State {
     }
     rec.minted = minted.toString();
     this.setTokenBalance(id, address, this.tokenBalanceOf(id, address) + asked);
+  }
+
+  /**
+   * Move units between holders. Only reachable for a token that declared
+   * itself transferable - the check lives in applyTransaction, before this is
+   * called, because a balance function that enforced policy would be a policy
+   * nobody could find.
+   */
+  moveToken(id, from, to, amount) {
+    const held = this.tokenBalanceOf(id, from);
+    const asked = BigInt(amount);
+    if (held < asked) throw new Error('insufficient token balance');
+    this.setTokenBalance(id, from, held - asked);
+    this.setTokenBalance(id, to, this.tokenBalanceOf(id, to) + asked);
   }
 
   /** Destroyed, not transferred - which is what makes the burn the tally. */
@@ -217,8 +231,9 @@ export class State {
       // rules (mode, cap, ceiling, cost, flags) and the running accounting
       // (minted, burned, expressions). An issuance that one node counted and
       // another did not must break the root, not drift quietly.
-      lines.push(`token:${id}:${t.voteMode}:${t.purpose}:${t.cap}:${t.maxSupply}:`
-        + `${t.minted}:${t.burned}:${t.expressions}:${t.expressionCost}:`
+      lines.push(`token:${id}:${t.kind}:${t.symbol}:${t.decimals}:${t.voteMode}:`
+        + `${t.purpose}:${t.cap}:${t.maxSupply}:${t.minted}:${t.burned}:`
+        + `${t.expressions}:${t.expressionCost}:`
         + `${t.transferable ? 1 : 0}${t.electoral ? 1 : 0}${t.issuable ? 1 : 0}`);
     }
     for (const k of [...this.tokenBalances.keys()].sort()) {
@@ -304,6 +319,28 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     issued = { token, to: tx.to, amount: issue.amount };
   }
 
+  // A transfer: holder → holder, and the ONE place the transferable flag
+  // stops being a description and becomes a rule. A token that did not declare
+  // itself transferable cannot move, however its holder asks.
+  const transfer = decodeTransfer(tx.data);
+  let moved = null;
+  if (transfer) {
+    if (tx.value !== 0n) throw new Error('a token transfer moves no MOLI');
+    if (!tx.to) throw new Error('a transfer needs a recipient');
+    const token = state.getToken(transfer.tokenId);
+    if (!token) throw new Error(`unknown token ${transfer.tokenId}`);
+    if (!token.transferable) {
+      throw new Error(
+        `token ${token.id} is not transferable: it has no market and no price, `
+        + 'which is the property it was created to have');
+    }
+    if (transfer.amount <= 0n) throw new Error('a transfer must be positive');
+    if (state.tokenBalanceOf(token.id, tx.from) < transfer.amount) {
+      throw new Error('insufficient token balance');
+    }
+    moved = { token, to: tx.to, amount: transfer.amount };
+  }
+
   const express = decodeExpress(tx.data);
   let expressed = null;
   let burnAmount = 0n;
@@ -367,6 +404,10 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     state.mintToken(issued.token.id, issued.to, issued.amount);
   }
 
+  if (moved) {
+    state.moveToken(moved.token.id, tx.from, moved.to, moved.amount);
+  }
+
   if (expressed) {
     // Burn, do not transfer: the units are destroyed, so they cannot be
     // replayed and `minted - remaining` is what anyone can verify.
@@ -384,8 +425,9 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     status: 1,
     voteKey: key ?? expressed?.key ?? null,
     pollId: expression?.pollId ?? null,
-    tokenId: record?.id ?? expressed?.token.id ?? issued?.token.id ?? null,
+    tokenId: record?.id ?? expressed?.token.id ?? issued?.token.id ?? moved?.token.id ?? null,
     tokenAmount: expressed ? expressed.amount.toString()
-      : (issued ? issued.amount.toString() : null),
+      : (issued ? issued.amount.toString()
+        : (moved ? moved.amount.toString() : null)),
   };
 }

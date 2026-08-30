@@ -40,6 +40,7 @@ const CREATOR = privateToAddress(fromHex('0x' + '01'.repeat(32)));
 const UNIT = 10n ** 18n;
 
 const base = {
+  kind: 'expression',
   title: 'Quem você comprou hoje?',
   options: ['A', 'B'],
   purpose: 'purchase',
@@ -145,6 +146,56 @@ for (const voteMode of form.VOTE_MODES) {
 }
 check('every mode the form offers is one the chain implements', modeProblems.length === 0,
   modeProblems.join(' | ') || form.VOTE_MODES.join(', '));
+
+// --- the other kind: an ordinary token -----------------------------------
+const assetForm = {
+  kind: 'asset',
+  title: 'Feira Token',
+  symbol: 'FEIRA',
+  decimals: 18,
+  options: [],
+  purpose: '',
+  voteMode: '',
+  cap: 2,
+  expressionCost: '0',
+  initialSupply: (1000n * UNIT).toString(),
+  maxSupply: '0',
+  issuable: true,
+  transferable: true,
+};
+check('the form calls a plain transferable token valid',
+  form.problemsWith(assetForm).length === 0,
+  form.problemsWith(assetForm).join(', ') || 'no problems');
+check('and the chain accepts it', chainAccepts(assetForm) === null,
+  chainAccepts(assetForm) ?? 'accepted');
+
+const assetRecord = form.buildRecord(assetForm);
+check('the asset record omits the question machinery rather than sending it empty',
+  !('options' in assetRecord) && !('voteMode' in assetRecord)
+  && !('expressionCost' in assetRecord) && !('purpose' in assetRecord),
+  'the validator refuses an asset that carries any of them');
+check('and it carries what an asset needs',
+  assetRecord.kind === 'asset' && assetRecord.symbol === 'FEIRA'
+  && assetRecord.decimals === 18 && assetRecord.transferable === true);
+
+const assetBad = [
+  ['needsKind', { ...assetForm, kind: '' }],
+  ['needsSymbol', { ...assetForm, symbol: '' }],
+  ['badSymbol', { ...assetForm, symbol: 'not a symbol' }],
+  ['badDecimals', { ...assetForm, decimals: 19 }],
+  ['cannotTransfer', { ...assetForm, purpose: 'electoral' }],
+  ['nothingToIssue', { ...assetForm, issuable: false, transferable: false, initialSupply: '0' }],
+];
+let assetMismatches = [];
+for (const [expected, f] of assetBad) {
+  if (!form.problemsWith(f).includes(expected)) assetMismatches.push(`${expected}: form allowed it`);
+  if (chainAccepts(f) === null) assetMismatches.push(`${expected}: chain accepted it`);
+}
+check('every asset the form refuses, the chain refuses too', assetMismatches.length === 0,
+  assetMismatches.join(' | ') || `${assetBad.length} cases`);
+
+check('an expression token and an asset with the same title are different tokens',
+  JSON.stringify(form.buildRecord(base)) !== JSON.stringify(assetRecord));
 
 // --- the cost arithmetic the person actually sees ------------------------
 check('1000 millionths of a unit reads back as 1,000 expressions per unit',

@@ -47,23 +47,42 @@
 <p class="muted" data-t="intro"></p>
 
 <div class="card">
-  <h2 data-t="qTitle"></h2>
-  <p class="muted small" data-t="qTitleHelp"></p>
-  <input id="title" maxlength="200" data-t-placeholder="qTitlePlaceholder">
-
-  <label data-t="qOptions"></label>
-  <div id="options"></div>
-  <p><button class="ghost" id="addOption" data-t="addOption"></button></p>
+  <h2 data-t="qKind"></h2>
+  <p class="muted small" data-t="qKindHelp"></p>
+  <select id="kind"></select>
+  <div id="kindNote" class="warn"></div>
 </div>
 
 <div class="card">
+  <h2 data-t="qTitle" id="titleHead"></h2>
+  <p class="muted small" data-t="qTitleHelp" id="titleHelp"></p>
+  <input id="title" maxlength="200" data-t-placeholder="qTitlePlaceholder">
+
+  <div id="symbolRow">
+    <label data-t="qSymbol"></label>
+    <!-- Deliberately NOT "MOLI": that is the network's own coin, not something
+         a person creates here, and offering it as the example invites exactly
+         the confusion between the coin, the chalk, and a user's token. -->
+    <input id="symbol" class="mono" maxlength="11" placeholder="FEIRA">
+    <label data-t="qDecimals"></label>
+    <input id="decimals" type="number" min="0" max="18" value="18">
+  </div>
+
+  <div id="optionsBlock">
+    <label data-t="qOptions"></label>
+    <div id="options"></div>
+    <p><button class="ghost" id="addOption" data-t="addOption"></button></p>
+  </div>
+</div>
+
+<div class="card" id="purposeCard">
   <h2 data-t="qPurpose"></h2>
   <p class="muted small" data-t="qPurposeHelp"></p>
   <select id="purpose"></select>
   <div id="purposeNote" class="warn"></div>
 </div>
 
-<div class="card">
+<div class="card" id="modeCard">
   <h2 data-t="qMode"></h2>
   <p class="muted small" data-t="qModeHelp"></p>
   <select id="voteMode"></select>
@@ -75,11 +94,18 @@
 </div>
 
 <div class="card">
-  <h2 data-t="qSupply"></h2>
-  <p class="muted small" data-t="qSupplyHelp"></p>
-  <label data-t="qCost"></label>
-  <input id="cost" type="number" min="1" step="1" value="1000">
-  <p class="muted small" id="costNote"></p>
+  <h2 data-t="qSupply" id="supplyHead"></h2>
+  <p class="muted small" data-t="qSupplyHelp" id="supplyHelp"></p>
+  <div id="costRow">
+    <label data-t="qCost"></label>
+    <input id="cost" type="number" min="1" step="1" value="1000">
+    <p class="muted small" id="costNote"></p>
+  </div>
+
+  <div id="initialRow" hidden>
+    <label data-t="qInitial"></label>
+    <input id="initialUnits" type="number" min="0" value="1000000">
+  </div>
 
   <label class="row"><input type="checkbox" id="issuable" checked style="width:auto">
     <span data-t="qIssuable"></span></label>
@@ -96,7 +122,7 @@
 
 <div class="card">
   <h2 data-t="qSign"></h2>
-  <p class="muted small" data-t="qSignHelp"></p>
+  <p class="muted small" data-t="qSignHelp" id="signHelp"></p>
   <p id="who" class="small muted"></p>
   <p>
     <button class="ghost" id="useWallet" data-t="useWallet"></button>
@@ -147,58 +173,92 @@ const PURPOSES = {
 
 const VOTE_MODES = ['quantum', 'single', 'capped', 'weighted'];
 
+/**
+ * What is being created. A question, or an ordinary token that can be held and
+ * sent like a token on any other chain. The chalk properties are available to
+ * either; they are not what a token has to be.
+ */
+const KINDS = ['expression', 'asset'];
+const SYMBOL_SHAPE = /^[A-Z0-9]{2,11}$/;
+
 /** Mirrors normalizeTokenRecord. Returns a list of problems - empty is valid. */
 function problemsWith(form) {
   const problems = [];
+  if (!KINDS.includes(form.kind)) problems.push('needsKind');
+  const isExpression = form.kind === 'expression';
+
   const title = String(form.title ?? '').trim();
   if (!title) problems.push('needsTitle');
   if (title.length > 200) problems.push('titleTooLong');
 
-  const options = (form.options ?? []).map((o) => String(o).trim()).filter(Boolean);
-  if (options.length < 2) problems.push('needsTwoOptions');
-  if (options.length > 64) problems.push('tooManyOptions');
-  if (new Set(options.map((o) => o.toLowerCase())).size !== options.length) {
-    problems.push('duplicateOptions');
+  if (!isExpression) {
+    const symbol = String(form.symbol ?? '').trim();
+    if (!symbol) problems.push('needsSymbol');
+    else if (!SYMBOL_SHAPE.test(symbol)) problems.push('badSymbol');
+    const decimals = Number(form.decimals ?? 18);
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) problems.push('badDecimals');
   }
 
-  if (!(form.purpose in PURPOSES)) problems.push('needsPurpose');
+  if (isExpression) {
+    const options = (form.options ?? []).map((o) => String(o).trim()).filter(Boolean);
+    if (options.length < 2) problems.push('needsTwoOptions');
+    if (options.length > 64) problems.push('tooManyOptions');
+    if (new Set(options.map((o) => o.toLowerCase())).size !== options.length) {
+      problems.push('duplicateOptions');
+    }
+    if (!(form.purpose in PURPOSES)) problems.push('needsPurpose');
+    if (!VOTE_MODES.includes(form.voteMode)) problems.push('needsMode');
+    if (form.voteMode === 'capped' && !(Number(form.cap) >= 1)) problems.push('needsCap');
+    if (!(BigInt(form.expressionCost ?? 0) > 0n)) problems.push('needsCost');
 
-  if (!VOTE_MODES.includes(form.voteMode)) problems.push('needsMode');
-  if (form.voteMode === 'capped' && !(Number(form.cap) >= 1)) problems.push('needsCap');
-
-  if (!(BigInt(form.expressionCost ?? 0) > 0n)) problems.push('needsCost');
-
-  // The naming rule, checked here so the form says so before the chain does.
-  if (form.purpose === 'purchase' && /\b(enquete|enquetes|pesquisa|pesquisas)\b/i.test(title)) {
-    problems.push('noEnqueteName');
+    // The naming rule, checked here so the form says so before the chain does.
+    if (form.purpose === 'purchase' && /\b(enquete|enquetes|pesquisa|pesquisas)\b/i.test(title)) {
+      problems.push('noEnqueteName');
+    }
   }
 
-  // The compliance keystone.
+  // The compliance keystone. It binds an ASSET too: declaring a political
+  // purpose on a token that can be sent does not make it a different object,
+  // and calling it an asset is not a way around the rule.
   if (form.transferable && form.purpose in PURPOSES && !PURPOSES[form.purpose].mayTransfer) {
     problems.push('cannotTransfer');
   }
 
-  // The dead end: nobody but the creator could ever hold a unit.
-  if (!form.issuable && !form.transferable) problems.push('deadEnd');
-  if (!form.issuable && BigInt(form.initialSupply ?? 0) === 0n) problems.push('nothingToIssue');
+  // The dead end: nothing could ever reach anybody.
+  if (isExpression && !form.issuable && !form.transferable) problems.push('deadEnd');
+  if (!form.issuable && !form.transferable
+      && BigInt(form.initialSupply ?? 0) === 0n) problems.push('nothingToIssue');
 
   const max = BigInt(form.maxSupply ?? 0);
   if (max > 0n && BigInt(form.initialSupply ?? 0) > max) problems.push('supplyOverMax');
   return problems;
 }
 
-/** The record exactly as the chain wants it. */
+/**
+ * The record exactly as the chain wants it.
+ *
+ * The fields that belong to the other kind are OMITTED, not sent empty: the
+ * validator refuses an asset that carries options or an expression cost,
+ * because a record that carries the machinery of a question it is not would be
+ * a record that lies about itself.
+ */
 function buildRecord(form) {
+  const isExpression = form.kind === 'expression';
   return {
+    kind: form.kind,
     title: String(form.title).trim(),
-    options: (form.options ?? []).map((o) => String(o).trim()).filter(Boolean),
-    voteMode: form.voteMode,
-    ...(form.voteMode === 'capped' ? { cap: Number(form.cap) } : {}),
+    ...(String(form.symbol ?? '').trim() ? { symbol: String(form.symbol).trim() } : {}),
+    ...(isExpression ? {} : { decimals: Number(form.decimals ?? 18) }),
+    ...(isExpression ? {
+      options: (form.options ?? []).map((o) => String(o).trim()).filter(Boolean),
+      voteMode: form.voteMode,
+      ...(form.voteMode === 'capped' ? { cap: Number(form.cap) } : {}),
+      expressionCost: String(form.expressionCost),
+      purpose: form.purpose,
+    } : (form.purpose ? { purpose: form.purpose } : {})),
     initialSupply: String(form.initialSupply ?? '0'),
     maxSupply: String(form.maxSupply ?? '0'),
-    expressionCost: String(form.expressionCost),
     issuable: Boolean(form.issuable),
-    purpose: form.purpose,
     transferable: Boolean(form.transferable),
   };
 }
@@ -215,10 +275,34 @@ function expressionsPerUnit(expressionCost) {
 const STRINGS = {
   'pt-BR': {
     lang: 'Português (BR)',
-    title: 'Criar uma pergunta',
-    intro: 'Uma pergunta no Molibra é um token: a pergunta, as opções, e a regra pela qual as '
-      + 'pessoas podem falar sobre ela. Tudo fica <b>fixo na criação e publicado junto</b> — '
-      + 'quem lê nunca precisa acreditar numa descrição.',
+    title: 'Criar um token',
+    intro: 'Qualquer pessoa pode criar um token nesta rede. Pode ser uma <b>pergunta</b> — com '
+      + 'opções e uma regra de quem pode falar — ou um <b>token comum</b>, que se guarda e se '
+      + 'envia como em qualquer outra blockchain. Tudo fica <b>fixo na criação e publicado '
+      + 'junto</b>: quem lê nunca precisa acreditar numa descrição.',
+    qKind: 'O que você está criando',
+    qKindHelp: 'Escolhido na criação e imutável. As características do giz — intransferível, '
+      + 'gasto para falar, queimado no uso — estão disponíveis para qualquer token, mas nenhum '
+      + 'token é obrigado a tê-las.',
+    k_expression: 'Uma pergunta — pessoas respondem gastando o token',
+    k_asset: 'Um token comum — guardado e enviado entre pessoas',
+    kn_expression: 'Uma pergunta: opções, regra de quem fala, e um custo por expressão. Falar '
+      + 'queima o token, e a queima é a contagem — ninguém precisa confiar num contador.',
+    kn_asset: 'Um token comum, com símbolo e casas decimais, transferível entre pessoas como '
+      + 'em qualquer outra rede. <b>Tem mercado e, portanto, preço</b> — e por isso não pode '
+      + 'carregar assunto político.',
+    qTitle_asset: 'O token',
+    qTitleHelp_asset: 'É o nome do token e não pode ser mudado depois.',
+    qTitlePlaceholder_asset: 'Como se chama o seu token?',
+    qSupply_asset: 'Quantidade',
+    qSupplyHelp_asset: 'Quantas unidades existem, e se pode existir mais. Uma unidade é '
+      + '10^18 na contagem interna, como em qualquer outra rede.',
+    qSignHelp_asset: 'Criar um token custa gás em MOLI. Use sua carteira ou a chave criada '
+      + 'neste site.',
+    needsTitle_asset: 'O token precisa de um nome.',
+    qSymbol: 'Símbolo (2 a 11 caracteres, A-Z e 0-9)',
+    qDecimals: 'Casas decimais',
+    qInitial: 'Quantidade inicial para você (unidades)',
     qTitle: 'A pergunta',
     qTitleHelp: 'É o título do token e não pode ser mudado depois.',
     qTitlePlaceholder: 'O que você quer perguntar?',
@@ -259,6 +343,12 @@ const STRINGS = {
     failed: 'Falhou: {error}',
     perUnit: 'Uma unidade inteira cobre {n} expressões.',
     // problems
+    needsMoli: 'Criar um token custa gás em MOLI, como qualquer transação. Você tem '
+      + '{have} MOLI e precisa de cerca de {need}. Publicar é quem paga.',
+    needsKind: 'Escolha o que você está criando.',
+    needsSymbol: 'Um token comum precisa de um símbolo.',
+    badSymbol: 'O símbolo precisa ter de 2 a 11 caracteres, só A-Z e 0-9.',
+    badDecimals: 'As casas decimais precisam ser um número inteiro de 0 a 18.',
     needsTitle: 'A pergunta precisa de um título.',
     titleTooLong: 'Título longo demais (máx. 200).',
     needsTwoOptions: 'São necessárias pelo menos duas opções.',
@@ -304,10 +394,34 @@ const STRINGS = {
   },
   en: {
     lang: 'English',
-    title: 'Create a question',
-    intro: 'A question on Molibra is a token: the question, its options, and the rule by which '
-      + 'people may speak on it. All of it is <b>fixed at creation and published with it</b> — '
-      + 'a reader never has to trust a description.',
+    title: 'Create a token',
+    intro: 'Anyone can create a token on this network. It can be a <b>question</b> — with '
+      + 'options and a rule for who may speak — or an <b>ordinary token</b>, held and sent like '
+      + 'one on any other blockchain. All of it is <b>fixed at creation and published with '
+      + 'it</b>: a reader never has to trust a description.',
+    qKind: 'What you are creating',
+    qKindHelp: 'Chosen at creation and immutable. The chalk properties — non-transferable, '
+      + 'spent to speak, burned on use — are available to any token, but no token has to have '
+      + 'them.',
+    k_expression: 'A question — people answer it by spending the token',
+    k_asset: 'An ordinary token — held and sent between people',
+    kn_expression: 'A question: options, a rule for who speaks, and a cost per expression. '
+      + 'Speaking burns the token, and the burn is the count — nobody has to trust a counter.',
+    kn_asset: 'An ordinary token, with a symbol and decimals, transferable between people as on '
+      + 'any other network. <b>It has a market and therefore a price</b> — which is why it '
+      + 'cannot carry a political subject.',
+    qTitle_asset: 'The token',
+    qTitleHelp_asset: 'It is the token name and cannot be changed afterwards.',
+    qTitlePlaceholder_asset: 'What is your token called?',
+    qSupply_asset: 'Amount',
+    qSupplyHelp_asset: 'How many units exist, and whether more may. One unit is 10^18 in the '
+      + 'internal count, as on any other network.',
+    qSignHelp_asset: 'Creating a token costs gas in MOLI. Use your wallet or the key created '
+      + 'on this site.',
+    needsTitle_asset: 'The token needs a name.',
+    qSymbol: 'Symbol (2–11 characters, A–Z and 0–9)',
+    qDecimals: 'Decimals',
+    qInitial: 'Initial amount for you (units)',
     qTitle: 'The question',
     qTitleHelp: 'It is the token title and cannot be changed afterwards.',
     qTitlePlaceholder: 'What do you want to ask?',
@@ -347,6 +461,12 @@ const STRINGS = {
       + 'title and block height — read it at <a href="/molibra/tokens">/molibra/tokens</a>.',
     failed: 'Failed: {error}',
     perUnit: 'One whole unit covers {n} expressions.',
+    needsMoli: 'Creating a token costs gas in MOLI, like any transaction. You have {have} '
+      + 'MOLI and need about {need}. Publishing is what pays.',
+    needsKind: 'Choose what you are creating.',
+    needsSymbol: 'An ordinary token needs a symbol.',
+    badSymbol: 'The symbol must be 2–11 characters, A–Z and 0–9 only.',
+    badDecimals: 'Decimals must be a whole number from 0 to 18.',
     needsTitle: 'The question needs a title.',
     titleTooLong: 'Title too long (max 200).',
     needsTwoOptions: 'At least two options are needed.',
@@ -438,16 +558,25 @@ function addOption(value = '') {
 
 function readForm() {
   const costMillionths = BigInt($('cost').value || '0');
+  const kind = $('kind').value;
+  const isExpression = kind === 'expression';
   return {
+    kind,
     title: $('title').value,
+    symbol: $('symbol').value.trim().toUpperCase(),
+    decimals: Number($('decimals').value || '18'),
     options: optionRows(),
-    purpose: $('purpose').value,
-    voteMode: $('voteMode').value,
+    // An asset answers no question, so it declares no purpose. Leaving one
+    // attached would put a political label on a tradable token, which is the
+    // one combination the chain refuses outright.
+    purpose: isExpression ? $('purpose').value : '',
+    voteMode: isExpression ? $('voteMode').value : '',
     cap: $('cap').value,
     // The form asks for millionths of a unit, because "1000" is a number a
     // person can hold in their head and 10^12 is not.
-    expressionCost: (costMillionths * (UNIT / 1000000n)).toString(),
-    initialSupply: '0',
+    expressionCost: isExpression ? (costMillionths * (UNIT / 1000000n)).toString() : '0',
+    initialSupply: isExpression
+      ? '0' : (BigInt($('initialUnits').value || '0') * UNIT).toString(),
     maxSupply: $('capped').checked
       ? (BigInt($('maxUnits').value || '0') * UNIT).toString() : '0',
     issuable: $('issuable').checked,
@@ -457,15 +586,39 @@ function readForm() {
 
 function refresh() {
   const form = readForm();
+  const isExpression = form.kind === 'expression';
   const purpose = PURPOSES[form.purpose];
 
-  $('purposeNote').innerHTML = t('pn_' + form.purpose);
-  $('modeNote').innerHTML = t('mn_' + form.voteMode);
-  $('capRow').hidden = form.voteMode !== 'capped';
+  // The two kinds ask for different things, so the form shows different
+  // things. Nothing is merely disabled: a field that does not apply is a
+  // field that should not be on the screen.
+  $('kindNote').innerHTML = t('kn_' + form.kind);
+  // The words follow the kind. A form that calls a currency "the question"
+  // has told the person it does not know what they are making.
+  const suffix = isExpression ? '' : '_asset';
+  $('titleHead').innerHTML = t('qTitle' + suffix);
+  $('titleHelp').innerHTML = t('qTitleHelp' + suffix);
+  $('title').placeholder = t('qTitlePlaceholder' + suffix);
+  $('supplyHead').innerHTML = t('qSupply' + suffix);
+  $('supplyHelp').innerHTML = t('qSupplyHelp' + suffix);
+  $('signHelp').innerHTML = t('qSignHelp' + suffix);
+  $('optionsBlock').hidden = !isExpression;
+  $('symbolRow').hidden = isExpression;
+  $('purposeCard').hidden = !isExpression;
+  $('modeCard').hidden = !isExpression;
+  $('costRow').hidden = !isExpression;
+  $('initialRow').hidden = isExpression;
+
+  if (isExpression) {
+    $('purposeNote').innerHTML = t('pn_' + form.purpose);
+    $('modeNote').innerHTML = t('mn_' + form.voteMode);
+  }
+  $('capRow').hidden = !isExpression || form.voteMode !== 'capped';
   $('maxRow').hidden = !$('capped').checked;
 
   // Transferability is not offered where consensus would refuse it, and the
-  // reason is shown rather than the control silently vanishing.
+  // reason is shown rather than the control silently vanishing. An asset
+  // declares no purpose, so nothing stands in its way.
   const mayTransfer = purpose ? purpose.mayTransfer : true;
   $('transferable').disabled = !mayTransfer;
   if (!mayTransfer) $('transferable').checked = false;
@@ -473,12 +626,22 @@ function refresh() {
   $('transferNote').innerHTML = t('cannotTransfer');
 
   const perUnit = expressionsPerUnit(form.expressionCost);
-  $('costNote').textContent = perUnit > 0n
+  $('costNote').textContent = isExpression && perUnit > 0n
     ? t('perUnit', { n: perUnit.toLocaleString(LANG) }) : '';
 
   const problems = problemsWith(form);
+  // A problem may read differently for an asset ("needs a name" rather than
+  // "needs a title"). Where no asset wording exists, the shared one is used -
+  // checked by looking the key up, not by pattern-matching the result, which
+  // would print a raw key the day somebody adds a problem and forgets a
+  // translation.
+  const problemText = (key) => {
+    const alt = key + '_asset';
+    const hasAlt = (STRINGS[LANG]?.[alt] ?? STRINGS.en[alt]) !== undefined;
+    return t(!isExpression && hasAlt ? alt : key);
+  };
   $('problems').innerHTML = problems
-    .map((p) => `<div class="stop">${t(p)}</div>`).join('');
+    .map((key) => `<div class="stop">${problemText(key)}</div>`).join('');
 
   const ok = problems.length === 0;
   $('create').disabled = !ok || !signer;
@@ -531,6 +694,20 @@ $('create').onclick = async () => {
   const data = encodeTokenCreate(buildRecord(form));
   $('out').className = 'small muted';
   try {
+    // Creating a token costs gas in MOLI, like any other transaction. Checked
+    // here so the person is told before they sign, rather than after a node
+    // refuses a transaction they already approved.
+    const balance = BigInt(await rpc('eth_getBalance', [address, 'latest']));
+    const gasPrice = BigInt(await rpc('eth_gasPrice', []));
+    const needed = 300000n * gasPrice;
+    if (balance < needed) {
+      $('out').className = 'small err';
+      $('out').innerHTML = t('needsMoli', {
+        have: (Number(balance) / 1e18).toFixed(4),
+        need: (Number(needed) / 1e18).toFixed(4),
+      });
+      return;
+    }
     let hash;
     if (signer.kind === 'wallet') {
       $('out').innerHTML = t('sending');
@@ -574,6 +751,8 @@ function applyLanguage() {
     el.placeholder = t(el.dataset.tPlaceholder);
   }
   document.title = t('title') + ' — Molibra';
+  $('kind').innerHTML = KINDS
+    .map((k) => `<option value="${k}">${t('k_' + k)}</option>`).join('');
   $('purpose').innerHTML = Object.keys(PURPOSES)
     .map((p) => `<option value="${p}">${t('p_' + p)}</option>`).join('');
   $('voteMode').innerHTML = VOTE_MODES
@@ -583,7 +762,9 @@ function applyLanguage() {
 function render(keepValues) {
   const purpose = keepValues ? $('purpose').value : 'purchase';
   const mode = keepValues ? $('voteMode').value : 'quantum';
+  const kind = keepValues ? $('kind').value : 'expression';
   applyLanguage();
+  $('kind').value = kind;
   $('purpose').value = purpose;
   $('voteMode').value = mode;
   for (const b of $('langs').children) {
@@ -600,11 +781,18 @@ for (const code of Object.keys(STRINGS)) {
   $('langs').appendChild(b);
 }
 
+// An asset is normally meant to move; a question normally is not. The default
+// follows the kind, and the person can still say otherwise.
+$('kind').addEventListener('change', () => {
+  $('transferable').checked = $('kind').value === 'asset';
+  refresh();
+});
+
 addOption();
 addOption();
 $('addOption').onclick = () => { addOption(); refresh(); };
-for (const id of ['title', 'purpose', 'voteMode', 'cap', 'cost',
-                  'issuable', 'capped', 'maxUnits', 'transferable']) {
+for (const id of ['kind', 'title', 'symbol', 'decimals', 'purpose', 'voteMode', 'cap',
+                  'cost', 'initialUnits', 'issuable', 'capped', 'maxUnits', 'transferable']) {
   $(id).addEventListener('input', refresh);
   $(id).addEventListener('change', refresh);
 }
