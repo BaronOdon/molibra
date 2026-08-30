@@ -1,8 +1,13 @@
 /**
  * Molibra - account state.
  *
- * A plain account model: balance and nonce per address. There is no EVM in
- * v0.1, so there is no code or storage to track.
+ * Balance and nonce per address, plus deployed code and contract storage.
+ *
+ * Code and storage live in their own maps rather than inside the account
+ * record, for the same reason tokens and vote keys do: they are appended to
+ * the root ONLY when present, so a chain written before contracts existed
+ * hashes to exactly the same root it always did. Adding the EVM is therefore
+ * not a hard fork of the existing chain.
  *
  * NOTE ON stateRoot: this is a deterministic Keccak-256 over the sorted
  * account set, NOT an Ethereum Merkle-Patricia trie root. It gives every node
@@ -11,18 +16,43 @@
  * trie proofs. Wallets do not check it.
  */
 
-import { keccak256, toHex, normalizeAddress } from './crypto.js';
+import { keccak256, toHex, fromHex, normalizeAddress } from './crypto.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
   decodeTokenCreate, decodeExpress, decodeIssue, decodeTransfer,
   normalizeTokenRecord, expressionKey, expressionBurn,
 } from './token.js';
 
+/** A storage word of zero. Unset and zero are the same thing, as in the EVM. */
+export const ZERO_WORD = '0x' + '00'.repeat(32);
+
+/** Anything word-shaped -> a 32-byte 0x hex string, so keys and values sort. */
+export function toWord(value) {
+  if (value instanceof Uint8Array) {
+    const padded = new Uint8Array(32);
+    padded.set(value.slice(-32), 32 - Math.min(32, value.length));
+    return toHex(padded);
+  }
+  const big = typeof value === 'bigint' ? value : BigInt(value ?? 0);
+  if (big < 0n) throw new Error('negative storage word');
+  return '0x' + big.toString(16).padStart(64, '0');
+}
+
+const storageKey = (address, slot) => `${normalizeAddress(address)}:${toWord(slot)}`;
+
 export class State {
   constructor(accounts = new Map(), voteKeys = new Set(),
               tokens = new Map(), tokenBalances = new Map(),
-              expressCounts = new Map()) {
+              expressCounts = new Map(),
+              code = new Map(), storage = new Map()) {
     this.accounts = accounts;
+    // Deployed runtime code, keyed by address. An address with no entry is an
+    // externally owned account; that is the only difference between the two.
+    this.code = code;
+    // Contract storage, keyed `${address}:${slot}` where slot is a 32-byte
+    // hex word. A slot set back to zero is DELETED rather than stored as
+    // zero, so the root cannot depend on whether a slot was ever written.
+    this.storage = storage;
     // The token registry. Immutable records, plus the supply accounting
     // that makes `minted - remaining = expressions cast` checkable by
     // anyone. Balances are keyed `${tokenId}:${address}`.
@@ -139,7 +169,14 @@ export class State {
       });
     }
     const voteKeys = new Set((obj && obj.voteKeys ? obj.voteKeys : []).map((k) => String(k).toLowerCase()));
-    return new State(accounts, voteKeys);
+    const state = new State(accounts, voteKeys);
+    for (const [address, hex] of Object.entries((obj && obj.code) || {})) {
+      state.setCode(address, fromHex(hex));
+    }
+    for (const [address, slots] of Object.entries((obj && obj.storage) || {})) {
+      for (const [slot, value] of Object.entries(slots)) state.setStorage(address, slot, value);
+    }
+    return state;
   }
 
   toJSON() {
@@ -148,7 +185,21 @@ export class State {
       const account = this.accounts.get(address);
       accounts[address] = { balance: account.balance.toString(), nonce: account.nonce.toString() };
     }
-    return { accounts, voteKeys: [...this.voteKeys].sort() };
+    const out = { accounts, voteKeys: [...this.voteKeys].sort() };
+    // Omitted entirely when empty, so a chain with no contracts serialises
+    // byte-for-byte the way it did before contracts existed.
+    if (this.code.size > 0) {
+      out.code = {};
+      for (const address of [...this.code.keys()].sort()) out.code[address] = toHex(this.code.get(address));
+    }
+    if (this.storage.size > 0) {
+      out.storage = {};
+      for (const key of [...this.storage.keys()].sort()) {
+        const [address, slot] = key.split(':');
+        (out.storage[address] ??= {})[slot] = this.storage.get(key);
+      }
+    }
+    return out;
   }
 
   clone() {
@@ -166,6 +217,11 @@ export class State {
       new Map([...this.tokens].map(([k, v]) => [k, { ...v }])),
       new Map(this.tokenBalances),
       new Map(this.expressCounts),
+      // Code bytes are immutable once deployed, so the arrays may be shared;
+      // the MAP must not be, or a candidate block deploying a contract would
+      // write it into its parent's state.
+      new Map(this.code),
+      new Map(this.storage),
     );
   }
 
@@ -201,6 +257,51 @@ export class State {
   bumpNonce(address) {
     const account = this.get(address);
     this.set(address, { balance: account.balance, nonce: account.nonce + 1n });
+  }
+
+  /* ------------------------- code and storage ------------------------- */
+
+  /** Deployed runtime code, or an empty array for an ordinary account. */
+  getCode(address) {
+    return this.code.get(normalizeAddress(address)) ?? new Uint8Array(0);
+  }
+
+  hasCode(address) {
+    return this.getCode(address).length > 0;
+  }
+
+  /**
+   * Set deployed code. Empty code is DELETED rather than stored empty, so
+   * "deployed nothing" and "never deployed" cannot produce different roots.
+   */
+  setCode(address, bytes) {
+    const key = normalizeAddress(address);
+    const code = bytes instanceof Uint8Array ? bytes : fromHex(bytes);
+    if (code.length === 0) this.code.delete(key);
+    else this.code.set(key, code);
+  }
+
+  /** Storage word as a 32-byte hex string; unset slots read as zero. */
+  getStorage(address, slot) {
+    return this.storage.get(storageKey(address, slot)) ?? ZERO_WORD;
+  }
+
+  /** Writing zero clears the slot - see the note on `this.storage`. */
+  setStorage(address, slot, value) {
+    const key = storageKey(address, slot);
+    const word = toWord(value);
+    if (word === ZERO_WORD) this.storage.delete(key);
+    else this.storage.set(key, word);
+  }
+
+  /** Every slot this address holds, as `{ slot, value }`, sorted by slot. */
+  storageOf(address) {
+    const prefix = normalizeAddress(address) + ':';
+    const out = [];
+    for (const key of [...this.storage.keys()].sort()) {
+      if (key.startsWith(prefix)) out.push({ slot: key.slice(prefix.length), value: this.storage.get(key) });
+    }
+    return out;
   }
 
   /**
@@ -241,6 +342,16 @@ export class State {
     }
     for (const k of [...this.expressCounts.keys()].sort()) {
       lines.push(`ecount:${k}:${this.expressCounts.get(k).toString(16)}`);
+    }
+    // Code and storage, on the same terms as everything above: appended only
+    // when present, so a chain with no contracts hashes exactly as it did
+    // before the EVM existed. Code is hashed rather than inlined - the root
+    // must not grow by the size of every contract deployed.
+    for (const address of [...this.code.keys()].sort()) {
+      lines.push(`code:${address}:${toHex(keccak256(this.code.get(address)))}`);
+    }
+    for (const key of [...this.storage.keys()].sort()) {
+      lines.push(`slot:${key}:${this.storage.get(key)}`);
     }
     return toHex(keccak256(new TextEncoder().encode(lines.join('\n'))));
   }
