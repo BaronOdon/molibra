@@ -3,8 +3,11 @@
 Anyone may run one. Nothing here is privileged, and a node holds **no credential**: mining needs
 the miner's *address*, never a key.
 
-Written against an **Oracle Cloud Always Free** instance (ARM Ampere A1), which is what the
-project's own first public node runs on — but nothing below is Oracle-specific except §2.
+Written against an **Oracle Cloud Always Free** instance (ARM Ampere A1). Nothing below is
+Oracle-specific except §2.
+
+⚠ **No public node exists yet.** This is the instruction for standing one up, not a description
+of one already running. When the first is live, its address belongs in this file.
 
 ---
 
@@ -82,8 +85,8 @@ The chain state lives in a named volume, never in the image.
 
 ## 3b. Run it — no Docker
 
-Equally valid, and how the project's first node started, because the software needs nothing a
-container provides:
+Equally valid, because the software needs nothing a container provides — two dependencies, no
+build step, no compiler:
 
 ```bash
 sudo cp deploy/molibra.service /etc/systemd/system/
