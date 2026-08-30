@@ -1,0 +1,10 @@
+# Shell scripts and the systemd unit MUST keep LF endings.
+#
+# This repository is partly authored on Windows, where the default checkout
+# converts to CRLF. A shell script with CRLF fails on Linux as
+# "bad interpreter: /usr/bin/env bash^M" - a message that says nothing about
+# line endings and sends people looking for a missing interpreter.
+*.sh      text eol=lf
+*.service text eol=lf
+Dockerfile text eol=lf
+*.yml     text eol=lf
