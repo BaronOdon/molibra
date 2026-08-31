@@ -75,8 +75,14 @@ button, and nothing is signed anywhere but in your own wallet.</p>
   <!-- ------------------------------------------------ Ethereum ---- -->
   <section class="panel">
     <h2>Ethereum <span class="chip">chain 1</span></h2>
-    <p class="muted">WSRO against WETH. The pool holds 144,005,312 WSRO and no WETH, so
-      <b>whatever you deposit sets the price</b>.</p>
+    <p class="muted">WSRO against WETH. ⛔ <b>The pool is already initialised at tick
+      &minus;187863 &mdash; 6.944188e-9 WETH per WSRO &mdash; with ZERO in-range liquidity.
+      You are adding depth at that price, not choosing one.</b> V3 takes the two sides in the
+      ratio the current price dictates and hands back the rest, so an off-ratio pair does not
+      revert; it just quietly uses almost none of one side. (The 144,005,312 in the notes is
+      wei of WSRO per wei of WETH at this tick, not an amount of WSRO.)</p>
+    <p class="muted">At this price: <b>0.0001 ETH pairs with 14,401 WSRO</b> ·
+      0.00025 &rarr; 36,001 · 0.001 &rarr; 144,005 · 0.005 &rarr; 720,027.</p>
 
     <label>WETH to deposit (ETH)</label>
     <input id="ethAmount" placeholder="0.0025" inputmode="decimal">
