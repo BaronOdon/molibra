@@ -17,6 +17,7 @@
  */
 
 import { keccak256, toHex, fromHex, normalizeAddress } from './crypto.js';
+import { runEvm } from './evm.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
   decodeTokenCreate, decodeExpress, decodeIssue, decodeTransfer,
@@ -39,6 +40,10 @@ export function toWord(value) {
 }
 
 const storageKey = (address, slot) => `${normalizeAddress(address)}:${toWord(slot)}`;
+
+/** A transaction's calldata as bytes, whether it arrived as hex or bytes. */
+const dataBytes = (tx) => (tx.data instanceof Uint8Array ? tx.data
+  : (tx.data ? fromHex(tx.data) : new Uint8Array(0)));
 
 export class State {
   constructor(accounts = new Map(), voteKeys = new Set(),
@@ -362,7 +367,8 @@ export class State {
  * Returns the receipt fields; throws with a reason when the transaction is
  * not applicable, so the caller can drop it from the block.
  */
-export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0n) {
+export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0n,
+                                       { chainId = 20226n, timestamp = 0n } = {}) {
   const expectedNonce = state.nonceOf(tx.from);
   if (tx.nonce !== expectedNonce) {
     throw new Error(`bad nonce for ${tx.from}: got ${tx.nonce}, expected ${expectedNonce}`);
@@ -493,10 +499,49 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
     expressed = { token, key, amount: burnAmount };
   }
 
-  state.debit(tx.from, total);
-  if (tx.to) state.credit(tx.to, tx.value);
-  else state.credit(tx.from, tx.value); // no contract creation in v0.1; value is returned
-  state.credit(miner, fee);
+  // ------------------------------------------------------------------ EVM
+  //
+  // A transaction reaches the EVM only when it is NOT one of Molibra's own
+  // typed payloads. Every decoder above has already run, so `native` is the
+  // authoritative answer to "did the validator claim this?" - the ordering is
+  // the disambiguation rule, and it must stay that way. A contract call and a
+  // vote both live in `data`; if a contract could claim a vote payload, or a
+  // vote could be routed to bytecode, the electoral rules would be optional.
+  const native = Boolean(expression || creation || issue || moved || express);
+  const isCreate = !native && !tx.to && dataBytes(tx).length > 0;
+  const isCall = !native && tx.to && state.hasCode(tx.to);
+
+  let evm = null;
+  if (isCreate || isCall) {
+    // Execution gas is what is left after the intrinsic cost, exactly as on
+    // Ethereum. The sender must be able to cover the WHOLE limit up front,
+    // because how much will actually burn is not knowable until it has.
+    const maxFee = tx.gasLimit * tx.gasPrice;
+    if (state.balanceOf(tx.from) < maxFee + tx.value) {
+      throw new Error(`insufficient funds for gas + value: ${tx.from} needs ${maxFee + tx.value}`);
+    }
+    evm = await runEvm(state, {
+      from: tx.from,
+      to: isCreate ? null : tx.to,
+      value: tx.value,
+      data: dataBytes(tx),
+      gasLimit: tx.gasLimit - intrinsicGas,
+      chainId, blockNumber, timestamp, coinbase: miner, gasPrice: tx.gasPrice,
+    });
+  }
+
+  if (evm) {
+    // The EVM has already moved `value` itself, so the fee is all that is
+    // taken here. Debiting the value again would spend it twice.
+    const spent = intrinsicGas + evm.gasUsed;
+    state.debit(tx.from, spent * tx.gasPrice);
+    state.credit(miner, spent * tx.gasPrice);
+  } else {
+    state.debit(tx.from, total);
+    if (tx.to) state.credit(tx.to, tx.value);
+    else state.credit(tx.from, tx.value); // a bare value-to-nobody is returned
+    state.credit(miner, fee);
+  }
   state.bumpNonce(tx.from);
   if (key) state.recordVoteKey(key);
 
@@ -532,8 +577,15 @@ export function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0
   }
 
   return {
-    gasUsed: intrinsicGas,
-    status: 1,
+    gasUsed: evm ? intrinsicGas + evm.gasUsed : intrinsicGas,
+    // A failed contract call is a MINED transaction with status 0, not a
+    // rejected one: the gas was spent and the nonce consumed, so the block
+    // must record it. Only the native paths above throw.
+    status: evm && evm.failed ? 0 : 1,
+    contractAddress: evm?.createdAddress ?? null,
+    logs: evm?.logs ?? [],
+    returnValue: evm ? toHex(evm.returnValue) : null,
+    evmError: evm?.error ?? null,
     voteKey: key ?? expressed?.key ?? null,
     pollId: expression?.pollId ?? null,
     tokenId: record?.id ?? expressed?.token.id ?? issued?.token.id ?? moved?.token.id ?? null,

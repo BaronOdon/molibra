@@ -212,5 +212,89 @@ check('⛔⛔ and cannot forge an expression of will',
 check('the EVM targets shanghai, so PUSH0 from solc >= 0.8.20 is not an invalid opcode',
   HARDFORK === 'shanghai', HARDFORK);
 
+/* ------------------------------------------------------------------ */
+/* 8. ⛔ END TO END: a signed transaction actually deploys a contract.  */
+/*                                                                     */
+/* Everything above drives the EVM directly. That proves the engine     */
+/* works and proves NOTHING about whether the chain uses it. Until this */
+/* section existed, applyTransaction still said "no contract creation   */
+/* in v0.1" and a deploy transaction silently returned your value.      */
+/* ------------------------------------------------------------------ */
+
+const { Node } = await import('../src/node.js');
+const { signTransaction } = await import('../src/tx.js');
+const { privateToAddress } = await import('../src/crypto.js');
+const { mkdtempSync, rmSync } = await import('node:fs');
+const { tmpdir } = await import('node:os');
+const { join: joinPath, resolve: resolvePath } = await import('node:path');
+
+const KEY = fromHex('0x' + '11'.repeat(32));
+const DEPLOYER = privateToAddress(KEY);
+const dir = mkdtempSync(joinPath(tmpdir(), 'molibra-evm-'));
+const GENESIS = joinPath(HERE, '..', 'genesis.json');
+
+try {
+  const node = new Node({ genesisPath: GENESIS, dataDir: dir, miner: DEPLOYER });
+  await node.ready;
+  await node.mineBlocks(3);            // fund the deployer with block rewards
+  check('the deployer has a balance to spend',
+    node.chain.state.balanceOf(DEPLOYER) > 0n);
+
+  const raw = signTransaction({
+    nonce: node.chain.pendingNonce(DEPLOYER), gasPrice: 1000000000n,
+    gasLimit: 3_000_000n, to: null, value: 0n, data: bytecode,
+  }, KEY, node.chain.chainId);
+  const hash = node.chain.submitRaw(toHex(raw));
+  await node.mineBlocks(1);
+
+  const receipt = node.chain.receiptFor(hash);
+  check('⛔ a signed creation transaction is mined', receipt !== null);
+  check('⛔ and the receipt carries the contract address',
+    /^0x[0-9a-f]{40}$/.test(receipt?.contractAddress ?? ''), receipt?.contractAddress ?? 'null');
+  check('⛔ and the code is actually on the chain',
+    node.chain.state.getCode(receipt.contractAddress).length > 0,
+    `${node.chain.state.getCode(receipt?.contractAddress ?? DEPLOYER).length} bytes`);
+  check('the transaction succeeded', receipt?.status === 1);
+  check('it cost more than the intrinsic 21000', receipt?.gasUsed > 21000n, `${receipt?.gasUsed}`);
+
+  // Call it through the same path.
+  const callRaw = signTransaction({
+    nonce: node.chain.pendingNonce(DEPLOYER), gasPrice: 1000000000n,
+    gasLimit: 300_000n, to: receipt.contractAddress, value: 0n,
+    data: selectors['set(uint256)'] + word(7),
+  }, KEY, node.chain.chainId);
+  const callHash = node.chain.submitRaw(toHex(callRaw));
+  await node.mineBlocks(1);
+  const callReceipt = node.chain.receiptFor(callHash);
+  check('⛔ a signed call to that contract is mined', callReceipt !== null);
+  check('⛔ and it wrote to contract storage',
+    BigInt(node.chain.state.getStorage(receipt.contractAddress, 0)) === 7n);
+  check('⛔ and the receipt carries the event it emitted',
+    (callReceipt?.logs?.length ?? 0) === 1, `${callReceipt?.logs?.length ?? 0} logs`);
+
+  // A block carrying a contract must re-execute identically on another node.
+  const mirror = mkdtempSync(joinPath(tmpdir(), 'molibra-evm-mirror-'));
+  try {
+    const other = new Node({ genesisPath: GENESIS, dataDir: mirror });
+    await other.ready;
+    const { serializeBlock } = await import('../src/block.js');
+    let replayed = true;
+    for (let n = 1n; n <= node.chain.height; n++) {
+      const r = await other.chain.appendSerialized(serializeBlock(node.chain.blockByNumber(n)));
+      if (!r.accepted) replayed = false;
+    }
+    check('⛔⛔ an independent node re-executes the contract and agrees on the state root',
+      replayed && other.chain.state.root() === node.chain.state.root(),
+      'consensus over contract execution, not just over transfers');
+    check('and it has the same code at the same address',
+      other.chain.state.getCode(receipt.contractAddress).length
+        === node.chain.state.getCode(receipt.contractAddress).length);
+  } finally {
+    rmSync(mirror, { recursive: true, force: true });
+  }
+} finally {
+  rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

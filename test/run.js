@@ -73,6 +73,7 @@ async function main() {
   // ---------------------------------------------------------------- node A
   console.log('1. node, genesis and mining');
   const nodeA = new Node({ genesisPath: GENESIS, dataDir: scratch('a'), miner: ALICE });
+  await nodeA.ready;
   await nodeA.start({ host: '127.0.0.1', port: 18545 });
   const url = nodeA.rpcUrl;
 
@@ -91,7 +92,7 @@ async function main() {
     && genesisExtra.includes('Macrobiotic Quantum Theory'));
 
   const t0 = Date.now();
-  nodeA.mineBlocks(3);
+  await nodeA.mineBlocks(3);
   check('mined 3 blocks', nodeA.chain.height === 3n, `${((Date.now() - t0) / 1000).toFixed(2)}s`);
   check('block reward credited', nodeA.chain.state.balanceOf(ALICE) === 6n * 10n ** 18n,
     `${nodeA.chain.state.balanceOf(ALICE) / 10n ** 18n} MOLI`);
@@ -133,7 +134,7 @@ async function main() {
   check('pending transaction has no block yet', pending.blockNumber === null);
 
   const aliceBefore = nodeA.chain.state.balanceOf(ALICE);
-  nodeA.mineBlocks(1);
+  await nodeA.mineBlocks(1);
   check('transaction was mined', nodeA.chain.mempool.size === 0 && nodeA.chain.height === 4n);
 
   const receipt = await rpc(url, 'eth_getTransactionReceipt', [sentHash]);
@@ -181,7 +182,7 @@ async function main() {
     ));
     tampered.header.number = String(BigInt(tampered.header.number) + 1n);
     tampered.header.miner = BOB;
-    nodeA.chain.appendSerialized(tampered);
+    await nodeA.chain.appendSerialized(tampered);
   } catch { rejected = true; }
   check('tampered block is rejected', rejected);
 
@@ -208,6 +209,7 @@ async function main() {
     txDoc.transaction.hash === sentHash && txDoc.receipt.status === '0x1');
 
   const nodeB = new Node({ genesisPath: GENESIS, dataDir: scratch('b'), peers: [url] });
+  await nodeB.ready;
   await nodeB.start({ host: '127.0.0.1', port: 18546 });
   const adopted = await nodeB.syncFrom(url);
   check('second node replicated the chain', adopted === 4 && nodeB.chain.height === 4n, `${adopted} blocks`);
@@ -222,24 +224,24 @@ async function main() {
   const { Chain } = await import('../src/chain.js');
 
   // Two independent chains from the same genesis, so they genuinely diverge.
-  const left = new Chain(Chain.loadGenesis(GENESIS), scratch('left')).init();
-  const right = new Chain(Chain.loadGenesis(GENESIS), scratch('right')).init();
+  const left = await new Chain(Chain.loadGenesis(GENESIS), scratch('left')).init();
+  const right = await new Chain(Chain.loadGenesis(GENESIS), scratch('right')).init();
 
-  left.mine(ALICE);
+  await left.mine(ALICE);
   const forkPoint = left.head;
-  right.appendSerialized(serializeBlock(forkPoint));
+  await right.appendSerialized(serializeBlock(forkPoint));
   check('both chains share the fork point', right.head.hash === forkPoint.hash);
 
   // Left extends by one, right by two: right is heavier.
-  left.mine(ALICE);
-  right.mine(BOB);
-  right.mine(BOB);
+  await left.mine(ALICE);
+  await right.mine(BOB);
+  await right.mine(BOB);
   check('left is 2 blocks, right is 3', left.height === 2n && right.height === 3n);
   check('right carries more total work', right.totalDifficulty > left.totalDifficulty);
 
   const leftHeadBefore = left.head.hash;
   for (let n = 2; n <= 3; n++) {
-    left.appendSerialized(serializeBlock(right.blockByNumber(n)));
+    await left.appendSerialized(serializeBlock(right.blockByNumber(n)));
   }
 
   check('left reorganised onto the heavier branch', left.head.hash === right.head.hash);
@@ -254,48 +256,48 @@ async function main() {
     left.state.balanceOf(BOB) === right.state.balanceOf(BOB));
 
   // A lighter competing branch must be kept but NOT adopted.
-  const lighter = new Chain(Chain.loadGenesis(GENESIS), scratch('lighter')).init();
-  lighter.appendSerialized(serializeBlock(forkPoint));
-  lighter.mine(CAROL); // a different miner, so this is genuinely a different block
+  const lighter = await new Chain(Chain.loadGenesis(GENESIS), scratch('lighter')).init();
+  await lighter.appendSerialized(serializeBlock(forkPoint));
+  await lighter.mine(CAROL); // a different miner, so this is genuinely a different block
   const headBeforeLighter = left.head.hash;
-  const lighterResult = left.appendSerialized(serializeBlock(lighter.head));
+  const lighterResult = await left.appendSerialized(serializeBlock(lighter.head));
   check('lighter branch is accepted into the tree', lighterResult.accepted);
   check('lighter branch does not move the head', left.head.hash === headBeforeLighter);
   check('lighter branch is stored non-canonically',
     left.blockByHash(lighter.head.hash) !== null && !left.isCanonical(lighter.head.hash));
 
   // A block arriving before its parent must be held, then connected.
-  const early = new Chain(Chain.loadGenesis(GENESIS), scratch('early')).init();
-  const source = new Chain(Chain.loadGenesis(GENESIS), scratch('source')).init();
-  source.mine(ALICE);
-  source.mine(ALICE);
+  const early = await new Chain(Chain.loadGenesis(GENESIS), scratch('early')).init();
+  const source = await new Chain(Chain.loadGenesis(GENESIS), scratch('source')).init();
+  await source.mine(ALICE);
+  await source.mine(ALICE);
   const child = serializeBlock(source.blockByNumber(2));
   const parentBlock = serializeBlock(source.blockByNumber(1));
-  const orphanResult = early.appendSerialized(child);
+  const orphanResult = await early.appendSerialized(child);
   check('out-of-order block is held as an orphan', orphanResult.reason === 'orphan' && early.height === 0n);
-  early.appendSerialized(parentBlock);
+  await early.appendSerialized(parentBlock);
   check('orphan connects once its parent arrives', early.height === 2n);
   check('connected chain matches the source', early.head.hash === source.head.hash);
 
   // A reorg that drops a mined transaction must hand it back to the mempool,
   // and the rolled-back balance must actually roll back.
   const dirL = scratch('tx-left');
-  const chainL = new Chain(Chain.loadGenesis(GENESIS), dirL).init();
-  const chainR = new Chain(Chain.loadGenesis(GENESIS), scratch('tx-right')).init();
-  chainL.mine(ALICE); chainL.mine(ALICE); chainL.mine(ALICE);
-  for (let n = 1; n <= 3; n++) chainR.appendSerialized(serializeBlock(chainL.blockByNumber(n)));
+  const chainL = await new Chain(Chain.loadGenesis(GENESIS), dirL).init();
+  const chainR = await new Chain(Chain.loadGenesis(GENESIS), scratch('tx-right')).init();
+  await chainL.mine(ALICE); await chainL.mine(ALICE); await chainL.mine(ALICE);
+  for (let n = 1; n <= 3; n++) await chainR.appendSerialized(serializeBlock(chainL.blockByNumber(n)));
 
   const payTx = signTransaction(
     { nonce: 0n, gasPrice: 1000000000n, gasLimit: 21000n, to: CAROL, value: 3n * 10n ** 18n, data: '0x' },
     ALICE_KEY, chainL.chainId,
   );
   const payHash = chainL.submitRaw(toHex(payTx));
-  chainL.mine(ALICE);
+  await chainL.mine(ALICE);
   check('transaction mined on the branch that will lose',
     chainL.txIndex.has(payHash) && chainL.state.balanceOf(CAROL) === 3n * 10n ** 18n);
 
-  chainR.mine(BOB); chainR.mine(BOB); // heavier: two blocks against one
-  for (let n = 4; n <= 5; n++) chainL.appendSerialized(serializeBlock(chainR.blockByNumber(n)));
+  await chainR.mine(BOB); await chainR.mine(BOB); // heavier: two blocks against one
+  for (let n = 4; n <= 5; n++) await chainL.appendSerialized(serializeBlock(chainR.blockByNumber(n)));
 
   check('reorg dropped the block containing the transaction',
     chainL.head.hash === chainR.head.hash && !chainL.txIndex.has(payHash));
@@ -304,7 +306,7 @@ async function main() {
   check('recipient balance rolled back with the reorg', chainL.state.balanceOf(CAROL) === 0n);
   check('receipt for the dropped transaction is gone', chainL.receiptFor(payHash) === null);
 
-  chainL.mine(ALICE);
+  await chainL.mine(ALICE);
   check('returned transaction can be mined again on the new branch',
     chainL.txIndex.has(payHash) && chainL.state.balanceOf(CAROL) === 3n * 10n ** 18n);
 
@@ -312,7 +314,7 @@ async function main() {
   // useless if it was thrown away today.
   const knownBefore = chainL.byHash.size;
   const headBefore = chainL.head.hash;
-  const reloadedFork = new Chain(Chain.loadGenesis(GENESIS), dirL).init();
+  const reloadedFork = await new Chain(Chain.loadGenesis(GENESIS), dirL).init();
   check('every known block survived the restart', reloadedFork.byHash.size === knownBefore,
     `${reloadedFork.byHash.size} of ${knownBefore}`);
   check('fork choice re-derived the same head after restart', reloadedFork.head.hash === headBefore);
@@ -323,17 +325,17 @@ async function main() {
   // The download-a-node-and-join case: a miner producing blocks faster than the
   // clock ticks must still produce blocks every other node accepts. This is the
   // regression guard for the header/difficulty timestamp split.
-  const fast = new Chain(Chain.loadGenesis(GENESIS), scratch('fast')).init();
-  fast.mine(ALICE); fast.mine(ALICE); fast.mine(ALICE); fast.mine(ALICE); fast.mine(ALICE);
+  const fast = await new Chain(Chain.loadGenesis(GENESIS), scratch('fast')).init();
+  await fast.mine(ALICE); await fast.mine(ALICE); await fast.mine(ALICE); await fast.mine(ALICE); await fast.mine(ALICE);
   const stamps = fast.canonical.map((b) => b.header.timestamp);
   check('rapid mining still advances the timestamp every block',
     stamps.every((t, i) => i === 0 || t > stamps[i - 1]),
     stamps.slice(1).join(','));
 
-  const joiner = new Chain(Chain.loadGenesis(GENESIS), scratch('joiner')).init();
+  const joiner = await new Chain(Chain.loadGenesis(GENESIS), scratch('joiner')).init();
   let joinFailure = null;
   for (let n = 1; n <= Number(fast.height); n++) {
-    try { joiner.appendSerialized(serializeBlock(fast.blockByNumber(n))); }
+    try { await joiner.appendSerialized(serializeBlock(fast.blockByNumber(n))); }
     catch (e) { joinFailure = `#${n}: ${e.message}`; break; }
   }
   check('a fresh node accepts every block of a fast miner', joinFailure === null, joinFailure ?? '');
@@ -374,10 +376,10 @@ async function main() {
     blockRewardAt(0n, G) === 2n * MOLI && blockRewardAt(1156n, G) === 2n * MOLI);
 
   // And the miner and the verifier must agree, which is the actual risk.
-  const issue = new Chain(Chain.loadGenesis(GENESIS), scratch('issuance')).init();
-  issue.mine(ALICE);
-  const mirror = new Chain(Chain.loadGenesis(GENESIS), scratch('issuance-b')).init();
-  mirror.appendSerialized(serializeBlock(issue.blockByNumber(1)));
+  const issue = await new Chain(Chain.loadGenesis(GENESIS), scratch('issuance')).init();
+  await issue.mine(ALICE);
+  const mirror = await new Chain(Chain.loadGenesis(GENESIS), scratch('issuance-b')).init();
+  await mirror.appendSerialized(serializeBlock(issue.blockByNumber(1)));
   check('a second node re-derives the same reward from the same schedule',
     mirror.state.balanceOf(ALICE) === issue.state.balanceOf(ALICE)
     && mirror.state.balanceOf(ALICE) === 2n * MOLI);
@@ -398,12 +400,12 @@ async function main() {
   );
 
   const dirV = scratch('vote-left');
-  const voteL = new Chain(Chain.loadGenesis(GENESIS), dirV).init();
-  voteL.mine(ALICE); voteL.mine(ALICE); voteL.mine(ALICE);
+  const voteL = await new Chain(Chain.loadGenesis(GENESIS), dirV).init();
+  await voteL.mine(ALICE); await voteL.mine(ALICE); await voteL.mine(ALICE);
 
   const voteHash = voteL.submitRaw(toHex(express(voteL, ALICE_KEY, ALICE, 0n, POLL_A)));
   check('an expression is accepted into the mempool', voteL.mempool.has(voteHash));
-  voteL.mine(ALICE);
+  await voteL.mine(ALICE);
   const keyA = voteKey(ALICE, POLL_A);
   check('the expression was mined', voteL.txIndex.has(voteHash));
   check('the chain recorded H(wallet || pollId)', voteL.state.hasVoteKey(keyA), keyA.slice(0, 18));
@@ -420,16 +422,16 @@ async function main() {
   check('a second expression from the same wallet on the same poll is refused', refused);
 
   const otherPoll = voteL.submitRaw(toHex(express(voteL, ALICE_KEY, ALICE, 1n, POLL_B)));
-  voteL.mine(ALICE);
+  await voteL.mine(ALICE);
   check('the same wallet may still speak on a different poll',
     voteL.txIndex.has(otherPoll) && voteL.state.hasVoteKey(voteKey(ALICE, POLL_B)));
   check('speaking on poll B did not consume poll A for anyone else',
     !voteL.state.hasVoteKey(voteKey(BOB, POLL_A)));
 
   // Another wallet on the same poll: the key is per wallet, not per poll.
-  voteL.mine(BOB); voteL.mine(BOB);
+  await voteL.mine(BOB); await voteL.mine(BOB);
   const bobVote = voteL.submitRaw(toHex(express(voteL, BOB_KEY, BOB, 0n, POLL_A)));
-  voteL.mine(BOB);
+  await voteL.mine(BOB);
   check('a different wallet may speak on the same poll',
     voteL.txIndex.has(bobVote) && voteL.state.hasVoteKey(voteKey(BOB, POLL_A)));
 
@@ -469,7 +471,7 @@ async function main() {
     express(voteL, ALICE_KEY, ALICE, 2n, POLL_A), voteL.chainId,
   );
   let blockLevel = false;
-  try { applyTransaction(replayState, dupTx, (await import('../src/tx.js')).intrinsicGas(dupTx), BOB); }
+  try { await applyTransaction(replayState, dupTx, (await import('../src/tx.js')).intrinsicGas(dupTx), BOB); }
   catch (e) { blockLevel = /already expressed/.test(e.message); }
   check('a block carrying a duplicate expression fails re-execution', blockLevel);
 
@@ -477,28 +479,28 @@ async function main() {
   const withoutKeys = voteL.state.clone();
   withoutKeys.voteKeys = new Set();
   check('vote keys change the state root', withoutKeys.root() !== voteL.state.root());
-  const rootBefore = new Chain(Chain.loadGenesis(GENESIS), scratch('vote-root')).init().state.root();
+  const rootBefore = (await new Chain(Chain.loadGenesis(GENESIS), scratch('vote-root')).init()).state.root();
   const emptyRoot = new State().root();
   check('a chain with no expressions hashes exactly as before',
-    rootBefore === new Chain(Chain.loadGenesis(GENESIS), scratch('vote-root2')).init().state.root()
+    rootBefore === (await new Chain(Chain.loadGenesis(GENESIS), scratch('vote-root2')).init()).state.root()
     && emptyRoot === new State(new Map(), new Set()).root());
 
   // An independent node re-deriving the chain must reach the same vote keys.
-  const voteMirror = new Chain(Chain.loadGenesis(GENESIS), scratch('vote-mirror')).init();
+  const voteMirror = await new Chain(Chain.loadGenesis(GENESIS), scratch('vote-mirror')).init();
   for (let n = 1; n <= Number(voteL.height); n++) {
-    voteMirror.appendSerialized(serializeBlock(voteL.blockByNumber(n)));
+    await voteMirror.appendSerialized(serializeBlock(voteL.blockByNumber(n)));
   }
   check('a second node re-derived the same expressions independently',
     voteMirror.state.hasVoteKey(keyA) && voteMirror.state.root() === voteL.state.root());
 
   // A reorg that unwinds the block must unwind the right to speak again. This
   // is the whole reason the keys live in state rather than in a side register.
-  const voteR = new Chain(Chain.loadGenesis(GENESIS), scratch('vote-right')).init();
-  for (let n = 1; n <= 3; n++) voteR.appendSerialized(serializeBlock(voteL.blockByNumber(n)));
+  const voteR = await new Chain(Chain.loadGenesis(GENESIS), scratch('vote-right')).init();
+  for (let n = 1; n <= 3; n++) await voteR.appendSerialized(serializeBlock(voteL.blockByNumber(n)));
   const heightBeforeReorg = Number(voteL.height);
-  for (let n = 4; n <= heightBeforeReorg + 1; n++) voteR.mine(CAROL);
+  for (let n = 4; n <= heightBeforeReorg + 1; n++) await voteR.mine(CAROL);
   for (let n = 4; n <= Number(voteR.height); n++) {
-    voteL.appendSerialized(serializeBlock(voteR.blockByNumber(n)));
+    await voteL.appendSerialized(serializeBlock(voteR.blockByNumber(n)));
   }
   check('the reorg took the branch carrying the expressions',
     voteL.head.hash === voteR.head.hash);
@@ -509,8 +511,8 @@ async function main() {
   // ------------------------------------------------------------ GIZ / tokens
   console.log('\n8. GIZ: issuance, uncapped supply and wei-granular cost');
 
-  const tk = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens')).init();
-  for (let i = 0; i < 4; i++) tk.mine(ALICE);
+  const tk = await new Chain(Chain.loadGenesis(GENESIS), scratch('tokens')).init();
+  for (let i = 0; i < 4; i++) await tk.mine(ALICE);
 
   const COMMIT = '0x' + '5a'.repeat(32);
   const POLL_Q = toPollId('voting-place-alpha');
@@ -547,7 +549,7 @@ async function main() {
     transferable: false,
   };
   const createHash = doAlice(encodeTokenCreate(gizRecord));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const height = tk.txIndex.get(createHash).blockNumber;
   const GIZ = tokenId(ALICE, gizRecord.title, BigInt(height));
   const token = tk.state.getToken(GIZ);
@@ -661,7 +663,7 @@ async function main() {
 
   const okTitle = { ...gizRecord, title: 'Quem voce comprou hoje?' };
   const okHash = doAlice(encodeTokenCreate(okTitle));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('a purchase token named for what it actually records is accepted',
     tk.state.getToken(tokenId(ALICE, okTitle.title,
       BigInt(tk.txIndex.get(okHash).blockNumber))) !== null);
@@ -669,7 +671,7 @@ async function main() {
   const marketRec = { ...gizRecord, title: 'a market question', purpose: 'market',
                       transferable: true, initialSupply: (COST * 5n).toString() };
   const mHash = doAlice(encodeTokenCreate(marketRec));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const MKT = tokenId(ALICE, marketRec.title, BigInt(tk.txIndex.get(mHash).blockNumber));
   check('afericao de mercado is a different object and MAY be transferable',
     tk.state.getToken(MKT).transferable === true
@@ -690,12 +692,12 @@ async function main() {
     { nonce: an, gasPrice: gasP, gasLimit: 21000n, to: BOB,
       value: 5n * 10n ** 18n, data: '0x' }, ALICE_KEY, tk.chainId)));
   an++;
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('BOB is funded, so the next refusals are about units and nothing else',
     tk.state.balanceOf(BOB) >= 5n * 10n ** 18n);
 
   doAlice(encodeIssue(GIZ, COST * 10n), BOB);
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('the creator ISSUES units to a holder, and that is how anyone gets GIZ',
     tk.state.tokenBalanceOf(GIZ, BOB) === COST * 10n
     && tk.state.getToken(GIZ).minted === (COST * 10n).toString());
@@ -709,7 +711,7 @@ async function main() {
     'no secondary market, so no price, so art. 29 has nothing to bite on');
 
   doAlice(encodeIssue(GIZ, COST * 4n), CAROL);
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('an uncapped token keeps minting on demand - no ceiling to hit',
     tk.state.getToken(GIZ).minted === (COST * 14n).toString()
     && tk.state.tokenBalanceOf(GIZ, CAROL) === COST * 4n);
@@ -718,10 +720,10 @@ async function main() {
   const capSupply = { ...gizRecord, title: 'a question with a declared ceiling',
                       maxSupply: (COST * 3n).toString() };
   const csHash = doAlice(encodeTokenCreate(capSupply));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const CS = tokenId(ALICE, capSupply.title, BigInt(tk.txIndex.get(csHash).blockNumber));
   doAlice(encodeIssue(CS, COST * 2n), BOB);
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   no = false;
   try { tk.submitRaw(tryAlice(encodeIssue(CS, COST * 2n), CAROL)); }
   catch (e) { no = /exceed the declared max supply/.test(e.message); }
@@ -729,7 +731,7 @@ async function main() {
 
   // --- expressing burns exactly the declared cost -------------------------
   const eHash = doBob(encodeExpress(GIZ, POLL_Q, COMMIT, COST));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('expressing BURNS the declared cost rather than one whole unit',
     tk.state.tokenBalanceOf(GIZ, BOB) === COST * 9n
     && tk.state.getToken(GIZ).burned === COST.toString(),
@@ -756,7 +758,7 @@ async function main() {
     'holding nine more units bought no second voice there');
 
   doBob(encodeExpress(GIZ, POLL_R, COMMIT, COST));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('but it CAN be in another macrobiotic quantum',
     tk.state.getToken(GIZ).burned === (COST * 2n).toString()
     && tk.state.tokenBalanceOf(GIZ, BOB) === COST * 8n,
@@ -788,15 +790,15 @@ async function main() {
   const wRec = { ...gizRecord, title: 'a weighted question', voteMode: 'weighted',
                  purpose: 'market', initialSupply: (COST * 100n).toString() };
   const wHash = doAlice(encodeTokenCreate(wRec));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const WT = tokenId(ALICE, wRec.title, BigInt(tk.txIndex.get(wHash).blockNumber));
   check('a weighted token may mint an initial supply to its creator',
     tk.state.tokenBalanceOf(WT, ALICE) === COST * 100n);
 
   doAlice(encodeExpress(WT, POLL_Q, COMMIT, COST * 5n));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   doAlice(encodeExpress(WT, POLL_Q, COMMIT, COST * 3n));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('weighted lets the burned amount vary - the amount IS the weight',
     tk.state.getToken(WT).burned === (COST * 8n).toString()
     && tk.state.getToken(WT).expressions === '2',
@@ -814,10 +816,10 @@ async function main() {
   const sRec = { ...gizRecord, title: 'a single-mode question', voteMode: 'single',
                  initialSupply: (COST * 10n).toString() };
   const sHash = doAlice(encodeTokenCreate(sRec));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const SG = tokenId(ALICE, sRec.title, BigInt(tk.txIndex.get(sHash).blockNumber));
   doAlice(encodeExpress(SG, POLL_Q, COMMIT, COST));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   no = false;
   try { tk.submitRaw(tryAlice(encodeExpress(SG, POLL_R, COMMIT, COST))); }
   catch (e) { no = /already expressed on token/.test(e.message); }
@@ -829,12 +831,12 @@ async function main() {
   const capRec = { ...gizRecord, title: 'capped question', voteMode: 'capped', cap: 2,
                    initialSupply: (COST * 10n).toString(), purpose: 'behaviour' };
   const capHash = doAlice(encodeTokenCreate(capRec));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const CAP = tokenId(ALICE, capRec.title, BigInt(tk.txIndex.get(capHash).blockNumber));
   doAlice(encodeExpress(CAP, POLL_Q, COMMIT, COST));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   doAlice(encodeExpress(CAP, POLL_R, COMMIT, COST));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('capped(2) allows exactly two expressions',
     tk.state.getToken(CAP).expressions === '2');
   no = false;
@@ -864,7 +866,7 @@ async function main() {
     transferable: true,
   };
   const assetHash = doAlice(encodeTokenCreate(assetRec));
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   const FEIRA = tokenId(ALICE, assetRec.title, BigInt(tk.txIndex.get(assetHash).blockNumber));
   const asset = tk.state.getToken(FEIRA);
   check('an ordinary transferable token can be created',
@@ -880,7 +882,7 @@ async function main() {
 
   // --- transfer: holder to holder ---------------------------------------
   doAlice(encodeTransfer(FEIRA, 250n * 10n ** 18n), BOB);
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('a transferable token moves from holder to holder',
     tk.state.tokenBalanceOf(FEIRA, ALICE) === 750n * 10n ** 18n
     && tk.state.tokenBalanceOf(FEIRA, BOB) === 250n * 10n ** 18n);
@@ -891,7 +893,7 @@ async function main() {
   // BOB, who is merely a holder, can pass them on - which is exactly what
   // ISSUE refuses and exactly what makes this a market.
   doBob(encodeTransfer(FEIRA, 100n * 10n ** 18n), CAROL);
-  tk.mine(ALICE);
+  await tk.mine(ALICE);
   check('a holder who is not the creator can pass units on',
     tk.state.tokenBalanceOf(FEIRA, BOB) === 150n * 10n ** 18n
     && tk.state.tokenBalanceOf(FEIRA, CAROL) === 100n * 10n ** 18n,
@@ -932,9 +934,9 @@ async function main() {
     'the kind is declared, not guessed from which fields turned up');
 
   // --- consensus ----------------------------------------------------------
-  const tkMirror = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-b')).init();
+  const tkMirror = await new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-b')).init();
   for (let n = 1; n <= Number(tk.height); n++) {
-    tkMirror.appendSerialized(serializeBlock(tk.blockByNumber(n)));
+    await tkMirror.appendSerialized(serializeBlock(tk.blockByNumber(n)));
   }
   check('a second node re-derives the identical token state',
     tkMirror.state.root() === tk.state.root()
@@ -948,11 +950,11 @@ async function main() {
   // A reorg must return the burned units AND unwind the issuance. Because
   // tokens live in state, this comes for free - the same property the vote
   // keys rely on.
-  const tkFork = new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-fork')).init();
-  for (let n = 1; n <= 4; n++) tkFork.appendSerialized(serializeBlock(tk.blockByNumber(n)));
-  for (let n = 0; n <= Number(tk.height) - 4 + 1; n++) tkFork.mine(CAROL);
+  const tkFork = await new Chain(Chain.loadGenesis(GENESIS), scratch('tokens-fork')).init();
+  for (let n = 1; n <= 4; n++) await tkFork.appendSerialized(serializeBlock(tk.blockByNumber(n)));
+  for (let n = 0; n <= Number(tk.height) - 4 + 1; n++) await tkFork.mine(CAROL);
   for (let n = 5; n <= Number(tkFork.height); n++) {
-    tk.appendSerialized(serializeBlock(tkFork.blockByNumber(n)));
+    await tk.appendSerialized(serializeBlock(tkFork.blockByNumber(n)));
   }
   check('a reorg unwound the token entirely - creation, issuance and burn',
     tk.head.hash === tkFork.head.hash
@@ -966,7 +968,8 @@ async function main() {
   // The issuer is the publisher's side of "publisher pays, speaker earns".
   // It runs on a node because it has to sign and broadcast a real ISSUE.
   const iNode = new Node({ genesisPath: GENESIS, dataDir: scratch('issuer'), miner: ALICE });
-  for (let i = 0; i < 4; i++) iNode.chain.mine(ALICE);
+  await iNode.ready;
+  for (let i = 0; i < 4; i++) await iNode.chain.mine(ALICE);
   const iRec = { kind: 'expression', title: 'Chalk (GIZ) on the earning node',
                  options: ['agree', 'disagree'], voteMode: 'quantum',
                  initialSupply: '0', maxSupply: '0', expressionCost: COST.toString(),
@@ -974,7 +977,7 @@ async function main() {
   const iHash = iNode.chain.submitRaw(toHex(signTransaction(
     { nonce: 0n, gasPrice: gasP, gasLimit: 300000n, to: ALICE, value: 0n,
       data: encodeTokenCreate(iRec) }, ALICE_KEY, iNode.chain.chainId)));
-  iNode.chain.mine(ALICE);
+  await iNode.chain.mine(ALICE);
   const IGIZ = tokenId(ALICE, iRec.title, BigInt(iNode.chain.txIndex.get(iHash).blockNumber));
 
   const issuer = iNode.enableIssuer({
@@ -998,7 +1001,7 @@ async function main() {
     'a solved challenge is worthless to anyone else');
 
   const grant = issuer.redeem({ address: BOB, challenge: job.challenge, nonce: solution });
-  iNode.chain.mine(ALICE);
+  await iNode.chain.mine(ALICE);
   check('solving it earns chalk, mined as an ordinary ISSUE',
     iNode.chain.state.tokenBalanceOf(IGIZ, BOB) === COST * 20n
     && iNode.chain.receiptFor(grant.txHash).status === 1);
@@ -1036,7 +1039,7 @@ async function main() {
   // banned by Apple 3.1.5(ii) and by Google Play, and the store position is
   // what the compliance argument rests on.
   const appGrant = issuer.grantForProof({ address: CAROL, appAccount: 'app-account-1' });
-  iNode.chain.mine(ALICE);
+  await iNode.chain.mine(ALICE);
   check('the app can ask for a grant on a linked address at the push of a button',
     iNode.chain.state.tokenBalanceOf(IGIZ, CAROL) === COST * 20n
     && appGrant.via === 'proof');
@@ -1051,7 +1054,7 @@ async function main() {
   const spend = iNode.chain.submitRaw(toHex(signTransaction(
     { nonce: 0n, gasPrice: 0n, gasLimit: 300000n, to: BOB, value: 0n,
       data: encodeExpress(IGIZ, POLL_Q, COMMIT, COST) }, BOB_KEY, iNode.chain.chainId)));
-  iNode.chain.mine(ALICE);
+  await iNode.chain.mine(ALICE);
   check('a wallet holding NO MOLI earned chalk and spoke with it',
     iNode.chain.receiptFor(spend).status === 1
     && iNode.chain.state.balanceOf(BOB) === 0n
@@ -1061,9 +1064,9 @@ async function main() {
 
   // ...and the exemption is exactly that: an exemption for speaking, not an
   // open door. Everything else still pays the floor.
-  const priced = new Chain(Chain.loadGenesis(GENESIS), scratch('fee'),
+  const priced = await new Chain(Chain.loadGenesis(GENESIS), scratch('fee'),
     { minGasPrice: 1000000000n }).init();
-  for (let i = 0; i < 4; i++) priced.mine(ALICE);
+  for (let i = 0; i < 4; i++) await priced.mine(ALICE);
   let cheap = false;
   try {
     priced.submitRaw(toHex(signTransaction(
@@ -1085,9 +1088,9 @@ async function main() {
   const { decodeTransaction } = await import('../src/tx.js');
   const { bigToBytes, bytesToBig } = await import('../src/crypto.js');
 
-  const sec = new Chain(Chain.loadGenesis(GENESIS), scratch('sec'),
+  const sec = await new Chain(Chain.loadGenesis(GENESIS), scratch('sec'),
     { maxReorgDepth: 3, maxMempoolPerSender: 4, maxMempoolSize: 6, maxOrphans: 2 }).init();
-  for (let i = 0; i < 6; i++) sec.mine(ALICE);
+  for (let i = 0; i < 6; i++) await sec.mine(ALICE);
 
   // --- signature malleability (EIP-2) -------------------------------------
   // For every valid (r, s) the pair (r, n - s) signs the same message. Accept
@@ -1122,7 +1125,7 @@ async function main() {
   // every block until the chain costs nothing to mine.
   const parent = sec.head;
   const farFuture = BigInt(Math.floor(Date.now() / 1000)) + MAX_FUTURE_DRIFT_SECONDS + 3600n;
-  const warpCandidate = sec.composeBlock(ALICE, parent);
+  const warpCandidate = await sec.composeBlock(ALICE, parent);
   const warpHeader = {
     ...warpCandidate.header,
     timestamp: farFuture,
@@ -1132,7 +1135,7 @@ async function main() {
   const warpSealed = mineHeader(warpHeader);
   blocked = false;
   try {
-    sec.processBlock({ header: warpSealed, hash: blockHash(warpSealed),
+    await sec.processBlock({ header: warpSealed, hash: blockHash(warpSealed),
                        transactions: warpCandidate.transactions });
   } catch (e) { blocked = /in the future/.test(e.message); }
   check('a block timestamped far in the future is refused', blocked,
@@ -1160,7 +1163,7 @@ async function main() {
   // absurd work costs the verifier nothing to throw away.
   blocked = false;
   try {
-    sec.verifyAgainstParent({
+    await sec.verifyAgainstParent({
       header: { ...parent.header, number: parent.header.number + 1n,
                 timestamp: parent.header.timestamp + 1n },
       hash: parent.hash,
@@ -1171,7 +1174,7 @@ async function main() {
 
   blocked = false;
   try {
-    sec.verifyAgainstParent({
+    await sec.verifyAgainstParent({
       header: { ...parent.header, number: parent.header.number + 1n,
                 timestamp: parent.header.timestamp + 1n,
                 gasUsed: parent.header.gasLimit + 1n },
@@ -1182,9 +1185,9 @@ async function main() {
   check('a block claiming more gas than its own limit is refused', blocked);
 
   // --- mempool caps -------------------------------------------------------
-  const flood = new Chain(Chain.loadGenesis(GENESIS), scratch('flood'),
+  const flood = await new Chain(Chain.loadGenesis(GENESIS), scratch('flood'),
     { maxMempoolPerSender: 4, maxMempoolSize: 6 }).init();
-  for (let i = 0; i < 4; i++) flood.mine(ALICE);
+  for (let i = 0; i < 4; i++) await flood.mine(ALICE);
   for (let i = 0; i < 4; i++) {
     flood.submitRaw(toHex(signTransaction(
       { nonce: BigInt(i), gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
@@ -1200,9 +1203,9 @@ async function main() {
     'crowding everybody out from one address is as effective as from a thousand');
 
   // Full mempool: only a higher bid gets in, and it displaces the cheapest.
-  const rich = new Chain(Chain.loadGenesis(GENESIS), scratch('rich'),
+  const rich = await new Chain(Chain.loadGenesis(GENESIS), scratch('rich'),
     { maxMempoolSize: 2, maxMempoolPerSender: 8 }).init();
-  for (let i = 0; i < 4; i++) rich.mine(ALICE);
+  for (let i = 0; i < 4; i++) await rich.mine(ALICE);
   rich.submitRaw(toHex(signTransaction(
     { nonce: 0n, gasPrice: gasP, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
     ALICE_KEY, rich.chainId)));
@@ -1226,11 +1229,11 @@ async function main() {
   // --- orphan pool --------------------------------------------------------
   // The one place a node stores something it has NOT validated, so it is the
   // one place an unverifiable block costs a peer nothing to plant.
-  const donor = new Chain(Chain.loadGenesis(GENESIS), scratch('donor')).init();
-  for (let i = 0; i < 6; i++) donor.mine(CAROL);
-  const orph = new Chain(Chain.loadGenesis(GENESIS), scratch('orph'), { maxOrphans: 2 }).init();
+  const donor = await new Chain(Chain.loadGenesis(GENESIS), scratch('donor')).init();
+  for (let i = 0; i < 6; i++) await donor.mine(CAROL);
+  const orph = await new Chain(Chain.loadGenesis(GENESIS), scratch('orph'), { maxOrphans: 2 }).init();
   const results = [];
-  for (let n = 6; n >= 2; n--) results.push(orph.appendSerialized(serializeBlock(donor.blockByNumber(n))));
+  for (let n = 6; n >= 2; n--) results.push(await orph.appendSerialized(serializeBlock(donor.blockByNumber(n))));
   check('the orphan pool is capped',
     orph.orphanCount() === 2 && results.some((r) => r.reason === 'orphan pool full'),
     `${orph.orphanCount()} held, the rest refused`);
@@ -1238,12 +1241,12 @@ async function main() {
   // --- deep reorg ---------------------------------------------------------
   // A branch mined in private, deeper than the bound, is refused however heavy
   // it is. The cost of this rule is stated in src/limits.js and is real.
-  const fork = new Chain(Chain.loadGenesis(GENESIS), scratch('deep')).init();
-  fork.appendSerialized(serializeBlock(sec.blockByNumber(1)));
-  for (let i = 0; i < 8; i++) fork.mine(CAROL);
+  const fork = await new Chain(Chain.loadGenesis(GENESIS), scratch('deep')).init();
+  await fork.appendSerialized(serializeBlock(sec.blockByNumber(1)));
+  for (let i = 0; i < 8; i++) await fork.mine(CAROL);
   let refusedDeep = null;
   for (let n = 2; n <= Number(fork.height); n++) {
-    const r = sec.appendSerialized(serializeBlock(fork.blockByNumber(n)));
+    const r = await sec.appendSerialized(serializeBlock(fork.blockByNumber(n)));
     if (r.refusedReorg) refusedDeep = r.refusedReorg;
   }
   check('a reorg deeper than the limit is refused, however heavy the branch',
@@ -1267,6 +1270,7 @@ async function main() {
   const dirA = nodeA.chain.dataDir;
   await nodeA.stop();
   const reloaded = new Node({ genesisPath: GENESIS, dataDir: dirA, miner: ALICE });
+  await reloaded.ready;
   check('chain reloaded from disk', reloaded.chain.height === 4n);
   check('reloaded head is unchanged', reloaded.chain.head.hash === headDoc.hash);
   check('reloaded state root is unchanged', reloaded.chain.state.root() === nodeB.chain.state.root());

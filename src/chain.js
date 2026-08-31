@@ -120,12 +120,12 @@ export class Chain {
     };
   }
 
-  init() {
+  async init() {
     const genesisBlock = this.buildGenesisBlock();
     this.byHash.set(genesisBlock.hash, genesisBlock);
     this.canonical = [genesisBlock];
     this.state = genesisBlock.state.clone();
-    this.load();
+    await this.load();
     return this;
   }
 
@@ -360,7 +360,7 @@ export class Chain {
   // ---------------------------------------------------------------- mining
 
   /** Assemble a candidate on top of a given parent (defaults to the head). */
-  composeBlock(miner, parent = this.head) {
+  async composeBlock(miner, parent = this.head) {
     const minerAddress = normalizeAddress(miner);
 
     // One effective timestamp, used for BOTH the header and the difficulty.
@@ -387,7 +387,8 @@ export class Chain {
       const gas = intrinsicGas(tx);
       if (gasUsed + gas > this.genesis.blockGasLimit) continue;
       try {
-        const receipt = applyTransaction(state, tx, gas, minerAddress, parent.header.number + 1n);
+        const receipt = await applyTransaction(state, tx, gas, minerAddress, parent.header.number + 1n,
+          { chainId: BigInt(this.genesis.chainId ?? 20226), timestamp: BigInt(timestamp ?? 0) });
         included.push(tx);
         gasUsed += receipt.gasUsed;
       } catch {
@@ -416,13 +417,13 @@ export class Chain {
   }
 
   /** Compose, seal and process. Returns the block, or null if interrupted. */
-  mine(miner, options = {}) {
+  async mine(miner, options = {}) {
     const parent = options.parent ?? this.head;
-    const candidate = this.composeBlock(miner, parent);
+    const candidate = await this.composeBlock(miner, parent);
     const sealed = mineHeader(candidate.header, options);
     if (!sealed) return null;
     const block = { header: sealed, hash: blockHash(sealed), transactions: candidate.transactions };
-    this.processBlock(block);
+    await this.processBlock(block);
     return this.blockByHash(block.hash);
   }
 
@@ -432,7 +433,7 @@ export class Chain {
    * Fully verify a block against its parent and return the resulting entry.
    * Never mutates chain state - the caller decides whether to adopt it.
    */
-  verifyAgainstParent(block, parent) {
+  async verifyAgainstParent(block, parent) {
     const header = block.header;
 
     if (header.number !== parent.header.number + 1n) {
@@ -487,7 +488,8 @@ export class Chain {
       if (gasUsed + gas > header.gasLimit) {
         throw new Error('transactions exceed the block gas limit');
       }
-      const receipt = applyTransaction(state, tx, gas, header.miner, header.number);
+      const receipt = await applyTransaction(state, tx, gas, header.miner, header.number,
+        { chainId: BigInt(this.genesis.chainId ?? 20226), timestamp: BigInt(header.timestamp) });
       receipts.push(receipt);
       gasUsed += receipt.gasUsed;
     }
@@ -518,7 +520,7 @@ export class Chain {
    * Returns { accepted, adopted, reorg } - `adopted` means the canonical head
    * moved to this block or a descendant of it.
    */
-  processBlock(block, { persist = true, depth = 0 } = {}) {
+  async processBlock(block, { persist = true, depth = 0 } = {}) {
     if (this.byHash.has(block.hash)) return { accepted: false, adopted: false, reason: 'known' };
 
     const parent = this.byHash.get(block.header.parentHash);
@@ -535,7 +537,7 @@ export class Chain {
       return { accepted: false, adopted: false, reason: 'orphan' };
     }
 
-    const entry = this.verifyAgainstParent(block, parent);
+    const entry = await this.verifyAgainstParent(block, parent);
     this.byHash.set(entry.hash, entry);
 
     let reorg = null;
@@ -587,7 +589,7 @@ export class Chain {
         if (persist) this.persist();
         return { accepted: true, adopted: false, reorg: null, refusedReorg: this.refusedReorg };
       }
-      reorg = this.setHead(entry);
+      reorg = await this.setHead(entry);
     }
 
     // The parent's arrival may unblock children that came in early. The depth
@@ -598,7 +600,7 @@ export class Chain {
     if (children && depth < MAX_ORPHAN_RESOLUTION_DEPTH) {
       this.orphans.delete(entry.hash);
       for (const child of children) {
-        this.processBlock(child, { persist: false, depth: depth + 1 });
+        await this.processBlock(child, { persist: false, depth: depth + 1 });
       }
     }
 
@@ -628,7 +630,7 @@ export class Chain {
    * Move the canonical head to `entry`, reorganising if it sits on a side
    * branch. Transactions dropped by the reorg go back to the mempool.
    */
-  setHead(entry) {
+  async setHead(entry) {
     const { ancestor, branch } = this.pathToCanonical(entry);
     const ancestorHeight = Number(ancestor.header.number);
     const reverted = this.canonical.slice(ancestorHeight + 1);
@@ -660,12 +662,16 @@ export class Chain {
           cumulativeGasUsed: receipt.gasUsed,
           effectiveGasPrice: tx.gasPrice,
           status: receipt.status,
-          contractAddress: null,
+          // The address a contract-creation transaction produced, and the
+          // events it emitted. Hardcoding these to null/[] was correct while
+          // there was no EVM; leaving them hardcoded once there is one means
+          // a wallet can deploy a contract and never learn where it went.
+          contractAddress: receipt.contractAddress ?? null,
           voteKey: receipt.voteKey ?? null,
           pollId: receipt.pollId ?? null,
           tokenId: receipt.tokenId ?? null,
           tokenAmount: receipt.tokenAmount ?? null,
-          logs: [],
+          logs: receipt.logs ?? [],
         });
       });
     }
@@ -697,7 +703,7 @@ export class Chain {
   }
 
   /** Adopt a serialized block received from a peer. */
-  appendSerialized(serialized) {
+  async appendSerialized(serialized) {
     const header = deserializeHeader(serialized.header);
     const transactions = serialized.transactions.map((raw) => decodeTransaction(raw, this.chainId));
     return this.processBlock({ header, hash: blockHash(header), transactions });
@@ -725,7 +731,7 @@ export class Chain {
     renameSync(temp, this.chainFile); // atomic swap; a crash never leaves a half file
   }
 
-  load() {
+  async load() {
     if (!existsSync(this.chainFile)) return false;
     const payload = JSON.parse(readFileSync(this.chainFile, 'utf8'));
     if (Number(payload.chainId) !== this.chainId) {
@@ -733,7 +739,7 @@ export class Chain {
     }
     for (const serialized of payload.blocks) {
       try {
-        this.appendSerialized(serialized);
+        await this.appendSerialized(serialized);
       } catch (error) {
         throw new Error(
           `stored block #${serialized.header.number} in ${this.chainFile} is invalid under the `

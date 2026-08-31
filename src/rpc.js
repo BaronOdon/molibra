@@ -700,7 +700,7 @@ export function verifyLinkingProof(node, code) {
   };
 }
 
-function handlePeerPost(node, path, payload, res) {
+async function handlePeerPost(node, path, payload, res) {
   try {
     if (path === '/molibra/airdrop') {
       if (!node.treasury) throw new Error('treasury not enabled on this node');
@@ -749,7 +749,7 @@ function handlePeerPost(node, path, payload, res) {
     }
 
     if (path === '/molibra/submit-block') {
-      node.acceptPeerBlock(payload.block ?? payload);
+      await node.acceptPeerBlock(payload.block ?? payload);
       return json(res, 200, { ok: true, height: Number(node.chain.height) });
     }
     node.chain.submitRaw(payload.raw ?? payload);

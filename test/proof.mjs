@@ -81,8 +81,8 @@ check('a path from another tree does not verify',
 const ALICE_KEY = fromHex('0x' + '01'.repeat(32));
 const ALICE = privateToAddress(ALICE_KEY);
 const BOB = privateToAddress(fromHex('0x' + '02'.repeat(32)));
-const chain = new Chain(Chain.loadGenesis(GENESIS), scratch('chain')).init();
-for (let i = 0; i < 4; i++) chain.mine(ALICE);
+const chain = await new Chain(Chain.loadGenesis(GENESIS), scratch('chain')).init();
+for (let i = 0; i < 4; i++) await chain.mine(ALICE);
 
 // Five transactions in one block: an odd count, on purpose.
 const hashes = [];
@@ -91,7 +91,7 @@ for (let i = 0; i < 5; i++) {
     { nonce: BigInt(i), gasPrice: 1000000000n, gasLimit: 21000n, to: BOB, value: 1n, data: '0x' },
     ALICE_KEY, chain.chainId))));
 }
-chain.mine(ALICE);
+await chain.mine(ALICE);
 const block = chain.blockByNumber(Number(chain.height));
 check('five transactions went into one block', block.transactions.length === 5);
 

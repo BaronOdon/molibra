@@ -68,9 +68,9 @@ check('the page\'s minimal RLP encoder matches @ethereumjs/rlp on 200 random inp
   rlpMatches === 200, `${rlpMatches}/200`);
 
 // --- a signed transaction the node accepts --------------------------------
-const chain = new Chain(Chain.loadGenesis(GENESIS), scratch('chain')).init();
+const chain = await new Chain(Chain.loadGenesis(GENESIS), scratch('chain')).init();
 const MINER = privateToAddress(fromHex('0x' + '01'.repeat(32)));
-for (let i = 0; i < 4; i++) chain.mine(MINER);
+for (let i = 0; i < 4; i++) await chain.mine(MINER);
 
 const userKey = wallet.generatePrivateKey();
 const userAddress = wallet.addressFor(userKey);
@@ -107,7 +107,7 @@ const MINER_KEY = fromHex('0x' + '01'.repeat(32));
 const createHash = chain.submitRaw(toHex(nodeSign(
   { nonce: 0n, gasPrice: 1000000000n, gasLimit: 300000n, to: MINER, value: 0n,
     data: encodeTokenCreate(record) }, MINER_KEY, chain.chainId)));
-chain.mine(MINER);
+await chain.mine(MINER);
 const GIZ = tokenId(MINER, record.title, BigInt(chain.txIndex.get(createHash).blockNumber));
 
 // The publisher issues chalk AND the fare to the freshly generated address.
@@ -117,7 +117,7 @@ chain.submitRaw(toHex(nodeSign(
 chain.submitRaw(toHex(nodeSign(
   { nonce: 2n, gasPrice: 1000000000n, gasLimit: 21000n, to: userAddress,
     value: 10n ** 16n, data: '0x' }, MINER_KEY, chain.chainId)));
-chain.mine(MINER);
+await chain.mine(MINER);
 check('the freshly generated address received chalk and the fare',
   chain.state.tokenBalanceOf(GIZ, userAddress) === COST * 20n
   && chain.state.balanceOf(userAddress) === 10n ** 16n);
@@ -127,7 +127,7 @@ const spoke = chain.submitRaw(wallet.signTransaction(
     data: encodeExpress(GIZ, toPollId('wallet-test-question'), '0x' + '11'.repeat(32), COST) },
   userKey, chain.chainId,
 ));
-chain.mine(MINER);
+await chain.mine(MINER);
 check('a key created in a browser can EXPRESS, signed in the page',
   chain.receiptFor(spoke).status === 1
   && chain.state.tokenBalanceOf(GIZ, userAddress) === COST * 19n,
@@ -166,6 +166,7 @@ check('sealing the same key twice produces different ciphertext',
 const { Node } = await import('../src/node.js');
 const { verifyLinkingProof } = await import('../src/rpc.js');
 const proofNode = new Node({ genesisPath: GENESIS, dataDir: scratch('proof') });
+await proofNode.ready;
 const nonce = '0x' + '7f'.repeat(16);
 const expires = new Date(Date.now() + 600000).toISOString();
 proofNode.challenges.set(nonce, Date.parse(expires));

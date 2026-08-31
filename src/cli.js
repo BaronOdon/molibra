@@ -36,14 +36,16 @@ function parseArgs(argv) {
   return args;
 }
 
-function makeNode(args) {
-  return new Node({
+async function makeNode(args) {
+  const node = new Node({
     genesisPath: args.genesis ? resolve(args.genesis) : join(ROOT, 'genesis.json'),
     dataDir: args.datadir ? resolve(args.datadir) : join(ROOT, 'data'),
     miner: args.miner ?? null,
     peers: args.peers ? String(args.peers).split(',').map((p) => p.trim()) : [],
     minGasPrice: args.gasprice ? BigInt(args.gasprice) : 1000000000n,
   });
+  await node.ready;
+  return node;
 }
 
 function formatMoli(wei, decimals = 18) {
@@ -63,10 +65,10 @@ const commands = {
     console.log('Keep the private key secret. Anyone holding it controls the account.');
   },
 
-  info(args) {
+  async info(args) {
     const genesisPath = args.genesis ? resolve(args.genesis) : join(ROOT, 'genesis.json');
     const dataDir = args.datadir ? resolve(args.datadir) : join(ROOT, 'data');
-    const chain = new Chain(Chain.loadGenesis(genesisPath), dataDir).init();
+    const chain = await new Chain(Chain.loadGenesis(genesisPath), dataDir).init();
     console.log(`chain       : ${chain.genesis.name} (${chain.genesis.symbol})`);
     console.log(`chain id    : ${chain.chainId}`);
     console.log(`height      : ${chain.height}`);
@@ -81,11 +83,11 @@ const commands = {
 
   async mine(args) {
     if (!args.miner) throw new Error('--miner 0x... is required');
-    const node = makeNode(args);
+    const node = await makeNode(args);
     const count = Number(args.n ?? args.blocks ?? 1);
     console.log(`mining ${count} block(s) to ${node.miner} at difficulty ${node.chain.head.header.difficulty}`);
     const started = Date.now();
-    node.mineBlocks(count, (block) => {
+    await node.mineBlocks(count, (block) => {
       console.log(`  #${block.header.number}  ${block.hash}  txs=${block.transactions.length}  diff=${block.header.difficulty}`);
     });
     const balance = node.chain.state.balanceOf(node.miner);
@@ -94,7 +96,7 @@ const commands = {
   },
 
   async node(args) {
-    const node = makeNode(args);
+    const node = await makeNode(args);
     if (args.treasury) node.enableTreasury(args.claim ? { claimAmount: BigInt(args.claim) } : {});
     const host = args.host ?? '127.0.0.1';
     const port = Number(args.port ?? 8545);
@@ -154,8 +156,8 @@ const commands = {
   },
 
 
-  treasury(args) {
-    const node = makeNode(args);
+  async treasury(args) {
+    const node = await makeNode(args);
     const t = node.enableTreasury(args.claim ? { claimAmount: BigInt(args.claim) } : {});
     const d = t.describe();
     console.log(`treasury    : ${d.address}`);
@@ -173,7 +175,7 @@ const commands = {
 
   async sync(args) {
     if (!args.peer) throw new Error('--peer http://host:port is required');
-    const node = makeNode(args);
+    const node = await makeNode(args);
     const adopted = await node.syncFrom(args.peer);
     console.log(`adopted ${adopted} block(s); height is now ${node.chain.height}`);
   },

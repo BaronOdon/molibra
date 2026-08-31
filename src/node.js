@@ -20,7 +20,13 @@ export class Node {
     // The node's fee floor is the chain's mempool policy; passing it in one
     // place stops the two disagreeing about what a cheap transaction is.
     this.chain = new Chain(Chain.loadGenesis(genesisPath), dataDir,
-      { minGasPrice, ...limits }).init();
+      { minGasPrice, ...limits });
+    // init() replays the stored blocks, and replaying them re-executes their
+    // transactions - which since contracts exist means running the EVM, which
+    // is async. The chain object itself is available immediately (genesis is
+    // built synchronously); `ready` resolves once the stored history has been
+    // verified back in. Anything that reads height or head must await it.
+    this.ready = this.chain.init();
     this.miner = miner ? normalizeAddress(miner) : null;
     this.peers = new Set(peers.filter(Boolean));
     this.minGasPrice = BigInt(minGasPrice);
@@ -80,12 +86,12 @@ export class Node {
     let candidateParent = null;
     let nonce = 0n;
 
-    const loop = () => {
+    const loop = async () => {
       if (!this.mining) return;
       try {
         if (!candidate || candidateParent !== this.chain.head.hash) {
           candidateParent = this.chain.head.hash;
-          candidate = this.chain.composeBlock(this.miner);
+          candidate = await this.chain.composeBlock(this.miner);
           nonce = 0n;
         }
         this._stopSignal.nextNonce = null;
@@ -96,7 +102,7 @@ export class Node {
         });
         if (sealed) {
           const block = { header: sealed, hash: blockHash(sealed), transactions: candidate.transactions };
-          this.chain.processBlock(block);
+          await this.chain.processBlock(block);
           const stored = this.chain.blockByHash(block.hash);
           candidate = null;
           this.broadcastBlock(stored);
@@ -119,11 +125,11 @@ export class Node {
   }
 
   /** Mine exactly n blocks synchronously. Used by tests and the CLI. */
-  mineBlocks(count, onBlock = null) {
+  async mineBlocks(count, onBlock = null) {
     if (!this.miner) throw new Error('no miner address configured');
     const mined = [];
     for (let i = 0; i < count; i++) {
-      const block = this.chain.mine(this.miner);
+      const block = await this.chain.mine(this.miner);
       mined.push(block);
       onBlock?.(block);
     }
@@ -240,9 +246,9 @@ export class Node {
    * one at or below our current height - that is exactly the block a competing
    * branch is made of. Chain.processBlock validates it and re-runs fork choice.
    */
-  acceptPeerBlock(serialized) {
+  async acceptPeerBlock(serialized) {
     const before = this.chain.head.hash;
-    const result = this.chain.appendSerialized(serialized);
+    const result = await this.chain.appendSerialized(serialized);
     if (result.reorg) {
       console.log(`[molibra] reorg depth ${result.reorg.depth}: ${before.slice(0, 10)} -> ${this.chain.head.hash.slice(0, 10)}`);
     }
@@ -277,7 +283,7 @@ export class Node {
       for (const serialized of payload.blocks) {
         if (Number(serialized.header.number) === 0) continue; // genesis is ours already
         if (this.chain.blockByHash(serialized.hash)) continue;
-        const result = this.chain.appendSerialized(serialized);
+        const result = await this.chain.appendSerialized(serialized);
         if (result.accepted) accepted++;
         // Yield periodically. Verifying a block re-executes every transaction
         // in it, and doing a whole page without pause means the node answers
