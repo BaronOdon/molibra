@@ -18,6 +18,7 @@ import { serializeBlock, encodeHeader } from './block.js';
 import { PURPOSE_LABELS } from './token.js';
 import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
+import { simulate } from './evm.js';
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
 
@@ -169,9 +170,24 @@ export function createRpcHandlers(node) {
       return toQuantity(chain.state.nonceOf(from));
     },
 
-    // No EVM in v0.1: every address is an externally owned account.
-    eth_getCode: () => '0x',
-    eth_getStorageAt: () => '0x' + '00'.repeat(32),
+    /**
+     * ⛔ These three were stubbed while there was no EVM, and stayed stubbed
+     * after there was one. A contract that mints correctly and cannot be READ
+     * is invisible: `balanceOf` is an `eth_call`, so a wallet shown a bridged
+     * asset would report zero, and an explorer would show an empty account
+     * where the token lives. Consensus was right and the window onto it was
+     * closed.
+     */
+    eth_getCode: ([address, tag]) => {
+      resolveBlock(tag);
+      const code = chain.state.getCode(normalizeAddress(address));
+      return code && code.length ? toHex(code) : '0x';
+    },
+
+    eth_getStorageAt: ([address, slot, tag]) => {
+      resolveBlock(tag);
+      return chain.state.getStorage(normalizeAddress(address), slot);
+    },
 
     eth_getBlockByNumber: ([tag, full]) => {
       const block = tag === 'latest' || tag === 'pending' ? chain.head : chain.blockByNumber(BigInt(tag));
@@ -208,13 +224,51 @@ export function createRpcHandlers(node) {
       }
     },
 
-    eth_estimateGas: ([call]) => {
+    eth_estimateGas: async ([call]) => {
       const data = call?.data ?? call?.input ?? '0x';
-      return toQuantity(intrinsicGas({ data }));
+      const base = intrinsicGas({ data });
+      if (!call?.to || !chain.state.hasCode(call.to)) return toQuantity(base);
+      const r = await simulate(chain.state, {
+        from: call.from ? normalizeAddress(call.from) : '0x' + '00'.repeat(20),
+        to: normalizeAddress(call.to),
+        value: call.value ? BigInt(call.value) : 0n,
+        data: fromHex(data),
+        gasLimit: BigInt(chain.genesis.blockGasLimit),
+        chainId: BigInt(chain.chainId),
+        blockNumber: chain.head.header.number,
+        timestamp: BigInt(chain.head.header.timestamp),
+      });
+      // A tenth on top: the estimate is against the CURRENT head, and the
+      // transaction will run against a later one. Returning the exact figure
+      // makes every estimate a transaction that only just fits.
+      return toQuantity(base + (r.gasUsed * 11n) / 10n);
     },
 
-    // Value transfers only in v0.1, so a call has no return data.
-    eth_call: () => '0x',
+    /**
+     * Read-only execution, against a clone. This is how a wallet reads
+     * `balanceOf`, `symbol`, `decimals` and every other view function - so
+     * without it a bridged asset exists in consensus and nowhere a person can
+     * see it.
+     */
+    eth_call: async ([call, tag]) => {
+      resolveBlock(tag);
+      if (!call?.to || !chain.state.hasCode(call.to)) return '0x';
+      const r = await simulate(chain.state, {
+        from: call.from ? normalizeAddress(call.from) : '0x' + '00'.repeat(20),
+        to: normalizeAddress(call.to),
+        value: call.value ? BigInt(call.value) : 0n,
+        data: fromHex(call.data ?? call.input ?? '0x'),
+        gasLimit: BigInt(chain.genesis.blockGasLimit),
+        chainId: BigInt(chain.chainId),
+        blockNumber: chain.head.header.number,
+        timestamp: BigInt(chain.head.header.timestamp),
+      });
+      // A reverted call is an ERROR, not an empty answer. A wallet that reads
+      // '0x' back from a revert shows a zero balance rather than a failure,
+      // which is the kind of wrong that looks like working.
+      if (r.failed) throw new RpcError(INTERNAL_ERROR, `execution reverted: ${r.error}`);
+      return toHex(r.returnValue);
+    },
 
     eth_feeHistory: ([count]) => {
       const blocks = Number(BigInt(count ?? '0x1'));
@@ -284,21 +338,26 @@ export function startRpcServer(node, { host, port }) {
       return handlePeerPost(node, req.url, payload, res);
     }
 
-    const respond = (request) => {
+    // ⛔ Awaited. `eth_call` and `eth_estimateGas` run the EVM, so they are
+    // async; a dispatcher that returned the promise would serialise `{}` and
+    // every contract read would come back empty rather than failing.
+    const respond = async (request) => {
       const id = request?.id ?? null;
       const handler = handlers[request?.method];
       if (!handler) {
         return { jsonrpc: '2.0', id, error: { code: METHOD_NOT_FOUND, message: `method not found: ${request?.method}` } };
       }
       try {
-        return { jsonrpc: '2.0', id, result: handler(request.params ?? []) };
+        return { jsonrpc: '2.0', id, result: await handler(request.params ?? []) };
       } catch (error) {
         const code = error instanceof RpcError ? error.code : INTERNAL_ERROR;
         return { jsonrpc: '2.0', id, error: { code, message: error.message } };
       }
     };
 
-    const result = Array.isArray(payload) ? payload.map(respond) : respond(payload);
+    const result = Array.isArray(payload)
+      ? await Promise.all(payload.map(respond))
+      : await respond(payload);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
   });
@@ -334,7 +393,7 @@ function handleAudit(node, req, res) {
       attribution: chain.genesis.attribution,
       theories: chain.genesis.theories,
       peers: [...node.peers],
-      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers'],
+      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle'],
     });
   }
 
@@ -346,6 +405,38 @@ function handleAudit(node, req, res) {
     return json(res, 200, { peers: [...node.peers] });
   }
 
+  /**
+   * What has crossed the bridge, and what a stranger must trust to believe it.
+   *
+   * Written to be read BY SOMEBODY WHO TRUSTS NOTHING. Every number here is
+   * recomputable from the two chains: sum the burns on the origin chain
+   * against the committed roots, sum what exists here, and check the total
+   * against the original supply. The `registrar` is the one input that is not
+   * arithmetic - it is whose word the committed headers are - which is exactly
+   * why it is printed next to the numbers rather than buried in a design note.
+   */
+  if (path === '/molibra/bridge') {
+    const { inbound } = chain.state;
+    const assets = [...inbound.assets.keys()].map((id) => ({ id, ...inbound.report(id) }));
+    return json(res, 200, {
+      assets,
+      claimsHonoured: inbound.claimed.size,
+      headers: [...inbound.headers.entries()].map(([k, v]) => {
+        const [chainId, blockNumber] = k.split(':');
+        return { chainId, blockNumber, receiptsRoot: v.receiptsRoot, committedBy: v.by };
+      }),
+      trustModel: {
+        trustless: 'that a burn is in a block with the committed receiptsRoot, that it burned '
+          + "the asset's own origin contract, and that it is paid exactly once",
+        trusted: 'that a block with that receiptsRoot is canonical on the origin chain - the '
+          + 'word of the registrar named above, permanently on this chain and refutable by '
+          + 'anyone running a node on that one',
+      },
+      howToVerify: 'compare every receiptsRoot here against the real block on the origin chain; '
+        + 'then sum the burns and check them against the minted totals.',
+    });
+  }
+
   if (path === '/molibra/treasury') {
     return json(res, 200, node.treasury
       ? node.treasury.describe()
@@ -354,6 +445,22 @@ function handleAudit(node, req, res) {
 
   if (path === '/molibra/connect') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'connect.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * The settlement page: deploy, anchor, release. An OPERATOR page - it holds
+   * no key and every transaction is signed in the reader's own wallet.
+   *
+   * ⛔ Served from disk on every request, so an edit is live without a restart.
+   * The ROUTE is not: a handler added to a running node is dead code until it
+   * is restarted, which is why this one was curled against a fresh process
+   * rather than the one that happened to be up.
+   */
+  if (path === '/molibra/settle') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'settle.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
