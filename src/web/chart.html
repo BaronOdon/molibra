@@ -52,6 +52,25 @@ const MOLIBRA_RPC = 'http://193.123.191.142:8545';
 
 const POOL = '0xfcaee25dd24c129a9069fcd2bedc7cd05798c47e';   // WSRO/WETH SushiSwap V3, fee 100
 const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+
+/**
+ * ETH/USD comes from Uniswap V3's USDC/WETH 0.05% pool, read the same way the
+ * WSRO pool is read.
+ *
+ * ⛔ Deliberately NOT a price API. A dollar figure from an aggregator is
+ * somebody's opinion delivered over HTTP; this one is a number a chain is
+ * currently trading at, and a reader can check it with one eth_call. The rule
+ * at the top of this file - if a number is here, a chain said it - holds for
+ * the dollars as well, or it does not hold at all.
+ *
+ * USDC is token0 with 6 decimals and WETH is token1 with 18, so the raw tick
+ * price is WETH-wei per USDC-unit and the 1e-12 below is the decimal gap. Get
+ * that factor wrong and the page reports a plausible, completely fictional
+ * dollar price.
+ */
+const USDC_WETH = '0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640';
+const USDC_DECIMAL_GAP = 1e-12;
 const Q96 = 2n ** 96n;
 
 const PAIRS = [
@@ -79,9 +98,21 @@ function priceFromSqrt(sqrtP) {
   return Number(num * 10n ** 18n / (Q96 * Q96)) / 1e18;
 }
 
+/** Dollars per ETH, from the deepest USDC pair on Ethereum. */
+async function readEthUsd() {
+  const slot0 = await call(USDC_WETH, '0x3850c7bd');
+  const sqrtP = BigInt('0x' + slot0.slice(2, 66));
+  const ethPerUsdc = priceFromSqrt(sqrtP) * USDC_DECIMAL_GAP;
+  return ethPerUsdc > 0 ? 1 / ethPerUsdc : 0;
+}
+
 async function readWsro() {
   const slot0 = await call(POOL, '0x3850c7bd');
   const liq = await call(POOL, '0x1a686502');
+  // How much WETH is actually IN the pool. This is the number that decides
+  // whether the price above means anything: it is the most the pool could ever
+  // pay out, however much WSRO is sold into it.
+  const held = await call(WETH, '0x70a08231' + POOL.slice(2).padStart(64, '0'));
   const s = slot0.slice(2);
   const sqrtP = BigInt('0x' + s.slice(0, 64));
   let tick = BigInt('0x' + s.slice(64, 128));
@@ -90,6 +121,7 @@ async function readWsro() {
     price: priceFromSqrt(sqrtP),
     tick: Number(tick),
     liquidity: BigInt(liq),
+    wethInPool: Number(BigInt(held)) / 1e18,
     dead: BigInt(liq) === 0n,
   };
 }
@@ -123,6 +155,22 @@ function sparkline(series) {
 
 const fmt = (v) => (v === 0 ? '0' : v.toExponential(6));
 
+/**
+ * A dollar figure a person can read.
+ *
+ * A price of 0.0000172 is not helped by being written as 1.72e-5, and it is
+ * not helped by being rounded to $0.00 either - which is what a currency
+ * formatter does to it. So: real currency formatting where the number is
+ * ordinary, and enough significant digits to stay true where it is small.
+ */
+function usd(v) {
+  if (!isFinite(v) || v === 0) return '$0.00';
+  const abs = Math.abs(v);
+  if (abs >= 0.01) return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (abs >= 1e-6) return '$' + v.toFixed(8).replace(/0+$/, '');
+  return '$' + v.toExponential(4);
+}
+
 function change(series) {
   if (series.length < 2) return '<span class="flat">—</span>';
   const a = series[0].v, b = series[series.length - 1].v;
@@ -153,21 +201,29 @@ async function poll() {
 
   try {
     const d = await readWsro();
+    const ethUsd = await readEthUsd();
+    const wsroUsd = d.price * ethUsd;
+    const depthUsd = d.wethInPool * ethUsd;
     w.series.push({ t, v: d.price });
     if (w.series.length > 720) w.series.shift();
     render('wsroweth', `
       <div class="head"><span class="pair">${w.pair}</span><span class="venue">${w.venue}</span></div>
-      <div class="price">${fmt(d.price)} <span class="venue">${w.quote}</span></div>
+      <div class="price">${usd(wsroUsd)} <span class="venue">per WSRO</span></div>
+      <div class="chg flat">${fmt(d.price)} ${w.quote} &nbsp;·&nbsp; ETH at ${usd(ethUsd)}</div>
       ${change(w.series)}
       ${sparkline(w.series)}
       <dl>
         <dt>tick</dt><dd>${d.tick}</dd>
         <dt>in-range liquidity</dt><dd>${d.liquidity.toLocaleString()}</dd>
+        <dt>WETH in the pool</dt><dd>${d.wethInPool.toFixed(9)} &nbsp;(${usd(depthUsd)})</dd>
         <dt>pool</dt><dd>${POOL}</dd>
       </dl>
       ${d.dead
         ? '<div class="note dead">⛔ Zero in-range liquidity. There is a quoted price and nothing behind it — nothing can actually trade at this number.</div>'
-        : '<div class="note">⛔ One position holds this entire market. A small trade moves the price a long way; this is a quote against shallow depth, not a valuation.</div>'}`);
+        : `<div class="note">⛔ <b>${usd(depthUsd)}</b> is the whole market. That is the most this
+             pool could ever pay out, however much WSRO is sold into it — the price above is a
+             quote against that depth, not a valuation. Multiplying a holding by it gives a
+             number no one is bidding.</div>`}`);
     failures = 0;
   } catch (e) {
     failures++;
