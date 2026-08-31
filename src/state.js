@@ -17,7 +17,7 @@
  */
 
 import { keccak256, toHex, fromHex, normalizeAddress } from './crypto.js';
-import { runEvm } from './evm.js';
+import { runEvm, simulate } from './evm.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
   decodePollOpen, assertPollOpenShape, decodeCredentialExpress,
@@ -27,6 +27,13 @@ import {
   decodeTokenCreate, decodeExpress, decodeIssue, decodeTransfer,
   normalizeTokenRecord, expressionKey, expressionBurn,
 } from './token.js';
+import {
+  decodeBridgeRegister, decodeHeaderCommit, decodeBridgeClaim, decodeBridgeRelease,
+  bridgeAuthority, mintCall, burnCall, isBurnCall, BRIDGE_GETTER,
+} from './bridgemint.js';
+import { InboundLedger } from './inbound.js';
+import { foreignAssetRecord } from './foreign.js';
+import { proveBurn } from './burnproof.js';
 
 /** A storage word of zero. Unset and zero are the same thing, as in the EVM. */
 export const ZERO_WORD = '0x' + '00'.repeat(32);
@@ -82,6 +89,13 @@ export class State {
     // recorded. It lives in state, so a reorg that unwinds a block also unwinds
     // the right to speak again - no separate bookkeeping to get out of step.
     this.voteKeys = voteKeys;
+    // The inbound bridge ledger: which foreign assets may exist here, how much
+    // of each does, and which origin burns have been paid. It is state and not
+    // a service for the same reason vote keys are: a reorg must unwind a claim
+    // along with the block that made it, or a burn would be spent on a chain
+    // that no longer exists. Assigned rather than passed in, so every existing
+    // caller of this constructor keeps working unchanged.
+    this.inbound = new InboundLedger();
   }
 
   hasVoteKey(key) {
@@ -194,6 +208,7 @@ export class State {
     for (const [address, slots] of Object.entries((obj && obj.storage) || {})) {
       for (const [slot, value] of Object.entries(slots)) state.setStorage(address, slot, value);
     }
+    if (obj && obj.inbound) state.inbound = InboundLedger.fromJSON(obj.inbound);
     return state;
   }
 
@@ -217,6 +232,10 @@ export class State {
         (out.storage[address] ??= {})[slot] = this.storage.get(key);
       }
     }
+    // Omitted when the ledger is empty, on the same terms as everything above,
+    // so a datadir written before the bridge existed round-trips unchanged.
+    const inbound = this.inbound.toJSON();
+    if (inbound) out.inbound = inbound;
     return out;
   }
 
@@ -225,6 +244,14 @@ export class State {
     for (const [address, account] of this.accounts) {
       accounts.set(address, { balance: account.balance, nonce: account.nonce });
     }
+    const copy = this.cloneWith(accounts);
+    // The bridge ledger is copied, not shared: a candidate block honouring a
+    // burn must not consume that burn in its parent's state.
+    copy.inbound = this.inbound.clone();
+    return copy;
+  }
+
+  cloneWith(accounts) {
     // Vote keys are copied, not shared: a candidate block built on this state
     // must not be able to write a vote back into its parent.
     return new State(
@@ -399,6 +426,13 @@ export class State {
       lines.push(`place:${id}:${p.opener}:${p.e.toString(16)}:${p.n.toString(16)}`);
     }
     for (const k of [...this.spentSerials].sort()) lines.push(`serial:${k}`);
+    // The bridge ledger: registered assets with their running accounting, the
+    // burns already paid, and the origin headers committed. Every node must
+    // agree on all three or a claim would be honoured on one node and refused
+    // on another - which is the same class of disagreement as a double-spend.
+    // Appended only when present, so the chain that exists today, which has no
+    // bridged asset on it, hashes to exactly the root it already has.
+    lines.push(...this.inbound.rootLines());
     return toHex(keccak256(new TextEncoder().encode(lines.join('\n'))));
   }
 }
@@ -410,6 +444,20 @@ export class State {
  */
 export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumber = 0n,
                                        { chainId = 20226n, timestamp = 0n } = {}) {
+  // ⛔⛔ Nothing is ever sent FROM a bridge authority.
+  //
+  // Those addresses are hash images, not public-key images, so no signature
+  // recovers to one and this can never fire against a real transaction. It is
+  // here because the security of every bridged asset rests on that fact, and a
+  // property nobody wrote down is a property nobody can check. If this ever
+  // throws, keccak256 or secp256k1 is broken and the right response is to stop
+  // rather than to mint.
+  if (state.inbound.isAuthority(tx.from)) {
+    throw new Error(
+      `${tx.from} is a bridge authority: it mints only through a proved burn, and `
+      + 'there is no key that could have signed this');
+  }
+
   const expectedNonce = state.nonceOf(tx.from);
   if (tx.nonce !== expectedNonce) {
     throw new Error(`bad nonce for ${tx.from}: got ${tx.nonce}, expected ${expectedNonce}`);
@@ -575,6 +623,108 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     spent = key;
   }
 
+  // ---------------------------------------------------------------- bridge
+  //
+  // Three payloads, checked here and executed below, in the order a unit of a
+  // foreign asset actually comes into existence: an asset is REGISTERED, an
+  // origin header is COMMITTED, and a burn under that header is CLAIMED. The
+  // fourth, RELEASE, is the way back out.
+  //
+  // ⛔ Everything is checked before anything mutates, exactly as above, because
+  // a claim that half-happened would have spent a burn without minting against
+  // it - and that burn is gone on the origin chain, so there is no second try.
+
+  const registration = decodeBridgeRegister(tx.data);
+  let registering = null;
+  if (registration) {
+    if (tx.value !== 0n) throw new Error('registering a bridged asset moves no value');
+    // foreignAssetRecord applies `mayEnterFromABridge`: an arriving token can
+    // only ever be an asset, and social/purchase/electoral subject matter
+    // never crosses. GIZ cannot reach this line whatever it is called.
+    const record = foreignAssetRecord({
+      originChainId: registration.originChainId,
+      contract: registration.contract,
+      symbol: registration.symbol,
+      name: registration.symbol,
+    });
+    if (state.inbound.assets.has(record.id)) {
+      throw new Error(`bridged asset ${record.id} is already registered`);
+    }
+    if (!state.hasCode(registration.assetContract)) {
+      throw new Error('the asset contract has no code: units need somewhere to live');
+    }
+    // ⛔⛔ The check the whole design rests on. The contract's `bridge` is
+    // immutable, set at construction, and it must be the KEYLESS address
+    // derived from this asset's id. Without this, anyone could register a
+    // contract that trusts their own wallet and the ledger below would be
+    // faithfully accounting for units somebody mints at will.
+    const authority = bridgeAuthority(record.id);
+    const probe = await simulate(state, {
+      from: tx.from, to: registration.assetContract,
+      data: fromHex(BRIDGE_GETTER), gasLimit: 100000n,
+    });
+    if (probe.failed) throw new Error('the asset contract has no bridge(): it is not a BridgedAsset');
+    const trusted = normalizeAddress('0x' + toHex(probe.returnValue).slice(-40));
+    if (trusted !== authority) {
+      throw new Error(
+        `${registration.assetContract} trusts ${trusted}, not ${authority}. A bridged asset `
+        + 'must trust the keyless address derived from its own id, or its supply is whatever '
+        + 'the holder of that key decides.');
+    }
+    registering = { record, cap: registration.cap, assetContract: registration.assetContract };
+  }
+
+  const header = decodeHeaderCommit(tx.data);
+  if (header) {
+    if (tx.value !== 0n) throw new Error('committing a header moves no value');
+    // Rehearsed on a copy so a refused commit leaves the ledger untouched.
+    state.inbound.clone().commitHeader({ ...header, by: tx.from });
+  }
+
+  const claimed = decodeBridgeClaim(tx.data);
+  let claiming = null;
+  if (claimed) {
+    if (tx.value !== 0n) throw new Error('a bridge claim moves no MOLI');
+    const asset = state.inbound.get(claimed.tokenId);
+    if (!asset.assetContract) throw new Error(`${asset.symbol} has no contract to mint into`);
+    const receiptsRoot = state.inbound.receiptsRootFor(asset.origin.chainId, claimed.blockNumber);
+    if (!receiptsRoot) {
+      throw new Error(
+        `no receiptsRoot is committed for chain ${asset.origin.chainId} block `
+        + `${claimed.blockNumber}. A proof against a root nobody committed is a proof `
+        + 'against a number the claimant chose.');
+    }
+    // ⛔ The burn is PROVED here - against the committed root, against THIS
+    // asset's origin contract - and only then is it asked whether paying it is
+    // permitted. Both, in this order, every time.
+    const proved = proveBurn({
+      receiptsRoot,
+      txIndex: claimed.txIndex,
+      proof: claimed.proof,
+      contract: asset.origin.contract,
+      ethTxHash: claimed.ethTxHash,
+      recipient: claimed.recipient,
+    });
+    const { value } = state.inbound.assertClaimable({
+      tokenId: asset.id, ethTxHash: proved.ethTxHash,
+      amount: proved.amount, recipient: proved.recipient,
+    });
+    claiming = { asset, proved, value };
+  }
+
+  const releasing = decodeBridgeRelease(tx.data);
+  let releasingAsset = null;
+  if (releasing) {
+    if (tx.value !== 0n) throw new Error('a bridge release moves no MOLI');
+    const asset = state.inbound.get(releasing.tokenId);
+    if (!asset.assetContract) throw new Error(`${asset.symbol} has no contract to burn from`);
+    if (releasing.amount > asset.minted) {
+      throw new Error(
+        `cannot release ${releasing.amount}: only ${asset.minted} exists here`);
+    }
+    releasingAsset = asset;
+  }
+
   // ------------------------------------------------------------------ EVM
   //
   // A transaction reaches the EVM only when it is NOT one of Molibra's own
@@ -584,7 +734,29 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   // vote both live in `data`; if a contract could claim a vote payload, or a
   // vote could be routed to bytecode, the electoral rules would be optional.
   const native = Boolean(expression || creation || issue || moved || express
-    || opening || credential);
+    || opening || credential || registration || header || claimed || releasing);
+
+  // ⛔ A bridged asset's units are destroyed through BRIDGE_RELEASE, never by
+  // calling `burn` on the contract directly.
+  //
+  // `burn` is public - anybody may destroy their own units - and it has to
+  // stay that way, because the contract is already deployed and its bytecode
+  // is immutable. But a direct burn would take units out of existence without
+  // telling the ledger, and `minted` would then overstate what is there
+  // forever. So the rule is enforced where it still can be: here, in
+  // consensus, before the call reaches the contract.
+  //
+  // ⚠ Stated exactly: this stops an ACCOUNT burning directly. A contract
+  // holding units could still burn its own, and the ledger would keep counting
+  // them. That direction is conservative - fewer units exist than the ledger
+  // believes, so the cap binds harder rather than softer - and no unit is
+  // created by it. It is a discrepancy, not a hole, and it is written down
+  // here rather than discovered later.
+  if (!native && tx.to && isBurnCall(tx.data) && state.inbound.assetAt(tx.to)) {
+    throw new Error(
+      'burn a bridged asset with BRIDGE_RELEASE, not by calling burn() directly: '
+      + 'a direct burn destroys units the inbound ledger would go on counting');
+  }
   const isCreate = !native && !tx.to && dataBytes(tx).length > 0;
   const isCall = !native && tx.to && state.hasCode(tx.to);
 
@@ -605,6 +777,46 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
       gasLimit: tx.gasLimit - intrinsicGas,
       chainId, blockNumber, timestamp, coinbase: miner, gasPrice: tx.gasPrice,
     });
+  }
+
+  // The two bridge paths that touch the contract drive the EVM themselves,
+  // rather than being routed to it by `isCall`. What differs is the SENDER,
+  // and that is the entire point:
+  //
+  //   a claim   runs as the asset's keyless authority - the only address the
+  //             contract will mint for, and an address no signature reaches
+  //   a release runs as the claimant, because `burn` destroys the caller's own
+  //             units and nobody else's
+  //
+  // ⛔ A failure here THROWS rather than mining with status 0. Every other
+  // contract call is mined whatever it returned, because the gas was really
+  // spent; but a claim whose mint reverted must not consume the burn, and a
+  // release whose burn reverted must not lower `minted`. The ledger and the
+  // contract move together or neither moves.
+  if (claiming || releasingAsset) {
+    const asset = claiming ? claiming.asset : releasingAsset;
+    const maxFee = tx.gasLimit * tx.gasPrice;
+    if (state.balanceOf(tx.from) < maxFee) {
+      throw new Error(`insufficient funds for gas: ${tx.from} needs ${maxFee}`);
+    }
+    evm = await runEvm(state, {
+      from: claiming ? asset.authority : tx.from,
+      to: asset.assetContract,
+      data: fromHex(claiming
+        ? mintCall(claiming.proved.recipient, claiming.value)
+        : burnCall(releasing.amount)),
+      gasLimit: tx.gasLimit - intrinsicGas,
+      chainId, blockNumber, timestamp, coinbase: miner,
+      // The internal call is not charged by the EVM; the claimant is charged
+      // below, on the same terms as any other transaction. Charging twice
+      // would take the fee from an address that cannot hold a balance.
+      gasPrice: 0n,
+    });
+    if (evm.failed) {
+      throw new Error(claiming
+        ? `the mint reverted (${evm.error}): the burn is not consumed and may be claimed again`
+        : `the burn reverted (${evm.error}): nothing is released`);
+    }
   }
 
   if (evm) {
@@ -640,6 +852,29 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     }
   }
 
+  // The ledger moves last, after the contract already did, so `minted` is
+  // never ahead of the units that exist.
+  if (registering) {
+    state.inbound.register(registering.record, registering.cap, {
+      assetContract: registering.assetContract,
+      registrar: tx.from,
+    });
+  }
+  if (header) {
+    state.inbound.commitHeader({ ...header, by: tx.from });
+  }
+  if (claiming) {
+    state.inbound.claim({
+      tokenId: claiming.asset.id,
+      ethTxHash: claiming.proved.ethTxHash,
+      amount: claiming.value,
+      recipient: claiming.proved.recipient,
+    });
+  }
+  if (releasingAsset) {
+    state.inbound.release({ tokenId: releasingAsset.id, amount: releasing.amount });
+  }
+
   if (issued) {
     state.mintToken(issued.token.id, issued.to, issued.amount);
   }
@@ -672,6 +907,12 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     evmError: evm?.error ?? null,
     voteKey: key ?? expressed?.key ?? null,
     placeOpened: opening?.pollId ?? null,
+    bridgeAsset: registering?.record.id ?? claiming?.asset.id ?? releasingAsset?.id ?? null,
+    bridgeMinted: claiming ? claiming.value.toString() : null,
+    bridgeReleased: releasingAsset ? releasing.amount.toString() : null,
+    headerCommitted: header
+      ? { chainId: header.originChainId.toString(), blockNumber: header.blockNumber.toString() }
+      : null,
     credentialSerial: credential?.serial ?? null,
     pollId: expression?.pollId ?? null,
     tokenId: record?.id ?? expressed?.token.id ?? issued?.token.id ?? moved?.token.id ?? null,

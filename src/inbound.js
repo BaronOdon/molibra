@@ -43,6 +43,10 @@
 
 import { keccak256, toHex, concatBytes, fromHex, normalizeAddress } from './crypto.js';
 import { foreignTokenId, mayEnterFromABridge } from './foreign.js';
+import { bridgeAuthority } from './bridgemint.js';
+
+/** Headers are keyed by the chain they came from, never by height alone. */
+const headerKey = (chainId, blockNumber) => `${BigInt(chainId)}:${BigInt(blockNumber)}`;
 
 /**
  * A claim is identified by the origin transaction, and by nothing else.
@@ -68,6 +72,15 @@ export class InboundLedger {
     this.assets = new Map();
     /** every claim key ever honoured, across all assets */
     this.claimed = new Set();
+    /**
+     * `chainId:blockNumber` -> receiptsRoot, committed by an asset's
+     * registrar. This is the TRUSTED half of the bridge, and it lives in
+     * consensus state precisely so that it is public: a fabricated root is
+     * permanently on the record, attributed, and refutable by anybody with an
+     * Ethereum node. A root held privately by a relayer would be exactly as
+     * load-bearing and nobody could check it.
+     */
+    this.headers = new Map();
   }
 
   /**
@@ -78,7 +91,7 @@ export class InboundLedger {
    * social/purchase/electoral purpose, is refused before it can have a cap at
    * all. GIZ can never reach this function, whatever it is called.
    */
-  register(record, cap) {
+  register(record, cap, { assetContract = null, registrar = null } = {}) {
     const verdict = mayEnterFromABridge(record);
     if (!verdict.ok) throw new Error(`refused at the door: ${verdict.reason}`);
     const ceiling = BigInt(cap);
@@ -93,8 +106,78 @@ export class InboundLedger {
       minted: 0n,
       burnedIn: 0n,
       returned: 0n,
+      // The ERC-20 that carries the units, and the keyless address it must
+      // trust. Both are null for a ledger used on its own, which is a
+      // perfectly good way to reason about the accounting without a chain.
+      assetContract: assetContract ? normalizeAddress(assetContract) : null,
+      authority: bridgeAuthority(id),
+      // Who registered it, and therefore whose committed headers this asset
+      // rests on. Shown in every report: it is the one thing a reader has to
+      // decide whether to trust.
+      registrar: registrar ? normalizeAddress(registrar) : null,
     });
     return this.assets.get(id);
+  }
+
+  /**
+   * Record a `receiptsRoot` for a block on an origin chain.
+   *
+   * Only an address that registered an asset on that chain may commit, and a
+   * height already committed cannot be re-committed with a different root.
+   *
+   * The second rule is the one that matters. A root that could be replaced is
+   * not a commitment; it is a draft, and a claim proved against a draft proves
+   * nothing that cannot be un-proved later. Equivocation here would also be
+   * invisible - the old root would simply be gone - so it is refused at the
+   * point where the evidence still exists.
+   */
+  commitHeader({ originChainId, blockNumber, receiptsRoot, by }) {
+    const chain = BigInt(originChainId);
+    const root = String(receiptsRoot).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(root)) throw new Error('a receipts root is 32 bytes');
+    const committer = normalizeAddress(by);
+    const mayCommit = [...this.assets.values()].some(
+      (a) => BigInt(a.origin.chainId) === chain && a.registrar === committer);
+    if (!mayCommit) {
+      throw new Error(
+        `${committer} has registered no asset on chain ${chain}, so its view of that `
+        + 'chain is not one this ledger carries');
+    }
+    const key = headerKey(chain, blockNumber);
+    const existing = this.headers.get(key);
+    if (existing && existing.receiptsRoot !== root) {
+      throw new Error(
+        `chain ${chain} block ${blockNumber} is already committed as ${existing.receiptsRoot}. `
+        + 'A commitment that can be replaced is a draft, and a claim proved against a draft '
+        + 'can be un-proved later.');
+    }
+    if (!existing) this.headers.set(key, { receiptsRoot: root, by: committer });
+    return { chainId: chain.toString(), blockNumber: BigInt(blockNumber).toString(), receiptsRoot: root, by: committer };
+  }
+
+  /** null when no root has been committed for that block - never a guess. */
+  receiptsRootFor(originChainId, blockNumber) {
+    return this.headers.get(headerKey(originChainId, blockNumber))?.receiptsRoot ?? null;
+  }
+
+  /**
+   * Is this one of the keyless addresses a bridged asset's contract trusts?
+   *
+   * `applyTransaction` asks before accepting any transaction, so the rule
+   * "nothing is ever sent from a bridge authority" is written down rather than
+   * left to the fact that nobody can produce the signature.
+   */
+  isAuthority(address) {
+    const who = normalizeAddress(address);
+    for (const a of this.assets.values()) if (a.authority === who) return true;
+    return false;
+  }
+
+  /** The asset whose units this contract carries, or null. */
+  assetAt(contract) {
+    const where = normalizeAddress(contract);
+    for (const a of this.assets.values()) if (a.assetContract === where) return a;
+    return null;
   }
 
   get(id) {
@@ -190,7 +273,7 @@ export class InboundLedger {
    * a burn it has already proved; this decides whether honouring it is
    * *permissible*. Both checks are necessary and neither substitutes.
    */
-  claim({ tokenId, ethTxHash, amount, recipient }) {
+  assertClaimable({ tokenId, ethTxHash, amount, recipient }) {
     const a = this.get(tokenId);
     const value = BigInt(amount);
     if (value <= 0n) throw new Error('a claim must be positive');
@@ -206,6 +289,14 @@ export class InboundLedger {
         + `over this bridge's cap of ${a.cap}. The cap is the most this bridge will ever `
         + 'mint, and raising it is a deliberate act.');
     }
+    return { asset: a, key, value };
+  }
+
+  claim({ tokenId, ethTxHash, amount, recipient }) {
+    // Every check lives in assertClaimable, so a caller that must decide
+    // BEFORE mutating anything - applyTransaction does - asks exactly the same
+    // questions this does, rather than a second copy of them that can drift.
+    const { asset: a, key, value } = this.assertClaimable({ tokenId, ethTxHash, amount, recipient });
 
     this.claimed.add(key);
     a.minted += value;
@@ -283,11 +374,110 @@ export class InboundLedger {
    * which is what makes an exploit visible to someone other than the party who
    * would least like to admit it.
    */
+  /* ------------------------------------------------- consensus plumbing */
+
+  /**
+   * A copy that shares nothing.
+   *
+   * A candidate block runs against a CLONE of the parent's state. If the
+   * ledger were shared, a claim in a block that was never mined - or was mined
+   * and then reorged away - would still have consumed its burn, and the burn
+   * would be unclaimable forever. Every other record on Molibra is copied for
+   * exactly this reason; see State.clone.
+   */
+  clone() {
+    const copy = new InboundLedger();
+    for (const [id, a] of this.assets) copy.assets.set(id, { ...a, origin: { ...a.origin } });
+    copy.claimed = new Set(this.claimed);
+    copy.headers = new Map([...this.headers].map(([k, v]) => [k, { ...v }]));
+    return copy;
+  }
+
+  /** Sorted lines for the state root. Empty when the ledger is empty, so a
+   *  chain with no bridge in it hashes exactly as it did before this existed. */
+  rootLines() {
+    const lines = [];
+    for (const id of [...this.assets.keys()].sort()) {
+      const a = this.assets.get(id);
+      lines.push(`basset:${id}:${a.origin.chainId}:${a.origin.contract}:`
+        + `${a.assetContract ?? ''}:${a.registrar ?? ''}:${a.cap.toString(16)}:`
+        + `${a.minted.toString(16)}:${a.burnedIn.toString(16)}:${a.returned.toString(16)}:`
+        + (a.pendingCap
+          ? `${a.pendingCap.cap.toString(16)}@${a.pendingCap.effectiveAt.toString(16)}`
+          : '-'));
+    }
+    for (const k of [...this.claimed].sort()) lines.push(`bclaim:${k}`);
+    for (const k of [...this.headers.keys()].sort()) {
+      const h = this.headers.get(k);
+      lines.push(`bhead:${k}:${h.receiptsRoot}:${h.by}`);
+    }
+    return lines;
+  }
+
+  toJSON() {
+    if (this.assets.size === 0 && this.claimed.size === 0 && this.headers.size === 0) return null;
+    const assets = {};
+    for (const id of [...this.assets.keys()].sort()) {
+      const a = this.assets.get(id);
+      assets[id] = {
+        symbol: a.symbol,
+        origin: { ...a.origin, chainId: String(a.origin.chainId) },
+        cap: a.cap.toString(),
+        minted: a.minted.toString(),
+        burnedIn: a.burnedIn.toString(),
+        returned: a.returned.toString(),
+        assetContract: a.assetContract,
+        registrar: a.registrar,
+        pendingCap: a.pendingCap
+          ? { cap: a.pendingCap.cap.toString(), effectiveAt: a.pendingCap.effectiveAt.toString(),
+            proposedAt: a.pendingCap.proposedAt.toString() }
+          : null,
+      };
+    }
+    const headers = {};
+    for (const k of [...this.headers.keys()].sort()) headers[k] = this.headers.get(k);
+    return { assets, claimed: [...this.claimed].sort(), headers };
+  }
+
+  static fromJSON(obj) {
+    const ledger = new InboundLedger();
+    if (!obj) return ledger;
+    for (const [id, a] of Object.entries(obj.assets ?? {})) {
+      ledger.assets.set(id, {
+        id,
+        symbol: a.symbol,
+        origin: a.origin,
+        cap: BigInt(a.cap),
+        minted: BigInt(a.minted),
+        burnedIn: BigInt(a.burnedIn),
+        returned: BigInt(a.returned),
+        assetContract: a.assetContract ?? null,
+        authority: bridgeAuthority(id),
+        registrar: a.registrar ?? null,
+        pendingCap: a.pendingCap
+          ? { cap: BigInt(a.pendingCap.cap), effectiveAt: BigInt(a.pendingCap.effectiveAt),
+            proposedAt: BigInt(a.pendingCap.proposedAt) }
+          : null,
+      });
+    }
+    for (const k of obj.claimed ?? []) ledger.claimed.add(k);
+    for (const [k, v] of Object.entries(obj.headers ?? {})) ledger.headers.set(k, v);
+    return ledger;
+  }
+
   report(tokenId) {
     const a = this.get(tokenId);
     return {
       symbol: a.symbol,
       origin: a.origin,
+      assetContract: a.assetContract,
+      // Two addresses that are easy to confuse and must not be. The authority
+      // is derived and keyless - it is the only address that can mint. The
+      // registrar is a person's wallet - it can commit headers and nothing
+      // else, and it is who a reader is being asked to trust.
+      authority: a.authority,
+      registrar: a.registrar,
+      headersCommitted: [...this.headers.values()].filter((h) => h.by === a.registrar).length,
       cap: a.cap.toString(),
       minted: a.minted.toString(),
       headroom: (a.cap - a.minted).toString(),

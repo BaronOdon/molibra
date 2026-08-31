@@ -16,6 +16,24 @@ pragma solidity ^0.8.20;
  *
  * A mint function anyone could call would make that invariant a comment.
  *
+ * ⛔⛔ AND SO WOULD A BRIDGE ADDRESS SOMEBODY HOLDS THE KEY FOR. Restricting
+ * `mint` to an address is only worth as much as the address. The `bridge_`
+ * this is deployed with must be the value `bridgeAuthority(tokenId)` returns
+ * in src/bridgemint.js:
+ *
+ *     last20( keccak256("molibra:bridge-authority:v1" || tokenId) )
+ *
+ * That is the image of a hash, not of a public key, so no signature recovers
+ * to it and no transaction can be sent from it. The only way anything executes
+ * with that `msg.sender` is Molibra's consensus path, which verifies a Merkle
+ * proof of the origin burn first. Consensus REFUSES to register an asset whose
+ * contract trusts anything else, so a contract deployed with an ordinary
+ * wallet here is not a bridged asset - it is a token somebody can print.
+ *
+ * ⚠ `burn` is public, and on Molibra it is reached through a BRIDGE_RELEASE
+ * transaction rather than called directly - consensus refuses a direct call so
+ * that the ledger is told what was destroyed. See src/bridgemint.js.
+ *
  * ⛔ This is NOT a Molibra registry token. It cannot be used for an expression
  * of will, it has no vote mode and no expression cost, and no contract can
  * make it into one - registry tokens are consensus records, not contracts.
