@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pairs — live</title>
+<!--
+  Live prices for every pair in the system, read from the chains themselves.
+  No price API, no aggregator, no cached feed: WSRO comes out of the pool's own
+  slot0(), and MOLI out of the Molibra node. If a number is here, a chain said
+  it, which is the only kind of price worth publishing about your own asset.
+
+  ⛔ Thin pools move. WSRO's entire market is one position; treat the number as
+  what it is - a quote against shallow depth, not a valuation.
+-->
+<style>
+  :root{ --bg:#0b0b0c; --panel:#141416; --line:#26262b; --ink:#ececf0;
+         --dim:#8b8b94; --gold:#FFD100; --up:#4ade80; --down:#ff5c5c; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;
+       font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:19px;margin:0 0 3px}
+  .sub{color:var(--dim);margin:0 0 20px;font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:16px;max-width:1300px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .pair{font-size:15px;font-weight:650}
+  .venue{font-size:11px;color:var(--dim)}
+  .price{font-family:ui-monospace,Menlo,monospace;font-size:19px;margin:6px 0 0}
+  .chg{font-size:12px;font-family:ui-monospace,Menlo,monospace}
+  .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--dim)}
+  svg{display:block;width:100%;height:150px;margin-top:10px}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:12px 0 0;font-size:12px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:8px 11px;margin-top:12px;font-size:12px}
+  .dead{border-left-color:var(--down);background:#1d0f0f}
+  .dot{width:7px;height:7px;border-radius:99px;background:var(--up);display:inline-block;margin-right:5px}
+  .stale{background:var(--down)}
+</style>
+</head>
+<body>
+
+<h1>Pairs — live</h1>
+<p class="sub"><span class="dot" id="dot"></span><span id="status">connecting…</span>
+  &nbsp;·&nbsp; prices read from the chains, not from a price API</p>
+
+<div class="grid" id="cards"></div>
+
+<script>
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+const MOLIBRA_RPC = 'http://193.123.191.142:8545';
+
+const POOL = '0xfcaee25dd24c129a9069fcd2bedc7cd05798c47e';   // WSRO/WETH SushiSwap V3, fee 100
+const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+const Q96 = 2n ** 96n;
+
+const PAIRS = [
+  { id: 'wsroweth', pair: 'WSRO / WETH', venue: 'SushiSwap V3 · fee 100 · Ethereum',
+    quote: 'WETH per WSRO', series: [] },
+  { id: 'moli',     pair: 'MOLI', venue: 'Molibra · native coin',
+    quote: 'no market yet', series: [] },
+];
+
+const $ = (id) => document.getElementById(id);
+
+async function rpc(url, method, params = []) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+const call = (to, data) => rpc(ETH_RPC, 'eth_call', [{ to, data }, 'latest']);
+
+/** sqrtPriceX96 -> price, in full precision, without going through a float. */
+function priceFromSqrt(sqrtP) {
+  // (sqrtP / 2^96)^2, kept as a ratio then divided once at the end
+  const num = sqrtP * sqrtP;
+  return Number(num * 10n ** 18n / (Q96 * Q96)) / 1e18;
+}
+
+async function readWsro() {
+  const slot0 = await call(POOL, '0x3850c7bd');
+  const liq = await call(POOL, '0x1a686502');
+  const s = slot0.slice(2);
+  const sqrtP = BigInt('0x' + s.slice(0, 64));
+  let tick = BigInt('0x' + s.slice(64, 128));
+  if (tick >= 2n ** 255n) tick -= 2n ** 256n;
+  return {
+    price: priceFromSqrt(sqrtP),
+    tick: Number(tick),
+    liquidity: BigInt(liq),
+    dead: BigInt(liq) === 0n,
+  };
+}
+
+async function readMoli() {
+  const r = await fetch(MOLIBRA_RPC + '/molibra');
+  const j = await r.json();
+  return { height: Number(j.height), work: BigInt(j.totalDifficulty), head: j.head };
+}
+
+/* --------------------------------------------------------------- drawing */
+
+function sparkline(series) {
+  if (series.length < 2) return '<svg viewBox="0 0 600 150"></svg>';
+  const vals = series.map((p) => p.v);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = hi - lo || Math.abs(hi) || 1;
+  const pad = span * 0.12;
+  const y = (v) => 140 - ((v - (lo - pad)) / (span + pad * 2)) * 130;
+  const x = (i) => (i / (series.length - 1)) * 596 + 2;
+  const line = series.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+  const area = `${line}L598,148L2,148Z`;
+  const rising = vals[vals.length - 1] >= vals[0];
+  const col = rising ? 'var(--up)' : 'var(--down)';
+  return `<svg viewBox="0 0 600 150" preserveAspectRatio="none">
+    <path d="${area}" fill="${col}" opacity="0.10"/>
+    <path d="${line}" fill="none" stroke="${col}" stroke-width="1.6"
+          stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+const fmt = (v) => (v === 0 ? '0' : v.toExponential(6));
+
+function change(series) {
+  if (series.length < 2) return '<span class="flat">—</span>';
+  const a = series[0].v, b = series[series.length - 1].v;
+  if (a === 0) return '<span class="flat">—</span>';
+  const pct = ((b - a) / a) * 100;
+  const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+  return `<span class="chg ${cls}">${pct > 0 ? '+' : ''}${pct.toFixed(4)}% this session</span>`;
+}
+
+function render(id, html) {
+  let el = $('card-' + id);
+  if (!el) {
+    el = document.createElement('section');
+    el.className = 'card';
+    el.id = 'card-' + id;
+    $('cards').appendChild(el);
+  }
+  el.innerHTML = html;
+}
+
+/* ------------------------------------------------------------------ tick */
+
+let failures = 0;
+
+async function poll() {
+  const t = Date.now();
+  const w = PAIRS[0], m = PAIRS[1];
+
+  try {
+    const d = await readWsro();
+    w.series.push({ t, v: d.price });
+    if (w.series.length > 720) w.series.shift();
+    render('wsroweth', `
+      <div class="head"><span class="pair">${w.pair}</span><span class="venue">${w.venue}</span></div>
+      <div class="price">${fmt(d.price)} <span class="venue">${w.quote}</span></div>
+      ${change(w.series)}
+      ${sparkline(w.series)}
+      <dl>
+        <dt>tick</dt><dd>${d.tick}</dd>
+        <dt>in-range liquidity</dt><dd>${d.liquidity.toLocaleString()}</dd>
+        <dt>pool</dt><dd>${POOL}</dd>
+      </dl>
+      ${d.dead
+        ? '<div class="note dead">⛔ Zero in-range liquidity. There is a quoted price and nothing behind it — nothing can actually trade at this number.</div>'
+        : '<div class="note">⛔ One position holds this entire market. A small trade moves the price a long way; this is a quote against shallow depth, not a valuation.</div>'}`);
+    failures = 0;
+  } catch (e) {
+    failures++;
+    render('wsroweth', `<div class="head"><span class="pair">${w.pair}</span></div>
+      <div class="note dead">could not read the pool: ${e.message}</div>`);
+  }
+
+  try {
+    const d = await readMoli();
+    m.series.push({ t, v: d.height });
+    if (m.series.length > 720) m.series.shift();
+    render('moli', `
+      <div class="head"><span class="pair">${m.pair}</span><span class="venue">${m.venue}</span></div>
+      <div class="price">${d.height.toLocaleString()} <span class="venue">blocks</span></div>
+      <span class="chg up">+${m.series.length > 1 ? d.height - m.series[0].v : 0} this session</span>
+      ${sparkline(m.series)}
+      <dl>
+        <dt>cumulative work</dt><dd>${d.work.toLocaleString()}</dd>
+        <dt>head</dt><dd>${d.head}</dd>
+      </dl>
+      <div class="note dead">⛔ MOLI has NO market and therefore no price. It is the native coin of
+        its own chain; it cannot be quoted until it can leave, and leaving means the bridge.
+        Height is plotted here because it is the honest live number — work done, not value claimed.</div>`);
+  } catch (e) {
+    render('moli', `<div class="head"><span class="pair">MOLI</span></div>
+      <div class="note dead">could not read the Molibra node: ${e.message}</div>`);
+  }
+
+  const ok = failures === 0;
+  $('dot').className = 'dot' + (ok ? '' : ' stale');
+  $('status').textContent = ok
+    ? `live · updated ${new Date().toLocaleTimeString()}`
+    : `stale · ${failures} failed read(s)`;
+}
+
+poll();
+setInterval(poll, 12000);
+</script>
+</body>
+</html>
