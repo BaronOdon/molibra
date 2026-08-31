@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molibra → Ethereum · settlement</title>
+<!--
+  An OPERATOR page. It builds and submits the settlement transactions and shows
+  exactly what is about to be signed before anything is sent.
+
+  ⛔ It holds no key. Every transaction is signed in your wallet, in YOUR tab.
+
+  ⛔⛔ Every value this page needs is READ AND FILLED IN HERE, from the live
+  chains, and nothing is left for anyone to copy by hand between windows. Two
+  rounds were lost once because values were filled in by script in one tab and
+  the buttons were pressed in another. If a field below is empty, the page has
+  not finished reading - wait for it rather than typing into it.
+
+  ## What this settles, and what it costs
+
+  A bridge-out is two ordinary transactions:
+
+      anchor(height, hash, work)    228,549 gas   once per Molibra BLOCK
+      release(...)                  113,400 gas   once per bridge-out
+
+  Nothing runs in between. There is no header feed, no keeper and no
+  subscription: the chain costs nothing to leave alone. Measured, in an EVM,
+  in bridge/settlement-build-and-test.mjs.
+
+  ⛔ MolibraRelay is the other path and it is NOT this. It verifies Molibra's
+  proof-of-work itself - 168,288 gas per header, every header from its
+  checkpoint, 5,760 of them per day of chain. Trustless and unaffordable.
+-->
+<style>
+  :root{ --bg:#0b0b0c; --panel:#141416; --line:#26262b; --ink:#ececf0; --dim:#8b8b94;
+         --gold:#FFD100; --ok:#4ade80; --bad:#ff5c5c; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 20px}
+  .wrap{max-width:900px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:16px;margin-bottom:16px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
+  input{width:100%;background:#0e0e10;border:1px solid var(--line);border-radius:8px;
+        color:var(--ink);padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:10px 16px;
+         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
+  button.ghost{background:#22222a;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  pre{background:#0e0e10;border:1px solid var(--line);border-radius:8px;padding:11px;
+      overflow-x:auto;font-size:12px;margin:12px 0 0;white-space:pre-wrap;word-break:break-all}
+  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
+       white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)} .log.ok{color:var(--ok)}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:220px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Molibra → Ethereum · settlement</h1>
+<p class="sub" id="banner">not connected</p>
+
+<div class="card">
+  <h2>1 · Wallet</h2>
+  <button id="connect">Connect wallet</button>
+  <div class="log" id="walletLog">MetaMask signs everything. This page holds no key.</div>
+  <dl>
+    <dt>account</dt><dd id="acct">—</dd>
+    <dt>chain</dt><dd id="chain">—</dd>
+    <dt>balance</dt><dd id="bal">—</dd>
+    <dt>base fee</dt><dd id="basefee">—</dd>
+  </dl>
+  <div class="note" id="gasNote">
+    ⛔ If your wallet shows a red warning on a transaction it can afford, it is reserving
+    <b>gasLimit × maxFeePerGas</b> — the worst case, not the likely cost. The priority fee is a
+    <b>different field</b>. Set <b>max base fee</b> below the figure shown here.
+  </div>
+</div>
+
+<div class="card">
+  <h2>2 · Deploy the settlement contract</h2>
+  <p class="sub">
+    Constructor takes the anchor it reads from, and a challenge window in Ethereum blocks.
+    ⛔ The window is the time in which an equivocating publisher can be slashed before an
+    anchor can pay out. Zero would let an anchor be posted and drained in one block, which
+    makes the bond decorative.
+  </p>
+  <div class="row">
+    <div>
+      <label>Anchor contract (live, bonded 20,000 WSRO)</label>
+      <input id="anchorAddr" value="0x2beba454d810eac41c6778e351f81d37a07ae03b">
+    </div>
+    <div>
+      <label>Challenge window, in Ethereum blocks (≈12s each)</label>
+      <input id="challenge" value="75">
+    </div>
+  </div>
+  <label>Initial funding, in ETH (this is what bridge-outs are paid from — may be 0)</label>
+  <input id="fundAmount" value="0">
+  <button id="deploy">Deploy MolibraSettlement</button>
+  <div class="log" id="deployLog"></div>
+  <label>Deployed settlement address — filled in automatically</label>
+  <input id="settlement" placeholder="deploy above, or paste a previous deployment">
+</div>
+
+<div class="card">
+  <h2>3 · Anchor the block</h2>
+  <p class="sub">
+    ⛔⛔ Height, hash and cumulative work are read together from <b>one</b> block, in one
+    request. A height from one moment with a hash from another is a commitment to a block
+    that never existed — and this contract is bonded, so that is the slashable kind.
+  </p>
+  <div class="row">
+    <div><label>Molibra height</label><input id="anchorHeight" placeholder="reading…"></div>
+    <div><label>Cumulative work at that height</label><input id="anchorWork" placeholder="reading…"></div>
+  </div>
+  <label>Block hash at that height</label>
+  <input id="anchorHash" placeholder="reading…">
+  <button id="readTip" class="ghost">Re-read the node</button>
+  <button id="anchor">Anchor this block</button>
+  <div class="log" id="anchorLog"></div>
+</div>
+
+<div class="card">
+  <h2>4 · Release a bridge-out</h2>
+  <p class="sub">
+    Paste the Molibra transaction hash of a <code>BRIDGE_OUT</code>. The node supplies the
+    header bytes, the raw transaction and the Merkle path; the contract checks all three.
+    ⛔ The recipient and the amount come out of the <b>proved transaction</b>, never from
+    anything typed here — a bridge that let the submitter name the recipient would have made
+    the proof decoration.
+  </p>
+  <label>Molibra transaction hash</label>
+  <input id="txHash" placeholder="0x…">
+  <button id="fetchProof" class="ghost">Fetch the proof</button>
+  <button id="release" disabled>Release</button>
+  <pre id="proofView">no proof loaded</pre>
+  <div class="log" id="releaseLog"></div>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  <button id="refreshStatus" class="ghost">Read everything back</button>
+  <dl>
+    <dt>node height</dt><dd id="stNode">—</dd>
+    <dt>anchor tip</dt><dd id="stTip">—</dd>
+    <dt>publisher slashed</dt><dd id="stSlashed">—</dd>
+    <dt>settlement funds</dt><dd id="stFunds">—</dd>
+  </dl>
+  <div class="log" id="statusLog"></div>
+</div>
+</div>
+
+<script>
+const NODE = 'http://193.123.191.142:8545';
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+
+/* Deploy bytecode for MolibraSettlement, built by
+ * bridge/settlement-build-and-test.mjs with solc 0.8.26, optimizer on, viaIR,
+ * evmVersion paris. ⛔ Rebuild it there if the contract changes - a page and a
+ * source that have drifted apart deploy something nobody has read. */
+const SETTLEMENT_BYTECODE = '0x60c0601f61104f38819003918201601f19168301916001600160401b038311848410176100d25780849260409485528339810103126100cd578051906001600160a01b03821682036100cd5760200151906080523360a0526000553461009c575b604051610f6690816100e9823960805181818161026c0152818161039001526105f6015260a05181818160e60152818161020401526107230152f35b6040513481527f5af8184bef8e4b45eb9f6ed7734d04da38ced226495548f46e0c8ff8d7d9a52460203392a2610060565b600080fd5b634e487b7160e01b600052604160045260246000fdfe60806040526004361015610047575b361561001957600080fd5b6040513481527f5af8184bef8e4b45eb9f6ed7734d04da38ced226495548f46e0c8ff8d7d9a52460203392a2005b60003560e01c806312fcb1f7146107c15780631f5626611461076f5780632e1a7d4d1461071057806342d21ef7146105ce57806364777b101461029b578063712e267b14610256578063843339ce146102335780638da5cb5b146101ee57806391774928146101d05780639c377b8d1461018c578063a6d68ecd1461015b5763b52588a90361000e5734610156576020366003190112610156576004357f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03163303610145576020817f2b8734976ea5ed5eee358af2dfe0f5c431fb775298dc65a20e64c3aa7dbdb81192600055604051908152a1005b6330cd747160e01b60005260046000fd5b600080fd5b34610156576020366003190112610156576004356000526001602052602060ff604060002054166040519015158152f35b346101565760203660031901126101565760043567ffffffffffffffff8111610156576101c86101c26020923690600401610855565b90610d2b565b604051908152f35b34610156576000366003190112610156576020600054604051908152f35b34610156576000366003190112610156576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461015657600036600319011261015657604051639854175f60e01b8152602090f35b34610156576000366003190112610156576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b346101565760a03660031901126101565760043560243567ffffffffffffffff8111610156576102cf903690600401610855565b9060443567ffffffffffffffff8111610156576102f0903690600401610855565b909160643567ffffffffffffffff811161015657610312903690600401610824565b60849591953567ffffffffffffffff811161015657610335903690600401610824565b91610341368789610cf4565b602081519101209788600052600160205260ff604060002054166105bd5761036a368688610cf4565b8051602090910120604051631b45b99f60e11b8152600481018c90526001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169190608081602481865afa9283156105625760009384928591610583575b50841561056e57604051638bcfa66560e01b81526001600160a01b03909116600482015290602090829060249082905afa90811561056257600091610533575b506105225760005481019081431061050b5750508181036104f45750509161044294939161043c938a6108e1565b92610d2b565b036104e35761045091610a43565b90811580156104da575b6104c9578260005260016020526040600020600160ff1982541617905560018060a01b031692600080808085885af1610491610c7b565b50156104c9577fbaa21fb6000fbb6d014fac9cd1b0726799e6f352a967157a59f4b2da8ef322119160409182519182526020820152a3005b631dc930eb60e01b60005260046000fd5b5047821161045a565b632521fb2160e11b60005260046000fd5b63decae1b360e01b60005260045260245260446000fd5b63076f615b60e41b60005260045260245260446000fd5b637473939160e01b60005260046000fd5b610555915060203d60201161055b575b61054d81836108a9565b810190610cdc565b8e61040e565b503d610543565b6040513d6000823e3d90fd5b8e63e4ba1ddd60e01b60005260045260246000fd5b919450506105a9915060803d6080116105b6575b6105a181836108a9565b810190610cab565b929094915093918f6103ce565b503d610597565b6331da482760e11b60005260046000fd5b3461015657602036600319011261015657604051631b45b99f60e11b815260048035908201527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690608081602481855afa801561056257600080926000926106e9575b50151591829182610683575b50608093508161066c575b47916040519384521515602084015260408301526060820152f35b905061067a60005482610a01565b43101590610651565b604051638bcfa66560e01b81526001600160a01b03909116600482015293909150602090849060249082905afa8015610562576080936000916106ca575b50159084610646565b6106e3915060203d60201161055b5761054d81836108a9565b846106c1565b915050610705915060803d6080116105b6576105a181836108a9565b90929091508461063a565b34610156576020366003190112610156577f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03163381900361014557600080808093600435905af1610767610c7b565b50156104c957005b346101565760203660031901126101565760043567ffffffffffffffff8111610156576107ab6107a56040923690600401610855565b90610a43565b82516001600160a01b0390921682526020820152f35b346101565760603660031901126101565760243567ffffffffffffffff8111610156576107f2903690600401610824565b6044359067ffffffffffffffff8211610156576020926108196101c8933690600401610824565b9290916004356108e1565b9181601f840112156101565782359167ffffffffffffffff8311610156576020808501948460051b01011161015657565b9181601f840112156101565782359167ffffffffffffffff8311610156576020838186019501011161015657565b91908110156108935760051b0190565b634e487b7160e01b600052603260045260246000fd5b90601f8019910116810190811067ffffffffffffffff8211176108cb57604052565b634e487b7160e01b600052604160045260246000fd5b94939492919285840361099557949291906000935b838510610904575050505050565b9091929395610914878386610883565b35908115158203610156576001911561096157610932888786610883565b3560405190602082019283526040820152604081526109526060826108a9565b5190205b9601939291906108f6565b61096c888786610883565b3590604051906020820192835260408201526040815261098d6060826108a9565b519020610956565b637ca55c7760e01b60005260046000fd5b90821015610893570190565b60ff60b6199116019060ff82116109c557565b634e487b7160e01b600052601160045260246000fd5b60ff607f199116019060ff82116109c557565b60ff60f6199116019060ff82116109c557565b919082018092116109c557565b90939293848311610156578411610156578101920390565b359060208110610a34575090565b6000199060200360031b1b1690565b9190610a4f8184610d99565b9060005b60058110610c4a5750610a678282866109a6565b3560f81c60006080821180610c3f575b15610bc85750610a8860ff916109db565b1691600181018091116109c557603890925b03610b975760048201908183116109c557610ab782848388610a0e565b6001600160e01b031991359182169160048210610ba8575b50506001600160e01b0319166367abe8a160e01b01610b97576000946018840192838511610b835783610b03918484610a0e565b6bffffffffffffffffffffffff1991359182169160148210610b5e575b505060601c9560388501809511610b4a575091610b479391610b4193610a0e565b90610a26565b90565b634e487b7160e01b81526011600452602490fd5b6bffffffffffffffffffffffff1960149290920360031b82901b161690503880610b20565b634e487b7160e01b87526011600452602487fd5b635055b29560e01b60005260046000fd5b6001600160e01b031960049290920360031b82901b161690503880610acf565b929060b7811180610c34575b15610c2557610be460ff916109b2565b169060018101809111610c11578181610c04603894610c0b94878b610ecc565b9550610a01565b92610a9a565b634e487b7160e01b84526011600452602484fd5b635055b29560e01b8452600484fd5b5060bf811115610bd4565b5060b7821115610a77565b91610c586001918387610dfa565b9201610a53565b67ffffffffffffffff81116108cb57601f01601f191660200190565b3d15610ca6573d90610c8c82610c5f565b91610c9a60405193846108a9565b82523d6000602084013e565b606090565b9190826080910312610156578151916020810151916060604083015192015160018060a01b03811681036101565790565b90816020910312610156575180151581036101565790565b929192610d0082610c5f565b91610d0e60405193846108a9565b829481845281830111610156578281602093846000960137010152565b610d358282610d99565b60005b60058110610d845750600560fd1b6001600160f81b0319610d5a8386866109a6565b35160361099557600181018082116109c557602182018092116109c557610b4793610b4193610a0e565b90610d926001918585610dfa565b9101610d38565b9015610893573560f81c60c081101580610def575b610de95760f8811015610dcc57637ca55c7760e01b60005260046000fd5b610dd760ff916109ee565b1660010160ff81116109c55760ff1690565b50600190565b5060f7811115610dae565b90610e068382846109a6565b3560f81c607f811115610ebb5760b7811115610e965760bf811115610e8b5760f7811115610e6357610e3960ff916109ee565b16600184018094116109c55783610e5d92610e5783610b4797610a01565b94610ecc565b90610a01565b915050600182018092116109c55760bf19019060ff82116109c55760ff610b47921690610a01565b610e3960ff916109b2565b9280925060019150018091116109c55760ff610eb4610b47936109db565b1690610a01565b505050600181018091116109c55790565b909392919360009483158015610f26575b610995579291906000935b838510610ef6575050505050565b9091929395600190610f12610f0b8985610a01565b85876109a6565b3560f81c9060081b17960193929190610ee8565b5060088411610edd56fea2646970667358221220b51f7696432e4a1d54d35d6e1ac06c17fbc9df8f43b76a2a7d790ddc064f4abe64736f6c634300081a0033';
+
+const SEL = {
+  anchor:   '0xdfedea24',   // anchor(uint256,bytes32,uint256)
+  anchors:  '0x368b733e',   // anchors(uint256)
+  slashed:  '0x8bcfa665',   // slashed(address)
+  tipHeight:'0x9c589f02',   // tipHeight()
+  release:  '',             // computed below
+};
+
+const $ = (id) => document.getElementById(id);
+const say = (id, msg, bad) => {
+  const el = $(id);
+  el.textContent = msg;
+  el.className = 'log' + (bad ? ' bad' : '');
+};
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const isAddress = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a).trim());
+const hex = (v) => '0x' + BigInt(v).toString(16);
+
+const eth = () => {
+  if (!window.ethereum) throw new Error('no wallet in this browser');
+  return window.ethereum;
+};
+
+/* release(uint256,bytes,bytes,bytes32[],bool[]) — the selector is COMPUTED
+ * from the signature rather than pasted, so it cannot be silently wrong. */
+async function keccakSelector(sig) {
+  // The page has no keccak of its own; the node has one it already uses for
+  // exactly this, so ask it rather than shipping a second implementation.
+  const r = await fetch(NODE, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'web3_sha3', params: ['0x' + [...new TextEncoder().encode(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')] }),
+  });
+  const j = await r.json();
+  if (j.error || !j.result) throw new Error('could not compute the release selector: ' + (j.error?.message ?? 'no result'));
+  return j.result.slice(0, 10);
+}
+
+let account = null;
+
+async function ethCall(to, data) {
+  const r = await fetch(ETH_RPC, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+
+async function refreshWallet() {
+  const id = Number(await eth().request({ method: 'eth_chainId' }));
+  $('chain').textContent = id === 1 ? 'Ethereum mainnet (1)' : `chain ${id} — NOT mainnet`;
+  if (account) {
+    const b = await eth().request({ method: 'eth_getBalance', params: [account, 'latest'] });
+    const wei = BigInt(b);
+    $('bal').textContent = (Number(wei) / 1e18).toFixed(9) + ' ETH';
+    const blk = await eth().request({ method: 'eth_getBlockByNumber', params: ['latest', false] });
+    const base = BigInt(blk.baseFeePerGas ?? 0);
+    $('basefee').textContent = (Number(base) / 1e9).toFixed(4) + ' gwei';
+    // ⛔ What the wallet will RESERVE, so a red alert can be read rather than feared.
+    const worst = 1_200_000n;
+    const affordable = wei / worst;
+    $('gasNote').innerHTML = '⛔ Your wallet reserves <b>gasLimit × maxFeePerGas</b> — the worst '
+      + 'case, not the likely cost, and the priority fee is a <b>different field</b>. At a '
+      + '1,200,000 gas limit your balance covers a <b>max base fee up to '
+      + (Number(affordable) / 1e9).toFixed(3) + ' gwei</b>; the network is at '
+      + (Number(base) / 1e9).toFixed(4) + ' gwei right now.';
+  }
+  return id;
+}
+
+async function requireMainnet() {
+  if (!account) throw new Error('connect the wallet first');
+  let id = await refreshWallet();
+  if (id === 1) return;
+  say('walletLog', 'asking your wallet to switch to Ethereum mainnet…');
+  await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1' }] });
+  id = await refreshWallet();
+  if (id !== 1) throw new Error(`still on chain ${id}, not Ethereum mainnet`);
+}
+
+async function send(tx, logId, label) {
+  say(logId, label + '\nawaiting signature in your wallet…');
+  const hash = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
+  say(logId, label + '\nsent: ' + hash + '\nwaiting to be mined…');
+  return hash;
+}
+
+async function waitForReceipt(hash, logId, label) {
+  for (let i = 0; i < 90; i++) {
+    const r = await eth().request({ method: 'eth_getTransactionReceipt', params: [hash] })
+      .catch(() => null);
+    if (r) return r;
+    say(logId, `${label}: waiting to be mined… (${i * 4}s)`);
+    await new Promise((res) => setTimeout(res, 4000));
+  }
+  throw new Error('not mined within 6 minutes — check the explorer');
+}
+
+$('connect').onclick = async () => {
+  try {
+    const accounts = await eth().request({ method: 'eth_requestAccounts' });
+    account = accounts[0];
+    $('acct').textContent = account;
+    await refreshWallet();
+    $('banner').textContent = 'connected — nothing is sent until you sign it';
+    say('walletLog', 'connected');
+  } catch (e) { say('walletLog', e.message, true); }
+};
+
+/* ------------------------------------------------------------- deploy */
+
+$('deploy').onclick = async () => {
+  try {
+    await requireMainnet();
+    const anchorAddr = $('anchorAddr').value.trim();
+    if (!isAddress(anchorAddr)) throw new Error('the anchor address is not an address');
+    const challenge = BigInt($('challenge').value.trim() || '0');
+    if (challenge === 0n
+        && !confirm('A challenge window of zero lets an anchor be posted and drained in the '
+          + 'same block, which makes the bond decorative. Deploy anyway?')) return;
+    const value = BigInt(Math.round(Number($('fundAmount').value || '0') * 1e18));
+
+    const data = SETTLEMENT_BYTECODE + addr32(anchorAddr) + word(challenge);
+    const tx = { from: account, data, value: hex(value) };
+    const hash = await send(tx, 'deployLog',
+      `Deploy MolibraSettlement(anchor ${anchorAddr}, challenge ${challenge} blocks)`);
+    const r = await waitForReceipt(hash, 'deployLog', 'deploy');
+    if (r.status !== '0x1') throw new Error('the deploy reverted');
+    $('settlement').value = r.contractAddress;
+    say('deployLog', 'deployed at ' + r.contractAddress + ' — filled in below. '
+      + 'Gas used: ' + BigInt(r.gasUsed).toLocaleString());
+  } catch (e) { say('deployLog', e.message, true); }
+};
+
+/* ------------------------------------------------------------- anchor */
+
+/**
+ * ⛔⛔ Height, hash and work come from ONE response.
+ *
+ * The tip moves about four blocks a minute. Reading the height now and the
+ * hash a moment later is a commitment to a block that never existed, and on a
+ * bonded contract that is the slashable kind of wrong.
+ */
+async function readTip() {
+  const j = await (await fetch(NODE + '/molibra')).json();
+  $('anchorHeight').value = j.height;
+  $('anchorHash').value = j.head;
+  $('anchorWork').value = j.totalDifficulty;
+  $('stNode').textContent = j.height + '  ' + j.head;
+  say('anchorLog', `read together from one response: height ${j.height}, `
+    + `hash ${j.head}, work ${j.totalDifficulty}`);
+}
+$('readTip').onclick = () => readTip().catch((e) => say('anchorLog', e.message, true));
+
+$('anchor').onclick = async () => {
+  try {
+    await requireMainnet();
+    const anchorAddr = $('anchorAddr').value.trim();
+    const height = BigInt($('anchorHeight').value.trim());
+    const hash = $('anchorHash').value.trim();
+    const work = BigInt($('anchorWork').value.trim());
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('the block hash is not 32 bytes');
+
+    // ⛔ Re-read the node and refuse if the tip has moved past what is on screen
+    // in a way that makes these three inconsistent.
+    const j = await (await fetch(NODE + '/molibra')).json();
+    if (BigInt(j.height) === height && j.head !== hash) {
+      throw new Error(`the node now reports a DIFFERENT hash at height ${height} — `
+        + 'a reorg. Press "Re-read the node" and check before anchoring.');
+    }
+
+    const data = SEL.anchor + word(height) + hash.replace(/^0x/, '') + word(work);
+    const h = await send({ from: account, to: anchorAddr, data }, 'anchorLog',
+      `anchor(height ${height}, hash ${hash}, work ${work})`);
+    const r = await waitForReceipt(h, 'anchorLog', 'anchor');
+    say('anchorLog', r.status === '0x1'
+      ? `anchored height ${height}. Gas used: ${BigInt(r.gasUsed).toLocaleString()}. `
+        + 'The challenge window must pass before it can pay out.'
+      : 'the anchor reverted — height and work must both INCREASE past the tip', r.status !== '0x1');
+  } catch (e) { say('anchorLog', e.message, true); }
+};
+
+/* ------------------------------------------------------------ release */
+
+let loadedProof = null;
+
+$('fetchProof').onclick = async () => {
+  try {
+    const h = $('txHash').value.trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(h)) throw new Error('that is not a transaction hash');
+    const p = await (await fetch(`${NODE}/molibra/proof/${h}`)).json();
+    if (p.error) throw new Error(p.error);
+    if (!p.headerRlp) {
+      throw new Error('this node does not serve headerRlp yet — it is running older code. '
+        + 'The contract hashes the bytes it is handed; rebuilding them here would be a '
+        + 'second encoder that must agree forever.');
+    }
+    loadedProof = p;
+    $('proofView').textContent =
+      `block      ${p.blockNumber}  ${p.blockHash}\n`
+      + `canonical  ${p.canonicalOnThisNode} (on that node, right now)\n`
+      + `index      ${p.index} of the block\n`
+      + `path       ${p.siblings.length} level(s)\n`
+      + `verdict    ${JSON.stringify(p.verdict)}\n\n`
+      + `⛔ The recipient and the amount are read from the raw transaction BY THE CONTRACT,\n`
+      + `   not from this page.`;
+    $('release').disabled = false;
+    // The height that must be anchored is this block's, not the tip's.
+    $('anchorHeight').value = p.blockNumber;
+    $('anchorHash').value = p.blockHash;
+    say('releaseLog', `proof loaded. ⛔ Height ${p.blockNumber} must be anchored before this `
+      + 'can be released — the anchor fields above have been set to that block. You still '
+      + 'need its cumulative work; press "Re-read the node" only if you intend to anchor the TIP.');
+  } catch (e) { $('release').disabled = true; say('releaseLog', e.message, true); }
+};
+
+/** ABI-encode release(uint256, bytes, bytes, bytes32[], bool[]). */
+function encodeRelease(height, headerRlp, rawTx, siblings, onRight) {
+  const pad = (s) => s.padEnd(Math.ceil(s.length / 64) * 64, '0');
+  const bytesArg = (hexStr) => {
+    const b = hexStr.replace(/^0x/, '');
+    return word(b.length / 2) + pad(b);
+  };
+  const tails = [
+    bytesArg(headerRlp),
+    bytesArg(rawTx),
+    word(siblings.length) + siblings.map((s) => s.replace(/^0x/, '')).join(''),
+    word(onRight.length) + onRight.map((r) => word(r ? 1 : 0)).join(''),
+  ];
+  let off = 5 * 32;
+  const heads = [];
+  for (const t of tails) { heads.push(word(off)); off += t.length / 2; }
+  return SEL.release + word(height) + heads.join('') + tails.join('');
+}
+
+$('release').onclick = async () => {
+  try {
+    await requireMainnet();
+    if (!loadedProof) throw new Error('fetch a proof first');
+    const settlement = $('settlement').value.trim();
+    if (!isAddress(settlement)) throw new Error('deploy the settlement contract first');
+    if (!SEL.release) SEL.release = await keccakSelector('release(uint256,bytes,bytes,bytes32[],bool[])');
+
+    const p = loadedProof;
+    const siblings = p.siblings.map((s) => s.hash);
+    const onRight = p.siblings.map((s) => s.side === 'right');
+    const data = encodeRelease(p.blockNumber, p.headerRlp, p.raw, siblings, onRight);
+
+    const h = await send({ from: account, to: settlement, data }, 'releaseLog',
+      `release(block ${p.blockNumber}, tx ${p.txHash})`);
+    const r = await waitForReceipt(h, 'releaseLog', 'release');
+    say('releaseLog', r.status === '0x1'
+      ? `released. Gas used: ${BigInt(r.gasUsed).toLocaleString()}. `
+        + 'The recipient and amount came out of the proved transaction.'
+      : 'the release reverted — the block may not be anchored, the challenge window may '
+        + 'still be open, or the transaction may not be a BRIDGE_OUT', r.status !== '0x1');
+  } catch (e) { say('releaseLog', e.message, true); }
+};
+
+/* ------------------------------------------------------------- status */
+
+$('refreshStatus').onclick = async () => {
+  try {
+    const j = await (await fetch(NODE + '/molibra')).json();
+    $('stNode').textContent = j.height + '  ' + j.head;
+
+    const anchorAddr = $('anchorAddr').value.trim();
+    const tip = await ethCall(anchorAddr, SEL.tipHeight);
+    $('stTip').textContent = BigInt(tip).toString();
+
+    if (account) {
+      const s = await ethCall(anchorAddr, SEL.slashed + addr32(account));
+      $('stSlashed').textContent = BigInt(s) === 0n ? 'no' : '⛔ YES — nothing will pay out';
+    }
+
+    const settlement = $('settlement').value.trim();
+    if (isAddress(settlement)) {
+      const r = await fetch(ETH_RPC, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [settlement, 'latest'] }),
+      });
+      const j2 = await r.json();
+      $('stFunds').textContent = (Number(BigInt(j2.result)) / 1e18).toFixed(9) + ' ETH';
+    }
+    say('statusLog', 'read from both chains just now');
+  } catch (e) { say('statusLog', e.message, true); }
+};
+
+/* Fill everything the page can know without a wallet, immediately. */
+readTip().catch((e) => say('anchorLog', 'could not reach the node: ' + e.message, true));
+$('refreshStatus').onclick();
+</script>
+</body>
+</html>

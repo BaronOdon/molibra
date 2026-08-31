@@ -51,7 +51,7 @@
  */
 
 import { keccak256, toHex, fromHex, concatBytes } from './crypto.js';
-import { merkleRoot, blockHash, isValidSeal } from './block.js';
+import { merkleRoot, blockHash, isValidSeal, encodeHeader } from './block.js';
 
 /**
  * ⛔⛔ **MOLI and GIZ are not the same thing and must never cross the same
@@ -177,6 +177,13 @@ export function transactionProof(chain, txHash) {
     index,
     siblings: merkleProof(leaves, index),
     raw: found.tx.raw,
+    // ⛔ The EXACT bytes the block hash is taken over, handed across rather
+    // than left to be rebuilt on the other side. MolibraSettlement checks
+    // `keccak256(headerRlp) == anchoredHash` and then reads txRoot out of
+    // these bytes; if a page re-encoded the header from the fields above,
+    // there would be two encoders that must agree forever, and the day they
+    // stopped agreeing every settlement would fail with no explanation.
+    headerRlp: encodeHeader(block.header),
   };
 }
 
