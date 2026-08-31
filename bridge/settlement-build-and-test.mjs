@@ -62,10 +62,11 @@ const out = JSON.parse(solc.compile(JSON.stringify({
     // ABI is identical either way.
     viaIR: true,
     // ⛔ Paris, not the compiler's default. solc 0.8.26 emits PUSH0 and MCOPY
-    // for Cancun; on a target that has not adopted them that is `invalid
-    // opcode` with no revert reason, which reads like a broken contract rather
-    // than a mis-set compiler. Mainnet has Cancun, but the local EVM here runs
-    // shanghai, and one target that works everywhere beats two that differ.
+    // for Cancun; on a target that has not adopted them the contract deploys
+    // fine and then every call halts with NO REVERT REASON, which reads like a
+    // broken contract rather than a mis-set compiler. Mainnet has Cancun, but
+    // the local EVM here runs shanghai, and one target that works everywhere
+    // beats two that differ.
     evmVersion: 'paris',
     outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object'] } },
   },
