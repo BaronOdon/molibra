@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fund the pools — Ethereum and Molibra</title>
+<!--
+  An OPERATOR page, not a public one. It builds and submits the two liquidity
+  transactions, one per chain, and shows exactly what is about to be signed
+  before anything is sent.
+
+  ⛔ It holds no key and never asks for one. Every transaction is signed in
+  your own wallet, in its own window, and can be rejected there.
+
+  ⛔ NO ROUTER ADDRESS IS EMBEDDED, on either chain. The same decision the
+  broker page made: a hardcoded router is an address you did not check, on a
+  page that moves money. Paste it, and read it before you do.
+-->
+<style>
+  :root{
+    --bg:#0b0b0c; --panel:#141416; --line:#26262b; --ink:#ececf0; --dim:#8b8b94;
+    --gold:#FFD100; --bad:#ff5c5c; --ok:#4ade80;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:28px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--dim);margin:0 0 22px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:18px;max-width:1100px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .panel h2{font-size:15px;margin:0 0 2px;display:flex;align-items:center;gap:8px}
+  .chip{font-size:11px;padding:2px 7px;border-radius:99px;background:#000;color:var(--gold);
+        border:1px solid var(--gold)}
+  .muted{color:var(--dim);font-size:13px;margin:0 0 14px}
+  label{display:block;font-size:12px;color:var(--dim);margin:12px 0 4px}
+  input{width:100%;padding:9px 10px;background:#0b0b0c;border:1px solid var(--line);
+        border-radius:8px;color:var(--ink);font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:none;border-color:var(--gold)}
+  button{margin-top:12px;padding:9px 14px;border-radius:8px;border:1px solid var(--gold);
+         background:var(--gold);color:#000;font-weight:650;cursor:pointer;font-size:13px}
+  button.ghost{background:transparent;color:var(--gold)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:13px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .warn{border-left:3px solid var(--gold);padding:9px 12px;margin:14px 0;background:#1a1608;font-size:13px}
+  .danger{border-left-color:var(--bad);background:#1d0f0f}
+  pre{background:#000;border:1px solid var(--line);border-radius:8px;padding:12px;
+      font-size:12px;overflow-x:auto;margin:12px 0 0}
+  .log{font-size:12px;color:var(--dim);margin-top:10px;white-space:pre-wrap}
+  a{color:var(--gold)}
+</style>
+</head>
+<body>
+
+<h1>Fund the pools</h1>
+<p class="sub">Two chains, two transactions, one page. Nothing is sent until you press a
+button, and nothing is signed anywhere but in your own wallet.</p>
+
+<div class="warn danger">
+  <b>⛔ This page holds no key and never asks for one.</b> It builds calldata and hands it to
+  your wallet. Read the preflight before approving — the numbers below are what you are
+  actually signing, not a description of them.
+</div>
+
+<div class="row" style="margin-bottom:18px">
+  <button id="connect">Connect wallet</button>
+  <button class="ghost" id="addMolibra">Add Molibra network</button>
+</div>
+<dl id="who"></dl>
+
+<div class="grid">
+
+  <!-- ------------------------------------------------ Ethereum ---- -->
+  <section class="panel">
+    <h2>Ethereum <span class="chip">chain 1</span></h2>
+    <p class="muted">WSRO against WETH. The pool holds 144,005,312 WSRO and no WETH, so
+      <b>whatever you deposit sets the price</b>.</p>
+
+    <label>WETH to deposit (ETH)</label>
+    <input id="ethAmount" placeholder="0.0025" inputmode="decimal">
+
+    <label>WSRO to pair with it</label>
+    <input id="wsroAmount" placeholder="144005312">
+
+    <label>Position manager address — paste it, do not trust it</label>
+    <input id="ethRouter" placeholder="0x…">
+
+    <label>WETH contract</label>
+    <input id="wethAddr" value="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2">
+
+    <div class="row">
+      <div style="flex:1"><label>fee tier</label><input id="fee" value="10000"></div>
+      <div style="flex:1"><label>tickLower</label><input id="tickLo" value="-887200"></div>
+      <div style="flex:1"><label>tickUpper</label><input id="tickHi" value="887200"></div>
+    </div>
+
+    <label>Or increase an existing position — NFT tokenId (leave blank to mint a new one)</label>
+    <input id="posId" placeholder="">
+
+    <div class="warn">⛔ No address is embedded here. A hardcoded manager on a page that moves
+      money is an address you never checked. The tick range defaults to full-range; narrow it
+      only if you know what price band you are quoting.</div>
+
+    <div class="row">
+      <button class="ghost" id="ethWrap">1 · Wrap ETH → WETH</button>
+      <button class="ghost" id="ethApprove">2 · Approve both</button>
+      <button id="ethFund">3 · Deposit</button>
+    </div>
+    <div class="log" id="ethLog"></div>
+  </section>
+
+  <!-- ------------------------------------------------- Molibra ---- -->
+  <section class="panel">
+    <h2>Molibra <span class="chip">chain 20226</span></h2>
+    <p class="muted">MOLI against a bridged asset, in <code>MolibraPool</code>. MOLI is the
+      native coin, so it goes in as the transaction's value — there is no wrapper.</p>
+
+    <label>MOLI to deposit</label>
+    <input id="moliAmount" placeholder="100" inputmode="decimal">
+
+    <label>Bridged tokens to pair with it</label>
+    <input id="tokAmount" placeholder="400000" inputmode="decimal">
+
+    <label>Pool address</label>
+    <input id="poolAddr" placeholder="0x…">
+
+    <label>Bridged asset (ERC-20) address</label>
+    <input id="assetAddr" placeholder="0x…">
+
+    <div class="warn">The first deposit sets the price here too, and permanently burns 1000
+      shares so the pool can never be drained and re-founded.</div>
+
+    <div class="row">
+      <button class="ghost" id="moliApprove">1 · Approve tokens</button>
+      <button id="moliFund">2 · Deposit</button>
+    </div>
+    <div class="log" id="moliLog"></div>
+  </section>
+</div>
+
+<h2 style="font-size:15px;margin:26px 0 6px">Preflight — what you are about to sign</h2>
+<pre id="preflight">Nothing staged.</pre>
+
+<script>
+const MOLIBRA = {
+  chainId: '0x4EF2',                       // 20226
+  chainName: 'Molibra',
+  nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
+  rpcUrls: ['http://193.123.191.142:8545'],
+  blockExplorerUrls: [],
+};
+
+const $ = (id) => document.getElementById(id);
+const eth = () => window.ethereum;
+
+function say(where, text, bad) {
+  const el = $(where);
+  el.textContent = text;
+  el.style.color = bad ? 'var(--bad)' : 'var(--dim)';
+}
+
+/* --------- units. Parsed as a decimal string, never via Number ------- */
+function toWei(text, decimals = 18) {
+  const s = String(text ?? '').trim();
+  if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') throw new Error('not a number: ' + s);
+  const [whole, frac = ''] = s.split('.');
+  if (frac.length > decimals) throw new Error(`more than ${decimals} decimal places`);
+  return BigInt((whole || '0') + frac.padEnd(decimals, '0'));
+}
+const hex = (v) => '0x' + BigInt(v).toString(16);
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => String(a).replace(/^0x/, '').toLowerCase().padStart(64, '0');
+const isAddress = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a || ''));
+
+/* Selectors, written out rather than derived, so they can be read here. */
+const SEL = {
+  deposit:       '0xd0e30db0',                  // deposit()            - WETH
+  approve:       '0x095ea7b3',                  // approve(address,uint256)
+  addLiquidity:  '0x9cd441da',                  // addLiquidity(uint256,uint256)
+  mint:          '0x88316456',                  // Uniswap V3 NPM mint(MintParams)
+  increase:      '0x219f5d17',                  // NPM increaseLiquidity(params)
+};
+
+let account = null;
+
+async function connect() {
+  if (!eth()) return say('who', 'No wallet found. Install MetaMask.', true);
+  const accounts = await eth().request({ method: 'eth_requestAccounts' });
+  account = accounts[0];
+  await refresh();
+}
+
+async function refresh() {
+  if (!account) return;
+  const chainId = await eth().request({ method: 'eth_chainId' });
+  const balance = await eth().request({ method: 'eth_getBalance', params: [account, 'latest'] });
+  const gasPrice = await eth().request({ method: 'eth_gasPrice' });
+  const id = parseInt(chainId, 16);
+  $('who').innerHTML =
+    `<dt>account</dt><dd>${account}</dd>` +
+    `<dt>chain</dt><dd>${id}${id === 1 ? ' — Ethereum' : id === 20226 ? ' — Molibra' : ' — neither'}</dd>` +
+    `<dt>balance</dt><dd>${(Number(BigInt(balance)) / 1e18).toFixed(6)}</dd>` +
+    `<dt>gas price</dt><dd>${(Number(BigInt(gasPrice)) / 1e9).toFixed(3)} gwei</dd>`;
+  return id;
+}
+
+/** ⛔ Refuse to send an Ethereum transaction from Molibra, and the reverse. */
+async function requireChain(want, label) {
+  const id = await refresh();
+  if (id !== want) {
+    throw new Error(`wallet is on chain ${id}; switch to ${label} (${want}) first`);
+  }
+}
+
+function stage(summary) {
+  $('preflight').textContent = summary;
+}
+
+async function send(tx, logId, label) {
+  stage(label + '\n\n' + JSON.stringify(tx, null, 2));
+  say(logId, 'awaiting signature in your wallet…');
+  try {
+    const hash = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
+    say(logId, 'sent: ' + hash);
+  } catch (e) {
+    say(logId, 'rejected or failed: ' + (e.message || e), true);
+  }
+}
+
+/* ------------------------------------------------------- Ethereum ---- */
+
+const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+
+/** int24 as a two's-complement 32-byte word - negative ticks are the norm. */
+function intWord(v) {
+  let n = BigInt(v);
+  if (n < 0n) n += 1n << 256n;
+  return n.toString(16).padStart(64, '0');
+}
+
+/** Uniswap V3 orders a pair by ADDRESS, not by which you think of first. */
+function ordered() {
+  const weth = $('wethAddr').value;
+  if (!isAddress(weth)) throw new Error('the WETH address is not an address');
+  const a = WSRO.toLowerCase(), b = weth.toLowerCase();
+  const wsroIsToken0 = a < b;
+  return {
+    token0: wsroIsToken0 ? a : b,
+    token1: wsroIsToken0 ? b : a,
+    wsroIsToken0,
+  };
+}
+
+$('ethWrap').onclick = async () => {
+  try {
+    await requireChain(1, 'Ethereum');
+    const value = toWei($('ethAmount').value);
+    const weth = $('wethAddr').value;
+    if (!isAddress(weth)) throw new Error('the WETH address is not an address');
+    await send({ from: account, to: weth, value: hex(value), data: SEL.deposit },
+      'ethLog', `Wrap ${$('ethAmount').value} ETH into WETH`);
+  } catch (e) { say('ethLog', e.message, true); }
+};
+
+$('ethApprove').onclick = async () => {
+  try {
+    await requireChain(1, 'Ethereum');
+    const mgr = $('ethRouter').value;
+    if (!isAddress(mgr)) throw new Error('paste the position manager address first');
+    const wsro = toWei($('wsroAmount').value);
+    const weth = toWei($('ethAmount').value);
+    await send({ from: account, to: WSRO, data: SEL.approve + addr32(mgr) + word(wsro) },
+      'ethLog', `Approve ${$('wsroAmount').value} WSRO for ${mgr}`);
+    await send({ from: account, to: $('wethAddr').value, data: SEL.approve + addr32(mgr) + word(weth) },
+      'ethLog', `Approve ${$('ethAmount').value} WETH for ${mgr}`);
+  } catch (e) { say('ethLog', e.message, true); }
+};
+
+$('ethFund').onclick = async () => {
+  try {
+    await requireChain(1, 'Ethereum');
+    const mgr = $('ethRouter').value;
+    if (!isAddress(mgr)) throw new Error('paste the position manager address first');
+
+    const wethAmt = toWei($('ethAmount').value);
+    const wsroAmt = toWei($('wsroAmount').value);
+    const { token0, token1, wsroIsToken0 } = ordered();
+    const amount0 = wsroIsToken0 ? wsroAmt : wethAmt;
+    const amount1 = wsroIsToken0 ? wethAmt : wsroAmt;
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+    const existing = $('posId').value.trim();
+
+    let data, what;
+    if (existing) {
+      // increaseLiquidity((uint256,uint256,uint256,uint256,uint256,uint256))
+      data = SEL.increase + word(existing) + word(amount0) + word(amount1)
+        + word(0) + word(0) + word(deadline);
+      what = `Increase position #${existing}`;
+    } else {
+      // mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256))
+      // Every member is static, so the tuple is encoded inline - no offset word.
+      data = SEL.mint
+        + addr32(token0) + addr32(token1) + word($('fee').value)
+        + intWord($('tickLo').value) + intWord($('tickHi').value)
+        + word(amount0) + word(amount1)
+        + word(0) + word(0)                       // no minimums: this pool has no price yet
+        + addr32(account) + word(deadline);
+      what = 'Mint a new full-range position';
+    }
+
+    await send({ from: account, to: mgr, data },
+      'ethLog',
+      `${what}\n\n`
+      + `token0 : ${token0}${wsroIsToken0 ? '  (WSRO)' : '  (WETH)'}\n`
+      + `token1 : ${token1}${wsroIsToken0 ? '  (WETH)' : '  (WSRO)'}\n`
+      + `WETH   : ${$('ethAmount').value}\n`
+      + `WSRO   : ${$('wsroAmount').value}\n`
+      + `implied: ${(Number(wethAmt) / Number(wsroAmt)).toExponential(3)} ETH per WSRO\n`
+      + `⛔ minimums are 0 because this pool has no price to slip against yet.`);
+  } catch (e) { say('ethLog', e.message, true); }
+};
+
+/* -------------------------------------------------------- Molibra ---- */
+
+$('addMolibra').onclick = async () => {
+  try {
+    await eth().request({ method: 'wallet_addEthereumChain', params: [MOLIBRA] });
+    await refresh();
+  } catch (e) { say('who', e.message, true); }
+};
+
+$('moliApprove').onclick = async () => {
+  try {
+    await requireChain(20226, 'Molibra');
+    const pool = $('poolAddr').value, asset = $('assetAddr').value;
+    if (!isAddress(pool) || !isAddress(asset)) throw new Error('pool and asset addresses are required');
+    const amount = toWei($('tokAmount').value);
+    await send({ from: account, to: asset, data: SEL.approve + addr32(pool) + word(amount) },
+      'moliLog', `Approve ${$('tokAmount').value} tokens for the pool`);
+  } catch (e) { say('moliLog', e.message, true); }
+};
+
+$('moliFund').onclick = async () => {
+  try {
+    await requireChain(20226, 'Molibra');
+    const pool = $('poolAddr').value;
+    if (!isAddress(pool)) throw new Error('the pool address is required');
+    const moli = toWei($('moliAmount').value);
+    const tok = toWei($('tokAmount').value);
+    await send({
+      from: account, to: pool, value: hex(moli),
+      // addLiquidity(uint256 tokenAmount, uint256 minShares) - minShares 0 on
+      // the FIRST deposit only, because there is no ratio to be slipped against
+      // yet. On any later deposit put a real floor in.
+      data: SEL.addLiquidity + word(tok) + word(0),
+    }, 'moliLog',
+      `Molibra deposit\n\nMOLI  : ${$('moliAmount').value}\ntokens: ${$('tokAmount').value}\n`
+      + `implied: ${(Number(moli) / Number(tok)).toExponential(3)} MOLI per token`);
+  } catch (e) { say('moliLog', e.message, true); }
+};
+
+$('connect').onclick = connect;
+if (eth()) {
+  eth().on?.('accountsChanged', (a) => { account = a[0]; refresh(); });
+  eth().on?.('chainChanged', () => refresh());
+}
+</script>
+</body>
+</html>
