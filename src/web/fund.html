@@ -85,10 +85,10 @@ button, and nothing is signed anywhere but in your own wallet.</p>
       0.00025 &rarr; 36,001 · 0.001 &rarr; 144,005 · 0.005 &rarr; 720,027.</p>
 
     <label>WETH to deposit (ETH)</label>
-    <input id="ethAmount" placeholder="0.0025" inputmode="decimal">
+    <input id="ethAmount" value="0.00025" inputmode="decimal">
 
     <label>WSRO to pair with it</label>
-    <input id="wsroAmount" placeholder="144005312">
+    <input id="wsroAmount" value="36001">
 
     <label>Position manager address — paste it, do not trust it</label>
     <input id="ethRouter" value="0x2214A42d8e2A1d20635c2cb0664422c528B6A432">
@@ -132,10 +132,10 @@ button, and nothing is signed anywhere but in your own wallet.</p>
       native coin, so it goes in as the transaction's value — there is no wrapper.</p>
 
     <label>MOLI to deposit</label>
-    <input id="moliAmount" placeholder="100" inputmode="decimal">
+    <input id="moliAmount" value="100" inputmode="decimal">
 
     <label>Bridged tokens to pair with it</label>
-    <input id="tokAmount" placeholder="400000" inputmode="decimal">
+    <input id="tokAmount" value="400000" inputmode="decimal">
 
     <label>Pool address</label>
     <input id="poolAddr" placeholder="0x…">
@@ -198,9 +198,12 @@ function say(where, text, bad) {
 }
 
 /* --------- units. Parsed as a decimal string, never via Number ------- */
-function toWei(text, decimals = 18) {
+function toWei(text, decimals = 18, field = 'an amount') {
   const s = String(text ?? '').trim();
-  if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') throw new Error('not a number: ' + s);
+  // ⛔ "not a number: " with nothing after it is what an EMPTY field produced,
+  // and it sent the operator looking for a bad value instead of a blank box.
+  if (s === '') throw new Error(`${field} is empty — fill it in before sending`);
+  if (!/^\d*\.?\d*$/.test(s) || s === '.') throw new Error(`${field} is not a number: "${s}"`);
   const [whole, frac = ''] = s.split('.');
   if (frac.length > decimals) throw new Error(`more than ${decimals} decimal places`);
   return BigInt((whole || '0') + frac.padEnd(decimals, '0'));
@@ -253,6 +256,12 @@ async function refresh() {
  * and only gives up if that is declined.
  */
 async function requireChain(want, label) {
+  // ⛔ Without this the failure is "still on chain undefined", which sends the
+  // reader looking at networks when the real problem is that a page reload
+  // cleared `account`. Say the actual thing.
+  if (!account) {
+    throw new Error('wallet not connected to this page — press "Connect wallet" first');
+  }
   let id = await refresh();
   if (id === want) return;
 
@@ -346,8 +355,8 @@ $('ethFund').onclick = async () => {
     const mgr = $('ethRouter').value;
     if (!isAddress(mgr)) throw new Error('paste the position manager address first');
 
-    const wethAmt = toWei($('ethAmount').value);
-    const wsroAmt = toWei($('wsroAmount').value);
+    const wethAmt = toWei($('ethAmount').value, 18, 'WETH to deposit');
+    const wsroAmt = toWei($('wsroAmount').value, 18, 'WSRO to pair');
     const { token0, token1, wsroIsToken0 } = ordered();
     const amount0 = wsroIsToken0 ? wsroAmt : wethAmt;
     const amount1 = wsroIsToken0 ? wethAmt : wsroAmt;
@@ -478,6 +487,21 @@ $('moliFund').onclick = async () => {
 };
 
 $('connect').onclick = connect;
+
+/**
+ * Restore the session on load. `eth_accounts` returns what is ALREADY
+ * authorised and never prompts, so a reload does not cost the operator a
+ * click - and, more importantly, does not leave the page thinking it has no
+ * account while the wallet plainly does.
+ */
+(async () => {
+  if (!eth()) return;
+  try {
+    const accounts = await eth().request({ method: 'eth_accounts' });
+    if (accounts && accounts.length) { account = accounts[0]; await refresh(); }
+  } catch { /* not authorised yet; the button is there for that */ }
+})();
+
 if (eth()) {
   eth().on?.('accountsChanged', (a) => { account = a[0]; refresh(); });
   eth().on?.('chainChanged', () => refresh());
