@@ -20,6 +20,10 @@ import { keccak256, toHex, fromHex, normalizeAddress } from './crypto.js';
 import { runEvm } from './evm.js';
 import { decodeVoteData, assertVoteShape, voteKey } from './vote.js';
 import {
+  decodePollOpen, assertPollOpenShape, decodeCredentialExpress,
+  assertCredentialShape, credentialIsValid, serialKey,
+} from './credential.js';
+import {
   decodeTokenCreate, decodeExpress, decodeIssue, decodeTransfer,
   normalizeTokenRecord, expressionKey, expressionBurn,
 } from './token.js';
@@ -49,8 +53,17 @@ export class State {
   constructor(accounts = new Map(), voteKeys = new Set(),
               tokens = new Map(), tokenBalances = new Map(),
               expressCounts = new Map(),
-              code = new Map(), storage = new Map()) {
+              code = new Map(), storage = new Map(),
+              polls = new Map(), spentSerials = new Set()) {
     this.accounts = accounts;
+    // Voting places opened by POLL_OPEN: pollId -> { opener, n, e }. The
+    // credential public key lives in consensus state because every node must
+    // reach the same verdict on a signature, and a key held off-chain would
+    // make that verdict a matter of who you asked.
+    this.polls = polls;
+    // Credentials already spent, keyed `${pollId}:${serial}`.
+    // ⛔ The WALLET IS NOT IN THIS KEY, and must never be - see credential.js.
+    this.spentSerials = spentSerials;
     // Deployed runtime code, keyed by address. An address with no entry is an
     // externally owned account; that is the only difference between the two.
     this.code = code;
@@ -227,6 +240,8 @@ export class State {
       // write it into its parent's state.
       new Map(this.code),
       new Map(this.storage),
+      new Map([...this.polls].map(([k, v]) => [k, { ...v }])),
+      new Set(this.spentSerials),
     );
   }
 
@@ -299,6 +314,24 @@ export class State {
     else this.storage.set(key, word);
   }
 
+  /* ------------------------ credentials ------------------------ */
+
+  getPlace(pollId) {
+    return this.polls.get(String(pollId).toLowerCase()) ?? null;
+  }
+
+  openPlace(pollId, record) {
+    this.polls.set(String(pollId).toLowerCase(), { ...record });
+  }
+
+  hasSpentSerial(key) {
+    return this.spentSerials.has(String(key).toLowerCase());
+  }
+
+  spendSerial(key) {
+    this.spentSerials.add(String(key).toLowerCase());
+  }
+
   /** Every slot this address holds, as `{ slot, value }`, sorted by slot. */
   storageOf(address) {
     const prefix = normalizeAddress(address) + ':';
@@ -358,6 +391,14 @@ export class State {
     for (const key of [...this.storage.keys()].sort()) {
       lines.push(`slot:${key}:${this.storage.get(key)}`);
     }
+    // Voting places and spent credentials, on the same appended-only-when-
+    // present terms as everything above, so a chain with no credentials in it
+    // hashes exactly as it did before they existed.
+    for (const id of [...this.polls.keys()].sort()) {
+      const p = this.polls.get(id);
+      lines.push(`place:${id}:${p.opener}:${p.e.toString(16)}:${p.n.toString(16)}`);
+    }
+    for (const k of [...this.spentSerials].sort()) lines.push(`serial:${k}`);
     return toHex(keccak256(new TextEncoder().encode(lines.join('\n'))));
   }
 }
@@ -499,6 +540,41 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     expressed = { token, key, amount: burnAmount };
   }
 
+  // ------------------------------------------------------------ credentials
+  // Both are checked BEFORE anything is mutated, so a refused credential
+  // leaves no trace - the same discipline every path above follows.
+  const opening = decodePollOpen(tx.data);
+  if (opening) {
+    if (tx.value !== 0n) throw new Error('opening a voting place moves no value');
+    assertPollOpenShape(opening);
+    if (state.getPlace(opening.pollId)) {
+      throw new Error(`voting place ${opening.pollId} is already open`);
+    }
+  }
+
+  const credential = decodeCredentialExpress(tx.data);
+  let spent = null;
+  if (credential) {
+    assertCredentialShape(tx);
+    const place = state.getPlace(credential.pollId);
+    if (!place) throw new Error(`no voting place ${credential.pollId}`);
+    // ⛔ Verified against THAT PLACE's key. A credential for one place is
+    // arithmetically useless in another, which is what makes a per-place
+    // quota enforceable at all.
+    if (!credentialIsValid(credential, place)) {
+      throw new Error('credential signature does not verify for this place');
+    }
+    const key = serialKey(credential.pollId, credential.serial);
+    // ⛔⛔ Keyed on the serial, NOT on tx.from. Putting the wallet in this key
+    // would link the credential to the spender and destroy the unlinkability
+    // the blind signature was bought for - while leaving this very check
+    // still passing. See the note at the top of credential.js.
+    if (state.hasSpentSerial(key)) {
+      throw new Error(`credential ${credential.serial} has already been spent`);
+    }
+    spent = key;
+  }
+
   // ------------------------------------------------------------------ EVM
   //
   // A transaction reaches the EVM only when it is NOT one of Molibra's own
@@ -507,7 +583,8 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   // the disambiguation rule, and it must stay that way. A contract call and a
   // vote both live in `data`; if a contract could claim a vote payload, or a
   // vote could be routed to bytecode, the electoral rules would be optional.
-  const native = Boolean(expression || creation || issue || moved || express);
+  const native = Boolean(expression || creation || issue || moved || express
+    || opening || credential);
   const isCreate = !native && !tx.to && dataBytes(tx).length > 0;
   const isCall = !native && tx.to && state.hasCode(tx.to);
 
@@ -544,6 +621,13 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   }
   state.bumpNonce(tx.from);
   if (key) state.recordVoteKey(key);
+
+  if (opening) {
+    state.openPlace(opening.pollId, {
+      opener: tx.from, n: opening.n, e: opening.e, openedAt: blockNumber,
+    });
+  }
+  if (spent) state.spendSerial(spent);
 
   if (record) {
     // Only the declared initial supply exists at creation - which for a
@@ -587,6 +671,8 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     returnValue: evm ? toHex(evm.returnValue) : null,
     evmError: evm?.error ?? null,
     voteKey: key ?? expressed?.key ?? null,
+    placeOpened: opening?.pollId ?? null,
+    credentialSerial: credential?.serial ?? null,
     pollId: expression?.pollId ?? null,
     tokenId: record?.id ?? expressed?.token.id ?? issued?.token.id ?? moved?.token.id ?? null,
     tokenAmount: expressed ? expressed.amount.toString()
