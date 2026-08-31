@@ -105,8 +105,30 @@
   <input id="fundAmount" value="0">
   <button id="deploy">Deploy MolibraSettlement</button>
   <div class="log" id="deployLog"></div>
-  <label>Deployed settlement address — filled in automatically</label>
-  <input id="settlement" placeholder="deploy above, or paste a previous deployment">
+  <label>Deployed settlement address — filled in automatically after a deploy</label>
+  <input id="settlement" value="0x381f567704e0fcba10d090325962bbc6723c8852">
+</div>
+
+<div class="card">
+  <h2>2b · Fund it</h2>
+  <p class="sub">
+    ⛔ A release pays out of THIS contract's balance. An empty contract reverts with
+    <code>Insufficient</code> however good the proof is. Send it at least as much as the
+    bridge-out is for.
+  </p>
+  <div class="row">
+    <div>
+      <label>⛔ To — the settlement contract that will pay out</label>
+      <input id="fundTo" value="0x381f567704e0fcba10d090325962bbc6723c8852">
+    </div>
+    <div>
+      <label>Amount to send, in ETH</label>
+      <input id="topUp" value="0.0002">
+    </div>
+  </div>
+  <div class="log" id="fundBalance">reading the contract's balance…</div>
+  <button id="fund">Send ETH to the settlement contract</button>
+  <div class="log" id="fundLog"></div>
 </div>
 
 <div class="card">
@@ -116,13 +138,19 @@
     request. A height from one moment with a hash from another is a commitment to a block
     that never existed — and this contract is bonded, so that is the slashable kind.
   </p>
+  <div class="note">
+    ⛔ These are pre-filled for the block that holds the bridge-out below —
+    <b>not</b> the current tip. Pressing “Re-read the node” replaces them with the live head,
+    which is a <b>different block</b> and would anchor the wrong one. Only press it if you mean
+    to anchor the tip.
+  </div>
   <div class="row">
-    <div><label>Molibra height</label><input id="anchorHeight" placeholder="reading…"></div>
-    <div><label>Cumulative work at that height</label><input id="anchorWork" placeholder="reading…"></div>
+    <div><label>Molibra height</label><input id="anchorHeight" placeholder="press “Fetch the proof” below, or “Re-read the node”"></div>
+    <div><label>Cumulative work at that height</label><input id="anchorWork" placeholder="filled with the height"></div>
   </div>
   <label>Block hash at that height</label>
-  <input id="anchorHash" placeholder="reading…">
-  <button id="readTip" class="ghost">Re-read the node</button>
+  <input id="anchorHash" placeholder="filled with the height">
+  <button id="readTip" class="ghost">Re-read the node (overwrites the above)</button>
   <button id="anchor">Anchor this block</button>
   <div class="log" id="anchorLog"></div>
 </div>
@@ -137,7 +165,7 @@
     the proof decoration.
   </p>
   <label>Molibra transaction hash</label>
-  <input id="txHash" placeholder="0x…">
+  <input id="txHash" placeholder="0x… (or pass ?tx=0x… in the URL)">
   <button id="fetchProof" class="ghost">Fetch the proof</button>
   <button id="release" disabled>Release</button>
   <pre id="proofView">no proof loaded</pre>
@@ -167,12 +195,29 @@ const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
  * source that have drifted apart deploy something nobody has read. */
 const SETTLEMENT_BYTECODE = '0x60c0601f61104f38819003918201601f19168301916001600160401b038311848410176100d25780849260409485528339810103126100cd578051906001600160a01b03821682036100cd5760200151906080523360a0526000553461009c575b604051610f6690816100e9823960805181818161026c0152818161039001526105f6015260a05181818160e60152818161020401526107230152f35b6040513481527f5af8184bef8e4b45eb9f6ed7734d04da38ced226495548f46e0c8ff8d7d9a52460203392a2610060565b600080fd5b634e487b7160e01b600052604160045260246000fdfe60806040526004361015610047575b361561001957600080fd5b6040513481527f5af8184bef8e4b45eb9f6ed7734d04da38ced226495548f46e0c8ff8d7d9a52460203392a2005b60003560e01c806312fcb1f7146107c15780631f5626611461076f5780632e1a7d4d1461071057806342d21ef7146105ce57806364777b101461029b578063712e267b14610256578063843339ce146102335780638da5cb5b146101ee57806391774928146101d05780639c377b8d1461018c578063a6d68ecd1461015b5763b52588a90361000e5734610156576020366003190112610156576004357f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03163303610145576020817f2b8734976ea5ed5eee358af2dfe0f5c431fb775298dc65a20e64c3aa7dbdb81192600055604051908152a1005b6330cd747160e01b60005260046000fd5b600080fd5b34610156576020366003190112610156576004356000526001602052602060ff604060002054166040519015158152f35b346101565760203660031901126101565760043567ffffffffffffffff8111610156576101c86101c26020923690600401610855565b90610d2b565b604051908152f35b34610156576000366003190112610156576020600054604051908152f35b34610156576000366003190112610156576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b3461015657600036600319011261015657604051639854175f60e01b8152602090f35b34610156576000366003190112610156576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b346101565760a03660031901126101565760043560243567ffffffffffffffff8111610156576102cf903690600401610855565b9060443567ffffffffffffffff8111610156576102f0903690600401610855565b909160643567ffffffffffffffff811161015657610312903690600401610824565b60849591953567ffffffffffffffff811161015657610335903690600401610824565b91610341368789610cf4565b602081519101209788600052600160205260ff604060002054166105bd5761036a368688610cf4565b8051602090910120604051631b45b99f60e11b8152600481018c90526001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169190608081602481865afa9283156105625760009384928591610583575b50841561056e57604051638bcfa66560e01b81526001600160a01b03909116600482015290602090829060249082905afa90811561056257600091610533575b506105225760005481019081431061050b5750508181036104f45750509161044294939161043c938a6108e1565b92610d2b565b036104e35761045091610a43565b90811580156104da575b6104c9578260005260016020526040600020600160ff1982541617905560018060a01b031692600080808085885af1610491610c7b565b50156104c9577fbaa21fb6000fbb6d014fac9cd1b0726799e6f352a967157a59f4b2da8ef322119160409182519182526020820152a3005b631dc930eb60e01b60005260046000fd5b5047821161045a565b632521fb2160e11b60005260046000fd5b63decae1b360e01b60005260045260245260446000fd5b63076f615b60e41b60005260045260245260446000fd5b637473939160e01b60005260046000fd5b610555915060203d60201161055b575b61054d81836108a9565b810190610cdc565b8e61040e565b503d610543565b6040513d6000823e3d90fd5b8e63e4ba1ddd60e01b60005260045260246000fd5b919450506105a9915060803d6080116105b6575b6105a181836108a9565b810190610cab565b929094915093918f6103ce565b503d610597565b6331da482760e11b60005260046000fd5b3461015657602036600319011261015657604051631b45b99f60e11b815260048035908201527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690608081602481855afa801561056257600080926000926106e9575b50151591829182610683575b50608093508161066c575b47916040519384521515602084015260408301526060820152f35b905061067a60005482610a01565b43101590610651565b604051638bcfa66560e01b81526001600160a01b03909116600482015293909150602090849060249082905afa8015610562576080936000916106ca575b50159084610646565b6106e3915060203d60201161055b5761054d81836108a9565b846106c1565b915050610705915060803d6080116105b6576105a181836108a9565b90929091508461063a565b34610156576020366003190112610156577f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03163381900361014557600080808093600435905af1610767610c7b565b50156104c957005b346101565760203660031901126101565760043567ffffffffffffffff8111610156576107ab6107a56040923690600401610855565b90610a43565b82516001600160a01b0390921682526020820152f35b346101565760603660031901126101565760243567ffffffffffffffff8111610156576107f2903690600401610824565b6044359067ffffffffffffffff8211610156576020926108196101c8933690600401610824565b9290916004356108e1565b9181601f840112156101565782359167ffffffffffffffff8311610156576020808501948460051b01011161015657565b9181601f840112156101565782359167ffffffffffffffff8311610156576020838186019501011161015657565b91908110156108935760051b0190565b634e487b7160e01b600052603260045260246000fd5b90601f8019910116810190811067ffffffffffffffff8211176108cb57604052565b634e487b7160e01b600052604160045260246000fd5b94939492919285840361099557949291906000935b838510610904575050505050565b9091929395610914878386610883565b35908115158203610156576001911561096157610932888786610883565b3560405190602082019283526040820152604081526109526060826108a9565b5190205b9601939291906108f6565b61096c888786610883565b3590604051906020820192835260408201526040815261098d6060826108a9565b519020610956565b637ca55c7760e01b60005260046000fd5b90821015610893570190565b60ff60b6199116019060ff82116109c557565b634e487b7160e01b600052601160045260246000fd5b60ff607f199116019060ff82116109c557565b60ff60f6199116019060ff82116109c557565b919082018092116109c557565b90939293848311610156578411610156578101920390565b359060208110610a34575090565b6000199060200360031b1b1690565b9190610a4f8184610d99565b9060005b60058110610c4a5750610a678282866109a6565b3560f81c60006080821180610c3f575b15610bc85750610a8860ff916109db565b1691600181018091116109c557603890925b03610b975760048201908183116109c557610ab782848388610a0e565b6001600160e01b031991359182169160048210610ba8575b50506001600160e01b0319166367abe8a160e01b01610b97576000946018840192838511610b835783610b03918484610a0e565b6bffffffffffffffffffffffff1991359182169160148210610b5e575b505060601c9560388501809511610b4a575091610b479391610b4193610a0e565b90610a26565b90565b634e487b7160e01b81526011600452602490fd5b6bffffffffffffffffffffffff1960149290920360031b82901b161690503880610b20565b634e487b7160e01b87526011600452602487fd5b635055b29560e01b60005260046000fd5b6001600160e01b031960049290920360031b82901b161690503880610acf565b929060b7811180610c34575b15610c2557610be460ff916109b2565b169060018101809111610c11578181610c04603894610c0b94878b610ecc565b9550610a01565b92610a9a565b634e487b7160e01b84526011600452602484fd5b635055b29560e01b8452600484fd5b5060bf811115610bd4565b5060b7821115610a77565b91610c586001918387610dfa565b9201610a53565b67ffffffffffffffff81116108cb57601f01601f191660200190565b3d15610ca6573d90610c8c82610c5f565b91610c9a60405193846108a9565b82523d6000602084013e565b606090565b9190826080910312610156578151916020810151916060604083015192015160018060a01b03811681036101565790565b90816020910312610156575180151581036101565790565b929192610d0082610c5f565b91610d0e60405193846108a9565b829481845281830111610156578281602093846000960137010152565b610d358282610d99565b60005b60058110610d845750600560fd1b6001600160f81b0319610d5a8386866109a6565b35160361099557600181018082116109c557602182018092116109c557610b4793610b4193610a0e565b90610d926001918585610dfa565b9101610d38565b9015610893573560f81c60c081101580610def575b610de95760f8811015610dcc57637ca55c7760e01b60005260046000fd5b610dd760ff916109ee565b1660010160ff81116109c55760ff1690565b50600190565b5060f7811115610dae565b90610e068382846109a6565b3560f81c607f811115610ebb5760b7811115610e965760bf811115610e8b5760f7811115610e6357610e3960ff916109ee565b16600184018094116109c55783610e5d92610e5783610b4797610a01565b94610ecc565b90610a01565b915050600182018092116109c55760bf19019060ff82116109c55760ff610b47921690610a01565b610e3960ff916109b2565b9280925060019150018091116109c55760ff610eb4610b47936109db565b1690610a01565b505050600181018091116109c55790565b909392919360009483158015610f26575b610995579291906000935b838510610ef6575050505050565b9091929395600190610f12610f0b8985610a01565b85876109a6565b3560f81c9060081b17960193929190610ee8565b5060088411610edd56fea2646970667358221220b51f7696432e4a1d54d35d6e1ac06c17fbc9df8f43b76a2a7d790ddc064f4abe64736f6c634300081a0033';
 
+/**
+ * ⛔ Function selectors, and one that was WRONG.
+ *
+ * `tipHeight` was pasted as 0x9c589f02, which is `tipWork()` — so the status
+ * panel showed cumulative work under a label saying height, and the two are
+ * not remotely the same number. Nothing broke; it just lied quietly, which is
+ * worse. Every value here is now checked against keccak256 of its signature by
+ * bridge/settle-page-e2e.mjs, so a pasted selector cannot be wrong again.
+ */
 const SEL = {
   anchor:   '0xdfedea24',   // anchor(uint256,bytes32,uint256)
   anchors:  '0x368b733e',   // anchors(uint256)
   slashed:  '0x8bcfa665',   // slashed(address)
-  tipHeight:'0x9c589f02',   // tipHeight()
-  release:  '',             // computed below
+  tipHeight:'0x1fd4827a',   // tipHeight()
+  tipWork:  '0x9c589f02',   // tipWork()
+  // release(uint256,bytes,bytes,bytes32[],bool[])
+  //
+  // ⛔ This was computed at call time by asking the node for `web3_sha3` — a
+  // method Molibra's RPC does not implement, so the button failed with "method
+  // not found" before it ever built a transaction. Deriving a constant from a
+  // service that might not answer is worse than a constant, because it fails
+  // at the moment of use rather than in a test.
+  release:  '0x64777b10',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -190,20 +235,6 @@ const eth = () => {
   if (!window.ethereum) throw new Error('no wallet in this browser');
   return window.ethereum;
 };
-
-/* release(uint256,bytes,bytes,bytes32[],bool[]) — the selector is COMPUTED
- * from the signature rather than pasted, so it cannot be silently wrong. */
-async function keccakSelector(sig) {
-  // The page has no keccak of its own; the node has one it already uses for
-  // exactly this, so ask it rather than shipping a second implementation.
-  const r = await fetch(NODE, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'web3_sha3', params: ['0x' + [...new TextEncoder().encode(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')] }),
-  });
-  const j = await r.json();
-  if (j.error || !j.result) throw new Error('could not compute the release selector: ' + (j.error?.message ?? 'no result'));
-  return j.result.slice(0, 10);
-}
 
 let account = null;
 
@@ -303,6 +334,46 @@ $('deploy').onclick = async () => {
   } catch (e) { say('deployLog', e.message, true); }
 };
 
+/* --------------------------------------------------------------- fund */
+
+/** Show the destination's live balance next to the button that funds it. */
+async function showFundBalance() {
+  const to = $('fundTo').value.trim();
+  if (!isAddress(to)) { say('fundBalance', 'that is not an address', true); return; }
+  try {
+    const r = await fetch(ETH_RPC, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [to, 'latest'] }),
+    });
+    const bal = BigInt((await r.json()).result);
+    say('fundBalance', `${to} currently holds ${(Number(bal) / 1e18).toFixed(9)} ETH`
+      + (bal === 0n ? '  ⛔ empty — a release would revert with Insufficient' : ''));
+  } catch (e) { say('fundBalance', 'could not read its balance: ' + e.message, true); }
+}
+$('fundTo').onchange = showFundBalance;
+
+$('fund').onclick = async () => {
+  try {
+    await requireMainnet();
+    // ⛔ The address the operator can SEE, not one read silently from another
+    // card. A button that moves money must show where the money goes, beside
+    // the button, or the person clicking it is trusting rather than checking.
+    const to = $('fundTo').value.trim();
+    if (!isAddress(to)) throw new Error('the destination is not an address');
+    const eth = Number($('topUp').value);
+    if (!(eth > 0)) throw new Error('the amount must be positive');
+    const value = BigInt(Math.round(eth * 1e18));
+    const h = await send({ from: account, to, value: hex(value) }, 'fundLog',
+      `Send ${eth} ETH to ${to}`);
+    const r = await waitForReceipt(h, 'fundLog', 'fund');
+    say('fundLog', r.status === '0x1'
+      ? `funded. The contract can now pay out up to ${eth} ETH.`
+      : 'the transfer reverted', r.status !== '0x1');
+    await showFundBalance();
+    $('refreshStatus').onclick();
+  } catch (e) { say('fundLog', e.message, true); }
+};
+
 /* ------------------------------------------------------------- anchor */
 
 /**
@@ -376,12 +447,22 @@ $('fetchProof').onclick = async () => {
       + `⛔ The recipient and the amount are read from the raw transaction BY THE CONTRACT,\n`
       + `   not from this page.`;
     $('release').disabled = false;
-    // The height that must be anchored is this block's, not the tip's.
+
+    // The height that must be anchored is THIS block's, never the tip's. The
+    // work comes from the same block, and its hash is re-checked against the
+    // proof before it is used - so the three values that go into `anchor()`
+    // still describe one block, which is the whole rule.
+    const blk = await (await fetch(`${NODE}/molibra/block/${p.blockNumber}?decoded=1`)).json();
+    if (blk.hash !== p.blockHash) {
+      throw new Error(`the node now reports a different hash at height ${p.blockNumber} — a reorg. `
+        + 'Do not anchor: re-fetch the proof and check where the transaction is now.');
+    }
     $('anchorHeight').value = p.blockNumber;
     $('anchorHash').value = p.blockHash;
-    say('releaseLog', `proof loaded. ⛔ Height ${p.blockNumber} must be anchored before this `
-      + 'can be released — the anchor fields above have been set to that block. You still '
-      + 'need its cumulative work; press "Re-read the node" only if you intend to anchor the TIP.');
+    $('anchorWork').value = blk.totalDifficulty;
+    say('releaseLog', `proof loaded, and the anchor fields above are now set to block `
+      + `${p.blockNumber} — height, hash and work all from that one block. ⛔ Anchor it first, `
+      + 'then wait out the challenge window, then release.');
   } catch (e) { $('release').disabled = true; say('releaseLog', e.message, true); }
 };
 
@@ -410,7 +491,6 @@ $('release').onclick = async () => {
     if (!loadedProof) throw new Error('fetch a proof first');
     const settlement = $('settlement').value.trim();
     if (!isAddress(settlement)) throw new Error('deploy the settlement contract first');
-    if (!SEL.release) SEL.release = await keccakSelector('release(uint256,bytes,bytes,bytes32[],bool[])');
 
     const p = loadedProof;
     const siblings = p.siblings.map((s) => s.hash);
@@ -437,7 +517,12 @@ $('refreshStatus').onclick = async () => {
 
     const anchorAddr = $('anchorAddr').value.trim();
     const tip = await ethCall(anchorAddr, SEL.tipHeight);
-    $('stTip').textContent = BigInt(tip).toString();
+    const work = await ethCall(anchorAddr, SEL.tipWork);
+    const want = $('anchorHeight').value.trim();
+    $('stTip').textContent = `height ${BigInt(tip)} · work ${BigInt(work)}`
+      + (want && BigInt(tip) >= BigInt(want)
+        ? `  ⛔ already at or past ${want} — anchor() refuses a height that does not INCREASE`
+        : want ? `  (${want} is anchorable: it is above the tip)` : '');
 
     if (account) {
       const s = await ethCall(anchorAddr, SEL.slashed + addr32(account));
@@ -457,8 +542,50 @@ $('refreshStatus').onclick = async () => {
   } catch (e) { say('statusLog', e.message, true); }
 };
 
-/* Fill everything the page can know without a wallet, immediately. */
-readTip().catch((e) => say('anchorLog', 'could not reach the node: ' + e.message, true));
+/**
+ * ⭐ Everything specific to one bridge-out comes from the URL.
+ *
+ *   ?tx=0x…&settlement=0x…&height=9443&hash=0x…&work=12503093791
+ *
+ * This exists because the alternative is editing the HTML by hand for each
+ * run, and that is exactly how a near-identical copy of this page ends up
+ * live somewhere else with different values in it. A link carries its own
+ * state; a hand-edited file carries whichever version you happen to be
+ * looking at. Anything not in the URL is simply left for the buttons to fill.
+ */
+const params = new URLSearchParams(location.search);
+for (const [key, field] of Object.entries({
+  tx: 'txHash', settlement: 'settlement', height: 'anchorHeight',
+  hash: 'anchorHash', work: 'anchorWork', anchor: 'anchorAddr',
+  challenge: 'challenge', fund: 'topUp',
+})) {
+  const v = params.get(key);
+  if (v) $(field).value = v;
+}
+// The funding destination follows the settlement address unless overridden.
+if (params.get('settlement')) $('fundTo').value = params.get('settlement');
+
+/**
+ * ⛔⛔ On load the page reads the node for STATUS ONLY. It does NOT overwrite
+ * the anchor fields.
+ *
+ * Those fields are pre-filled with the block that holds a specific bridge-out.
+ * The tip moves about four blocks a minute, so an automatic read would silently
+ * replace a chosen block with whatever is current - and the operator would
+ * anchor a block their transaction is not in, pay for it, and get
+ * `HeaderDoesNotMatchAnchor` with no idea why. Re-reading the node is now
+ * something a person asks for, never something that happens to them.
+ */
+(async () => {
+  try {
+    const j = await (await fetch(NODE + '/molibra')).json();
+    $('stNode').textContent = j.height + '  ' + j.head;
+    const want = $('anchorHeight').value.trim();
+    say('anchorLog', `node is at height ${j.height}; the fields above are set to block ${want}, `
+      + 'which is the block holding the bridge-out below. They are deliberately NOT the tip.');
+  } catch (e) { say('anchorLog', 'could not reach the node: ' + e.message, true); }
+})();
+showFundBalance();
 $('refreshStatus').onclick();
 </script>
 </body>

@@ -158,6 +158,17 @@ export function createRpcHandlers(node) {
     eth_maxPriorityFeePerGas: () => toQuantity(0n),
     eth_protocolVersion: () => '0x41',
 
+    /**
+     * Keccak-256 of arbitrary bytes.
+     *
+     * Part of the standard method set and it was missing, which is the kind of
+     * gap that only surfaces when something actually calls it: the settlement
+     * page used it to derive a function selector and failed with "method not
+     * found" at the moment the operator pressed the button. Every node already
+     * has this hash function; not exposing it was an omission, not a decision.
+     */
+    web3_sha3: ([data]) => toHex(keccak256(fromHex(data ?? '0x'))),
+
     eth_getBalance: ([address, tag]) => {
       resolveBlock(tag);
       return toQuantity(chain.state.balanceOf(normalizeAddress(address)));

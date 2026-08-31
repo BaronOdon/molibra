@@ -231,6 +231,45 @@ check('the page reads height, hash and work from ONE response',
   'a height from one moment with a hash from another is a slashable commitment');
 check('  and re-checks for a reorg before anchoring',
   pageSrc.includes('a reorg. Press "Re-read the node"'));
+/**
+ * ⛔⛔ Every selector the page pastes, checked against keccak256 of its
+ * signature.
+ *
+ * `tipHeight` was pasted as `tipWork()`'s selector. Nothing threw: the status
+ * panel simply showed cumulative work under a label saying height, which is a
+ * number wrong by six orders of magnitude and looks like a working page. A
+ * constant nobody derives is a constant nobody can check, so it is derived
+ * here.
+ */
+const PAGE_SELECTORS = {
+  anchor: 'anchor(uint256,bytes32,uint256)',
+  anchors: 'anchors(uint256)',
+  slashed: 'slashed(address)',
+  tipHeight: 'tipHeight()',
+  tipWork: 'tipWork()',
+  // ⛔ The one that used to be computed at call time, by asking the node for
+  // `web3_sha3` — which Molibra's RPC does not implement. The Release button
+  // failed with "method not found" before it built anything. A constant
+  // checked by a test beats a value derived from a service that may not
+  // answer: this fails here, not under the operator's cursor.
+  release: 'release(uint256,bytes,bytes,bytes32[],bool[])',
+};
+for (const [name, sig] of Object.entries(PAGE_SELECTORS)) {
+  const want = toHex(keccak256(new TextEncoder().encode(sig))).slice(0, 10);
+  const found = new RegExp(`${name}\\s*:\\s*'(0x[0-9a-f]{8})'`).exec(pageSrc);
+  check(`⛔ the page's ${name} selector is really ${sig}`,
+    Boolean(found) && found[1] === want,
+    found ? `page has ${found[1]}, keccak says ${want}` : 'not found in the page');
+}
+
+check('⭐ run-specific values come from the URL, not from hand-edited HTML',
+  /new URLSearchParams\(location\.search\)/.test(pageSrc)
+  && /tx: 'txHash'/.test(pageSrc) && /height: 'anchorHeight'/.test(pageSrc),
+  'a link carries its own state; an edited file carries whichever copy you are looking at');
+check('  and no single bridge-out is baked into the page',
+  !/value="0xee92d3e7/.test(pageSrc) && !/value="9443"/.test(pageSrc),
+  'the committed page is a tool, not a record of one run');
+
 check('the page never names the recipient itself',
   !/recipient.*value/i.test(pageSrc.split('function encodeRelease')[1] ?? ''),
   'the instruction comes out of the proved transaction');
