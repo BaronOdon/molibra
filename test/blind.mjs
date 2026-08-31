@@ -95,11 +95,28 @@ check('a credential for one voting place is useless in another',
   !blind.verify(serial, signature, otherParams),
   'the place is carried by the KEY, which is why the quota is enforceable');
 
+// ⛔ This check failed intermittently - about one run in twelve - and the
+// cause was this test, not the library. `here.blinded` is reduced modulo THIS
+// place's modulus and is then handed to a key with a DIFFERENT one. Two
+// independent 2048-bit moduli are never equal, so the value sometimes exceeds
+// the foreign modulus and OpenSSL refuses it outright: `data too large for
+// modulus`. Measured: 5 of 5 failures were exactly that, every time.
+//
+// The refusal is correct behaviour, and it satisfies the property being tested
+// more completely than a bad signature does. So both outcomes count: the wrong
+// place's key either cannot sign at all, or signs something that does not
+// verify. What must never happen is a usable credential.
 const here = blind.blind(serial, params);
-const wrongKeySig = blind.unblind(
-  blind.signBlinded(here.blinded, otherPlace.privateKeyPem, params), here.unblinder, params);
+let wrongKeyUsable;
+try {
+  const sig = blind.unblind(
+    blind.signBlinded(here.blinded, otherPlace.privateKeyPem, params), here.unblinder, params);
+  wrongKeyUsable = blind.verify(serial, sig, params);
+} catch {
+  wrongKeyUsable = false; // it could not even be attempted across moduli
+}
 check('signing with the wrong place\'s key produces nothing usable',
-  !blind.verify(serial, wrongKeySig, params));
+  !wrongKeyUsable, 'it either refuses outright, or yields a signature that fails');
 
 // 5 — tampering ------------------------------------------------------------
 check('a tampered signature is refused',
