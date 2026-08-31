@@ -29,7 +29,7 @@ Supporting routes: `GET /molibra/proof/{txHash}`, `GET /molibra/header-rlp/{bloc
 
 **Compile for `paris`, not the compiler's default.** solc 0.8.26 targets Cancun and emits
 `PUSH0`/`MCOPY`. On a network that has not reached that hardfork the contract deploys happily
-and then every call dies with `invalid opcode` and **no revert reason** — which reads exactly
+and then every call dies with an **invalid-instruction halt and no revert reason** — which reads exactly
 like a broken verifier rather than a wrong compilation target.
 
 **Molibra's Merkle tree promotes an odd trailing node; it does not duplicate it.** A verifier

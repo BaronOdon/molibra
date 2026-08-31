@@ -72,7 +72,8 @@ const out = JSON.parse(solc.compile(JSON.stringify({
     //
     // solc 0.8.26 emits PUSH0 and MCOPY for Cancun, and a network that has not
     // reached that hardfork treats them as INVALID - the contract deploys and
-    // then every call dies with "invalid opcode" and no revert reason, which
+    // then every call halts on an invalid instruction, with no revert reason,
+    // which
     // reads exactly like a broken verifier rather than a wrong target. Paris
     // runs everywhere that matters and costs a little gas.
     evmVersion: 'paris',

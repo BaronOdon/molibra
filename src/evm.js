@@ -6,10 +6,10 @@
  * unrecoverable, and there is no credit for writing one badly.
  *
  * HARDFORK: shanghai. Not an idle default - solc 0.8.20 and later emit PUSH0
- * unless told otherwise, and on a pre-shanghai target that dies as `invalid
- * opcode` with no revert reason, which reads like a broken contract rather
- * than a mis-set compiler. The bridge work lost time to exactly that against
- * a paris target. Shanghai accepts what a current compiler produces.
+ * unless told otherwise, and on a pre-shanghai target that halts as an invalid
+ * instruction with no revert reason, which reads like a broken contract rather
+ * than a mis-set compiler. The bridge work lost time to exactly that against a
+ * paris target. Shanghai accepts what a current compiler produces.
  *
  * ⛔ The EVM reaches state ONLY through MolibraStateManager, which exposes
  * accounts, code and storage. The token registry and vote keys are not on

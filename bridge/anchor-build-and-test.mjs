@@ -74,7 +74,8 @@ const out = JSON.parse(solc.compile(JSON.stringify({
   settings: {
     optimizer: { enabled: true, runs: 200 },
     // Paris, for the same reason as the prover: PUSH0/MCOPY from a Cancun
-    // target deploy fine and then die "invalid opcode" with no revert reason.
+    // target deploy fine and then halt on an invalid instruction, with no
+    // revert reason.
     evmVersion: 'paris',
     outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object'] } },
   },
