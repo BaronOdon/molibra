@@ -19,6 +19,7 @@ import { PURPOSE_LABELS } from './token.js';
 import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
 import { simulate } from './evm.js';
+import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
 
@@ -419,6 +420,46 @@ function handleAudit(node, req, res) {
 
   if (path === '/molibra/head') {
     return json(res, 200, serializeBlock(chain.head));
+  }
+
+  /**
+   * An inclusion proof for one account's line in the state.
+   *
+   *   /molibra/state-proof/0x…
+   *
+   * ⛔ Honest about what it is worth right now. Until STATE_MERKLE_ACTIVATION,
+   * the Merkle root is NOT the root in any block header, so a proof verifies
+   * against `root` here and against nothing on the chain. `consensus` says
+   * which of the two roots the current height actually commits to, so a caller
+   * cannot mistake a preview for a guarantee.
+   */
+  if (path.startsWith('/molibra/state-proof/')) {
+    const address = path.slice('/molibra/state-proof/'.length);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return json(res, 400, { error: 'expected /molibra/state-proof/0x<20-byte address>' });
+    }
+    const line = accountLine(chain.state, normalizeAddress(address));
+    if (!line) {
+      return json(res, 404, {
+        error: 'this account contributes no line to the state',
+        why: 'an account with no balance and no nonce is skipped by the root, '
+          + 'so there is nothing to prove rather than an empty proof',
+      });
+    }
+    const proof = chain.state.proofForLine(line);
+    const height = chain.height;
+    return json(res, 200, {
+      address: normalizeAddress(address),
+      height: Number(height),
+      line,
+      ...proof,
+      rootConcat: chain.state.rootConcat(),
+      consensus: height >= STATE_MERKLE_ACTIVATION ? 'merkle' : 'concat',
+      committedInHeader: height >= STATE_MERKLE_ACTIVATION,
+      activation: Number(STATE_MERKLE_ACTIVATION),
+      verifier: 'keccak leaves, keccak(left‖right), odd nodes promoted — the same '
+        + 'construction MolibraSettlement.merkleRoot already verifies on Ethereum',
+    });
   }
 
   if (path === '/molibra/peers') {

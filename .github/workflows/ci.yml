@@ -1,0 +1,81 @@
+# Repo-level safety: runs on GitHub, so it cannot be skipped by a contributor's
+# local configuration.
+#
+# ⛔ The secret scan on this machine is a GLOBAL git hook (core.hooksPath), which
+# protects this machine and nothing else. Anyone who clones the repo gets none
+# of it. That is the gap this file closes: the checks travel with the repository
+# instead of with one laptop.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # `npm ci` refuses to drift from the lockfile, which is the point: a build
+      # that silently resolved a different dependency tree is not the tree that
+      # was reviewed.
+      - run: npm ci
+      - run: npm test
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # ⛔ Full history. A key committed once and deleted the next commit is
+          # still public forever; scanning only the tip would report clean on a
+          # repository that is not.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  hygiene:
+    name: nothing private is tracked
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # ⛔⛔ The paths below are gitignored, but .gitignore only stops a file
+      # being ADDED by accident - it does nothing once a file is tracked, and
+      # nothing about a contributor who uses `git add -f`. This asserts the
+      # invariant rather than trusting the ignore file.
+      #
+      # patent-private/ is here because publishing it is not a leak of secrets
+      # but a disclosure bearing on NOVELTY, which is irreversible in
+      # absolute-novelty jurisdictions.
+      - name: refuse tracked private paths
+        run: |
+          set -e
+          bad=$(git ls-files | grep -E '^(patent-private/|data/|HANDOFF|ASSESSMENT-)|\.(key|pem)$|^\.env' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::private paths are tracked:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "no private paths tracked"
+      - name: refuse a committed private key
+        run: |
+          set -e
+          if git grep -qIE 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' -- . ; then
+            echo "::error::a PEM private key block is committed"
+            exit 1
+          fi
+          echo "no PEM private key blocks"

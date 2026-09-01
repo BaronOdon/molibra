@@ -33,6 +33,9 @@ import {
 } from './bridgemint.js';
 import { InboundLedger } from './inbound.js';
 import { decodeMoliBurn, OutboundLedger, MOLI_BURN_ACTIVATION } from './moliburn.js';
+import {
+  stateRoot as merkleStateRoot, proofFor, STATE_MERKLE_ACTIVATION,
+} from './stateproof.js';
 import { foreignAssetRecord } from './foreign.js';
 import { proveBurn } from './burnproof.js';
 
@@ -388,7 +391,8 @@ export class State {
    * are appended after the accounts and only when present, so a chain written
    * before expressions existed still hashes to exactly the same root.
    */
-  root() {
+  /** Every line the state contributes, sorted and canonical. */
+  rootLines() {
     const lines = [];
     for (const address of [...this.accounts.keys()].sort()) {
       const account = this.accounts.get(address);
@@ -445,7 +449,52 @@ export class State {
     lines.push(...this.inbound.rootLines());
     // What has been destroyed to exist elsewhere, on the same terms.
     lines.push(...this.outbound.rootLines());
-    return toHex(keccak256(new TextEncoder().encode(lines.join('\n'))));
+    return lines;
+  }
+
+  /**
+   * The state fingerprint, by CONCATENATION.
+   *
+   * ⛔ This is the pre-activation computation and it must never change. Replay
+   * re-derives the root of every historical block, so altering this by a byte
+   * would make a node reject its own chain.
+   */
+  rootConcat() {
+    return toHex(keccak256(new TextEncoder().encode(this.rootLines().join('\n'))));
+  }
+
+  /**
+   * The state fingerprint as a MERKLE root over the same lines.
+   *
+   * Same inputs, different combination - which is what buys inclusion proofs.
+   * See src/stateproof.js for why the construction is the one already deployed
+   * in Solidity rather than a new one.
+   */
+  rootMerkle() {
+    return merkleStateRoot(this.rootLines());
+  }
+
+  /**
+   * The state root for a block at `height`.
+   *
+   * ⛔⛔ Height-gated, exactly as the MOLI burn is. Below the flag day the old
+   * computation is used byte-for-byte, so upgraded and un-upgraded nodes agree
+   * on all existing history; only crossing the height changes anything.
+   *
+   * ⛔ The default is deliberately the OLD form. A caller that forgets to pass
+   * a height gets today's consensus, not tomorrow's - the failure mode of an
+   * omitted argument must be "no change", never "silent fork".
+   */
+  root(height = 0n) {
+    return BigInt(height) >= STATE_MERKLE_ACTIVATION ? this.rootMerkle() : this.rootConcat();
+  }
+
+  /** An inclusion proof for one state line, against `rootMerkle()`. */
+  proofForLine(line) {
+    const lines = this.rootLines();
+    const index = lines.indexOf(line);
+    if (index === -1) return null;
+    return { ...proofFor(lines, index), root: merkleStateRoot(lines) };
   }
 }
 

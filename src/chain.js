@@ -402,7 +402,10 @@ export class Chain {
       parentHash: parent.hash,
       timestamp,
       miner: minerAddress,
-      stateRoot: state.root(),
+      // ⛔ The root is computed FOR THIS HEIGHT: past the activation it is a
+      // Merkle root, before it the old concatenation. Composing and validating
+      // must pass the same height or a node would refuse its own block.
+      stateRoot: state.root(parent.header.number + 1n),
       txRoot: merkleRoot(included.map((tx) => tx.hash)),
       difficulty: nextDifficulty(
         parent.header, timestamp,
@@ -498,7 +501,10 @@ export class Chain {
     if (gasUsed !== header.gasUsed) {
       throw new Error(`gas used mismatch: computed ${gasUsed}, header says ${header.gasUsed}`);
     }
-    if (state.root() !== header.stateRoot) {
+    // ⛔ At THIS block's height, never the tip's. Replay re-validates every
+    // historical block, so a node that used the tip here would recompute old
+    // blocks under the new rule and reject its own chain on restart.
+    if (state.root(header.number) !== header.stateRoot) {
       throw new Error('state root mismatch after re-execution');
     }
 

@@ -54,10 +54,28 @@ data, and that uniqueness should be enforced by **cost** rather than by **identi
 
 ## 2. Design
 
-The chain is an account model with balances and nonces. There is no virtual machine: no
-contracts, no storage, no code accounts. This is a deliberate reduction — every feature a chain
-does not have is a feature that cannot be exploited, and nothing in the problem statement
-requires general computation.
+The chain is an account model with balances and nonces, and it runs a general-purpose virtual
+machine: contracts, storage and code accounts all exist. The bridged assets and the MOLI/WSRO
+pair are ordinary contracts on it.
+
+That is a change. This document previously said there was no virtual machine, and argued that a
+feature a chain does not have is a feature that cannot be exploited. The argument was right and
+the property it protected still has to hold, so it is now obtained a different way: **the
+regulated instructions are decoded before the machine ever runs, and arbitrary code cannot
+reach them.**
+
+Every native payload — an expression of will, a token creation, an issuance, a bridge claim —
+has its decoder run first. A transaction reaches the virtual machine only when it is none of
+them. A contract call and an expression both live in `data`; if a contract could claim an
+expression payload, or an expression could be routed into bytecode, the rules in §5 would be
+optional. They are not, because the ordering is consensus and not convention: a node that ran
+them in the other order would compute a different state root and fork away from the network.
+
+So the chain has general computation and, simultaneously, a class of instructions that general
+computation cannot forge, wrap, or route around. An electoral token's non-transferability is
+enforced by the validator rather than by the token's own code, which means no contract can wrap
+it into something tradeable. That is a stronger guarantee than the absence of a machine was,
+because it survives the machine being there.
 
 Blocks are sealed by Keccak-256 proof of work. Difficulty retargets by one sixteenth per block
 toward a fifteen-second target. The canonical chain is the path of heaviest cumulative
@@ -81,10 +99,13 @@ another chain and vice versa. The node answers the JSON-RPC methods a wallet cal
 is that a standard wallet connects natively.
 
 The compatibility is not total, and the difference is documented rather than glossed. The state
-root is a deterministic Keccak-256 over the sorted account set — it gives every node the same
-fingerprint for the same state, which is what consensus requires, but it is **not** an Ethereum
-Merkle-Patricia root and supports no trie proofs. Wallets do not check it, so nothing breaks;
-but anyone building on Molibra should know that light-client proofs do not exist here yet.
+root is a deterministic Keccak-256 over the sorted state — accounts first, then contract code
+and storage, tokens and their balances, voting places, spent credentials, and the bridge
+ledgers. Each of those is appended **only when present**, so a chain that has never used a
+feature hashes exactly as it did before that feature existed, and adding one is not a fork.
+
+It gives every node the same fingerprint for the same state, which is what consensus requires,
+but it is **not** an Ethereum Merkle-Patricia root. Wallets do not check it, so nothing breaks.
 
 ---
 

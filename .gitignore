@@ -48,3 +48,16 @@ ASSESSMENT-*.md
 scripts-bridge-prep/
 start-bridge-node.ps1
 *.log
+
+# ─────────────────────────────────────────────────────────────────────────
+#  ⛔⛔ PATENT RESERVATION — NEVER COMMIT, NEVER PUSH
+# ─────────────────────────────────────────────────────────────────────────
+# This repository is PUBLIC. Publishing source is a public disclosure bearing
+# on novelty, in every jurisdiction, under any licence - that follows from
+# making it public, not from Apache-2.0. Absolute-novelty jurisdictions have
+# no grace period, so a push forecloses the filing.
+#
+# Anything in here is an invention disclosure held back until the operator
+# decides the filing position. Moving a file OUT of this directory is a
+# deliberate decision to disclose it, not a tidy-up.
+patent-private/
