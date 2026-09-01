@@ -708,11 +708,15 @@ export class Chain {
     return this.lastReorg;
   }
 
-  /** Adopt a serialized block received from a peer. */
-  async appendSerialized(serialized) {
+  /** Adopt a serialized block received from a peer.
+   *
+   *  ⛔⛔ `options` is not decoration. A replay from disk MUST pass
+   *  `{ persist: false }` - see `load()` for what a persisting replay does to
+   *  the very file it is reading. */
+  async appendSerialized(serialized, options = {}) {
     const header = deserializeHeader(serialized.header);
     const transactions = serialized.transactions.map((raw) => decodeTransaction(raw, this.chainId));
-    return this.processBlock({ header, hash: blockHash(header), transactions });
+    return this.processBlock({ header, hash: blockHash(header), transactions }, options);
   }
 
   // ----------------------------------------------------------- persistence
@@ -745,7 +749,17 @@ export class Chain {
     }
     for (const serialized of payload.blocks) {
       try {
-        await this.appendSerialized(serialized);
+        // ⛔⛔ persist: false, and it is load-bearing. This used to default to
+        // true, so replaying N blocks rewrote the whole chain file N times -
+        // O(n^2) work on every boot, and far worse than slow: at any instant
+        // during the replay the file held EXACTLY the blocks read so far.
+        // The write is atomic, so what landed on disk was not a torn file but
+        // a complete, valid, SHORT chain. Interrupt a boot and the node came
+        // back to a truncated history it could never reorg out of, because the
+        // gap exceeds maxReorgDepth. That is how node 1 lost 645 blocks on
+        // 1 Sep 2026 and started mining a fork against its own peer.
+        // Loading is a read. It writes nothing.
+        await this.appendSerialized(serialized, { persist: false });
       } catch (error) {
         throw new Error(
           `stored block #${serialized.header.number} in ${this.chainFile} is invalid under the `
