@@ -77,6 +77,17 @@ jobs:
           # the action does not resolve it against the checkout - and the run
           # failed identically while looking configured.
           GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
+          # ⛔⛔ Pinned, and not for reproducibility alone. The action's own
+          # default is 8.24.3, which SILENTLY IGNORES the top-level
+          # [[allowlists]] array this repo's config uses - it loads the file,
+          # logs "extending config with default config", applies none of the
+          # allowlists and fails. Reproduced locally: same repo, same config,
+          # same 60 commits - 8.24.3 finds 2, 8.30.1 finds 0, and 8.24.3 honours
+          # the same regex written as a singular [allowlist]. A config that
+          # parses without error and is then half-ignored is the worst shape a
+          # security control can take, so the version that understands it is
+          # named here. Bump it deliberately, with a re-run.
+          GITLEAKS_VERSION: 8.30.1
 
   hygiene:
     name: nothing private is tracked
