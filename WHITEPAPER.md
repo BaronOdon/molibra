@@ -287,15 +287,51 @@ be declared, not silent.
 ### 8.5 Network hardening
 
 Peering is HTTP push and pull. It suits a known set of nodes and is not a hostile-network
-protocol: no peer reputation, no meaningful rate limiting, no eclipse resistance. At the
+protocol: **no peer reputation and no eclipse resistance.** A node that supplied most of
+another's connections would decide what that node believes is the longest chain, without any
+hash power at all.
+
+Rate limiting is no longer on that list. The RPC bounds how much work one client address may
+ask for, charging per route and per method rather than per request — a state proof rebuilds the
+whole Merkle tree and is not the same unit of work as reading a balance, and a batch is charged
+for every call inside it. Bursts are allowed, because a wallet opening a page and a peer pulling
+blocks both arrive in bursts; the limiter is sized so that legitimate sync passes untouched,
+which was verified against a real second node rather than assumed. At the
 network's current size, proof of work is also cheap to out-hash — which is correct behaviour
 under cumulative-difficulty fork choice, and exactly why the peer set matters today.
 
 ### 8.6 Cross-network transfers
 
 A bridge is the most attacked component in this field, and it reintroduces the regulatory
-questions the non-transferable design exists to avoid. It is wanted. It is not built. This will
-say so until it is.
+questions the non-transferable design exists to avoid. This section said "it is not built" until
+it was. It is now built and settled in both directions on Ethereum mainnet.
+
+The design holds **nothing**. There is no vault and no custodian, because value crosses by
+destruction and proof rather than by deposit: units are burned on one side and minted on the
+other against a proof that the burn happened. Nearly every large bridge loss in this field was a
+custody or quorum compromise, and there is no custody here to compromise. The mint authority on
+the receiving side is the image of a hash rather than of a public key, so no signature reaches
+it — only consensus can mint, and only after a Merkle proof.
+
+⛔ **What is trusted, stated rather than glossed.** Settlement is against a **bonded attestation**
+of Molibra's chain state, not against verified proof of work. Verifying the work itself is
+implemented and trustless, and costs 168,288 gas per header — which is unaffordable at 5,760
+blocks a day, so the affordable path is the bonded one. That is strictly weaker and nobody should
+describe the bridge as proof-of-work-secured.
+
+⛔⛔ **And the honest limit of the bond.** The publisher can be slashed for *equivocation* — one
+key attesting to two different blocks at one height. A publisher who posts a single false
+attestation and never a second has committed no provable fault, and cannot be slashed for it.
+The challenge window therefore buys time to *notice* and to stop accepting, not an on-chain
+remedy. A watcher runs against every attestation and reports disagreement; that watcher is the
+thing that makes the window worth anything, and it is why it exists.
+
+⛔ **MOLI leaving is one-way.** Burning MOLI here to mint a representation elsewhere destroys it;
+returning would require the reverse instruction, which does not exist yet. Until it does, this
+says so.
+
+§8.5 remains the honest constraint on all of it: an attestation is only as good as the chain it
+attests to.
 
 ---
 

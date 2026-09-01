@@ -20,6 +20,7 @@ import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
 import { simulate } from './evm.js';
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
+import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
 
@@ -297,6 +298,27 @@ export function createRpcHandlers(node) {
 export function startRpcServer(node, { host, port }) {
   const handlers = createRpcHandlers(node);
 
+  /**
+   * ⛔ One limiter for the whole server, per client address. §8.5 said the RPC
+   * had no meaningful rate limiting; that was tolerable while the audience was
+   * a known set of nodes and stops being tolerable the moment a public trading
+   * page points browsers at the same host.
+   */
+  const limiter = node.rateLimiter ?? new RateLimiter();
+
+  const refuse = (res, retryAfter) => {
+    res.writeHead(429, {
+      'Content-Type': 'application/json',
+      'Retry-After': String(retryAfter),
+    });
+    res.end(JSON.stringify({
+      error: 'rate limit exceeded',
+      retryAfter,
+      why: 'this node bounds how much work one client can ask for; the limit is '
+        + 'per second and bursts are allowed',
+    }));
+  };
+
   const server = createServer(async (req, res) => {
     // Browser wallets are cross-origin by nature.
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -308,6 +330,11 @@ export function startRpcServer(node, { host, port }) {
     }
 
     if (req.method === 'GET') {
+      // Cost is per ROUTE: a state proof rebuilds the whole Merkle tree and is
+      // not the same unit of work as reading a balance.
+      const path = (req.url ?? '/').split('?')[0];
+      const verdict = limiter.take(clientKey(req), costOfPath(path));
+      if (!verdict.ok) return refuse(res, verdict.retryAfter);
       return handleAudit(node, req, res);
     }
 
@@ -336,6 +363,17 @@ export function startRpcServer(node, { host, port }) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: INVALID_REQUEST, message: 'invalid JSON' } }));
       return;
+    }
+
+    // ⛔ Charged AFTER parsing, because the cost depends on the method asked
+    // for, and a batch is charged for every call in it - otherwise one request
+    // carrying two hundred eth_calls would cost the same as one balance read,
+    // which is the obvious way around a per-request limiter.
+    {
+      const calls = Array.isArray(payload) ? payload : [payload];
+      const cost = calls.reduce((sum, c) => sum + costOfMethod(c?.method), 0);
+      const verdict = limiter.take(clientKey(req), cost);
+      if (!verdict.ok) return refuse(res, verdict.retryAfter);
     }
 
     // ⛔ An explicit allowlist, not a prefix match: everything else falls
