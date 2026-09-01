@@ -477,6 +477,28 @@ function handleAudit(node, req, res) {
     return;
   }
 
+  /**
+   * The inbound leg: register the asset, burn on Ethereum, commit the header,
+   * claim on Molibra. The other half of the settlement page's journey.
+   */
+  if (path === '/molibra/inbound') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'inbound.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * The MOLI/WSRO pair: deploy the pool and seed it. The page prints the price
+   * the deposit will set next to the button that sets it.
+   */
+  if (path === '/molibra/pool') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'pool.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   // The browser wallet, and the crypto it needs.
   //
   // Served from THIS node out of node_modules rather than pulled from a CDN.
