@@ -149,6 +149,10 @@ check('it refuses rather than guessing when a node publishes no activations',
 check('the gate is shown in the status panel, not only at the button',
   page.includes('stBurnGate'));
 
+check('and the gate is checked BEFORE the field validation, not after',
+  page.indexOf('burnActivation && !burnActivation.active') < page.indexOf('const b = buildBurn();\n  $'),
+  'an empty recipient must not hide the gate, nor leave the button live');
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

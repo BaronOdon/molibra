@@ -354,10 +354,14 @@ function buildBurn() {
   return { data: MOLI_BURN_TAG + addr32(to).slice(24) + word(wei), to, wei };
 }
 function showBurn() {
-  const b = buildBurn();
-  // ⛔⛔ Below the flag day this payload is not a burn. Saying "this destroys"
-  // would be false at the one moment it matters.
-  if (!b.error && burnActivation && !burnActivation.active) {
+  // ⛔⛔ The gate is checked BEFORE the fields, and the order is the point. It
+  // is not one input being wrong, it is the whole step being impossible, so
+  // reporting "the recipient is not an address" first would hide the only
+  // message that matters behind one that does not - and leave the button live
+  // on a form nobody can submit. Below the flag day this payload is not a
+  // burn, and saying "this destroys" would be false at the one moment it is
+  // acted on.
+  if (burnActivation && !burnActivation.active) {
     $('burnDecoded').innerHTML = `⛔ <b>Burning is not active yet.</b> Until Molibra height `
       + `<b>${burnActivation.height.toLocaleString()}</b> this payload is not decoded as a burn: `
       + `it takes the ordinary path, carries no value, and <b>destroys nothing</b>. You would pay `
@@ -367,6 +371,7 @@ function showBurn() {
     $('burn').disabled = true;
     return;
   }
+  const b = buildBurn();
   $('burn').disabled = false;
   $('burnDecoded').innerHTML = b.error
     ? '⛔ ' + b.error
