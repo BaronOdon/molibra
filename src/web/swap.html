@@ -3,127 +3,197 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MOLI / WSRO · swap</title>
+<title>MOLIBRA · swap</title>
 <!--
-  A PUBLIC page. Anyone may connect a wallet and trade against the pool.
+  A PUBLIC page. Anyone may connect a wallet and trade.
 
-  It holds no key, custodies nothing, and cannot move anybody's funds: every
-  transaction is signed in the reader's own wallet, and the only contract it
-  talks to is the pool itself.
+  It holds no key and custodies nothing: every transaction is signed in the
+  reader's own wallet, and the only contracts it talks to are the pools and the
+  factory.
 
-  ⛔⛔ The quoted output is ALWAYS read from the contract's own `quote()` by
-  eth_call, never recomputed here. A page that does its own constant-product
-  arithmetic will eventually disagree with the pool by a rounding step, and the
-  swap will revert on `minOut` for a reason the person cannot see. One source of
-  truth, and it is the chain.
+  ⛔⛔ Every quoted output is read from the POOL's own quote() by eth_call and
+  never recomputed here. A page doing its own constant-product arithmetic
+  eventually disagrees with the pool by a rounding step, and the swap then
+  reverts on minOut for a reason the person cannot see.
 
-  ⛔ The pool is SMALL. Slippage in a constant-product pool is scale-invariant -
-  trading 2% of the pool moves the price about 4% no matter how big the pool is -
-  so the page shows price impact as a first-class number rather than hiding it
-  behind a default tolerance.
+  ⛔ Any token trades for any other in TWO HOPS, because every pool has MOLI on
+  one side. n tokens need n pools, not n².
+
+  ⛔⛔ Expression tokens - GIZ, and anything declaring a social, purchase or
+  electoral purpose - can never appear here. They live in the chain's registry
+  and are not EVM contracts, so no pool can exist for them. Structural, not a
+  filter this page applies.
 -->
 <style>
-  :root{ --bg:#0b0b0c; --panel:#141416; --line:#26262b; --ink:#ececf0; --dim:#8b8b94;
-         --gold:#FFD100; --ok:#4ade80; --bad:#ff5c5c; --warn:#f0a500; }
+  /* Black and gold - the libertarian flag, read as a terminal. Glass panels
+     over a live perspective grid; the grid is the only motion on the page. */
+  :root{
+    --void:#07070a; --ink:#f5f3ea; --dim:#8d8a7d; --dimmer:#5a584f;
+    --gold:#FFD100; --gold-dk:#c9a600; --gold-glow:rgba(255,209,0,.35);
+    --glass:rgba(20,20,16,.55); --edge:rgba(255,209,0,.16);
+    --bad:#ff4d4d; --ok:#66ff9e; --warn:#ffa62b;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;
-       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
-  .sub{color:var(--dim);margin:0 0 20px}
-  .wrap{max-width:620px;margin:0 auto}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-        padding:16px;margin-bottom:16px}
-  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
-  input{width:100%;background:#0e0e10;border:1px solid var(--line);border-radius:8px;
-        color:var(--ink);padding:11px;font-family:ui-monospace,Menlo,monospace;font-size:16px}
-  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:11px 16px;
-         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
-  button.ghost{background:#22222a;color:var(--ink)}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
-       white-space:pre-wrap;word-break:break-all}
-  .log.bad{color:var(--bad)} .log.ok{color:var(--ok)}
-  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
-  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
-  .note.warn{border-left-color:var(--warn);background:#1c1608}
-  dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:12px 0 0;font-size:13px}
-  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;text-align:right}
-  .out{font-size:26px;font-weight:650;font-family:ui-monospace,Menlo,monospace;margin:6px 0 0}
-  .flip{display:flex;align-items:center;justify-content:center;margin:10px 0}
-  .flip button{margin:0;background:#22222a;color:var(--gold);border:1px solid var(--line);
-               border-radius:999px;width:38px;height:38px;font-size:17px;padding:0}
-  .pair{display:flex;justify-content:space-between;align-items:baseline}
-  .pair span{color:var(--dim);font-size:12px}
+  body{
+    margin:0;color:var(--ink);background:var(--void);
+    font:14px/1.6 var(--mono);padding:28px 18px 80px;position:relative;overflow-x:hidden;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgba(255,209,0,.10), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      var(--void);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px);
+    opacity:.5;
+  }
+  .wrap{max-width:640px;margin:0 auto;position:relative}
+  header{margin:0 0 26px}
+  .mark{font:700 30px/1 var(--mono);letter-spacing:.22em;color:var(--gold);
+        text-shadow:0 0 18px var(--gold-glow);margin:0}
+  .tag{color:var(--dim);font-size:11px;letter-spacing:.28em;text-transform:uppercase;margin:8px 0 0}
+  .status{margin:14px 0 0;font-size:12px;color:var(--dimmer)}
+  .status b{color:var(--ok);font-weight:500}
+  .panel{
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(14px) saturate(130%);
+    backdrop-filter:blur(14px) saturate(130%);
+    border:1px solid var(--edge);border-radius:4px;
+    padding:18px;margin-bottom:14px;position:relative;
+    box-shadow:0 0 0 1px rgba(0,0,0,.5), 0 18px 50px -30px rgba(0,0,0,.9);
+  }
+  h2{font:500 10px/1 var(--mono);letter-spacing:.3em;text-transform:uppercase;
+     color:var(--gold-dk);margin:0 0 14px}
+  label{display:block;color:var(--dim);font-size:10px;letter-spacing:.16em;
+        text-transform:uppercase;margin:14px 0 6px}
+  input,select{
+    width:100%;background:rgba(0,0,0,.45);border:1px solid var(--edge);border-radius:3px;
+    color:var(--ink);padding:12px;font:400 16px/1.2 var(--mono);
+  }
+  select{cursor:pointer}
+  input:focus,select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(255,209,0,.10)}
+  button{
+    background:var(--gold);color:#0a0a0a;border:0;border-radius:3px;padding:13px 20px;
+    font:650 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+    cursor:pointer;margin:14px 8px 0 0;
+  }
+  button:hover:not(:disabled){box-shadow:0 0 22px var(--gold-glow)}
+  button.ghost{background:transparent;color:var(--gold);border:1px solid var(--edge)}
+  button:disabled{opacity:.3;cursor:not-allowed}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .out{font:650 30px/1.15 var(--mono);color:var(--gold);margin:8px 0 0;word-break:break-all;
+       text-shadow:0 0 22px var(--gold-glow)}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin:16px 0 0;font-size:12px}
+  dt{color:var(--dimmer);letter-spacing:.1em;text-transform:uppercase;font-size:10px;align-self:center}
+  dd{margin:0;text-align:right;color:var(--ink);word-break:break-all}
+  .note{border-left:2px solid var(--gold);background:rgba(255,209,0,.05);
+        padding:11px 13px;margin:14px 0;font-size:12px;line-height:1.65}
+  .note.bad{border-left-color:var(--bad);background:rgba(255,77,77,.07)}
+  .note.warn{border-left-color:var(--warn);background:rgba(255,166,43,.07)}
+  .log{color:var(--dim);font-size:11px;margin-top:12px;white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)}
+  .flip{display:flex;justify-content:center;margin:14px 0 2px}
+  .flip button{margin:0;width:42px;height:42px;padding:0;font-size:15px;border-radius:50%;
+               background:transparent;color:var(--gold);border:1px solid var(--edge)}
+  .hint{color:var(--dimmer);font-size:11px;margin-top:8px}
+  a{color:var(--gold)}
+  @media (prefers-reduced-motion:no-preference){
+    .panel{transition:border-color .2s ease}
+    .panel:hover{border-color:rgba(255,209,0,.3)}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>MOLI / WSRO</h1>
-<p class="sub" id="banner">not connected — nothing is sent until you sign it</p>
+
+<header>
+  <p class="mark">MOLIBRA</p>
+  <p class="tag">decentralised exchange · chain 20226</p>
+  <p class="status" id="banner">not connected — <b>nothing is sent until you sign it</b></p>
+</header>
 
 <div class="note bad">
-  <b>⛔ This pool is small.</b> Slippage in a constant-product pool is the same proportion at any
-  size: trading 2% of the pool moves the price about 4% whether the pool holds a hundred units or
-  a million. Check <b>price impact</b> below before you sign — it is shown for every trade, not
-  hidden behind a tolerance.
+  <b>⛔ Pools here are small.</b> Slippage in a constant-product pool is the same proportion at any
+  size — trading 2% of a pool moves its price about 4% whether it holds a hundred units or a
+  million. <b>Price impact</b> is shown for every trade rather than hidden behind a tolerance.
+  A market existing says nothing about whether an asset is worth anything, or its contract honest.
 </div>
 
-<div class="card">
-  <h2>1 · Wallet</h2>
-  <button id="connect">Connect wallet</button>
+<div class="panel">
+  <h2>01 · wallet</h2>
+  <button id="connect">Connect</button>
   <dl>
     <dt>account</dt><dd id="acct">—</dd>
     <dt>network</dt><dd id="chain">—</dd>
     <dt>MOLI</dt><dd id="balMoli">—</dd>
-    <dt>WSRO</dt><dd id="balTok">—</dd>
   </dl>
   <div class="log" id="walletLog"></div>
 </div>
 
-<div class="card">
-  <h2>2 · Swap</h2>
-
-  <div class="pair"><label id="inLabel">You pay — MOLI</label><span id="inBal"></span></div>
+<div class="panel">
+  <h2>02 · swap</h2>
+  <div class="row">
+    <div><label>from</label><select id="fromSel"></select></div>
+    <div><label>to</label><select id="toSel"></select></div>
+  </div>
+  <label>amount — <span id="fromBal">—</span></label>
   <input id="amountIn" value="1" spellcheck="false" inputmode="decimal">
-
-  <div class="flip"><button id="flip" title="Swap direction">⇅</button></div>
-
-  <label id="outLabel">You receive — WSRO (quoted by the contract)</label>
+  <div class="flip"><button id="flip" title="Reverse">&#8645;</button></div>
+  <label>you receive — quoted by the contract, not by this page</label>
   <div class="out" id="amountOut">—</div>
-
   <dl>
+    <dt>route</dt><dd id="route">—</dd>
     <dt>rate</dt><dd id="rate">—</dd>
-    <dt>price impact</dt><dd id="impact">—</dd>
+    <dt>impact</dt><dd id="impact">—</dd>
     <dt>fee</dt><dd id="fee">—</dd>
-    <dt>minimum received</dt><dd id="minOut">—</dd>
+    <dt>min received</dt><dd id="minOut">—</dd>
   </dl>
-
-  <label>Slippage tolerance, percent — the trade reverts rather than filling worse than this</label>
+  <label>slippage tolerance %</label>
   <input id="slippage" value="0.5" spellcheck="false" inputmode="decimal">
-
   <div class="note" id="impactNote"></div>
-
-  <button id="approve" class="ghost" style="display:none">Approve WSRO</button>
-  <button id="swap" disabled>Swap</button>
+  <button id="approve" class="ghost" style="display:none">Approve</button>
+  <button id="swap" disabled>Execute</button>
   <div class="log" id="swapLog"></div>
 </div>
 
-<div class="card">
-  <h2>3 · Pool</h2>
-  <dl>
-    <dt>MOLI reserve</dt><dd id="rMoli">—</dd>
-    <dt>WSRO reserve</dt><dd id="rTok">—</dd>
-    <dt>spot price</dt><dd id="spot">—</dd>
-    <dt>pool</dt><dd id="poolAddr">—</dd>
-  </dl>
+<div class="panel">
+  <h2>03 · markets</h2>
+  <dl id="marketList"><dt>loading</dt><dd>—</dd></dl>
   <div class="note">
-    ⛔ Spot price is a <b>reserve ratio read right now</b>, not an oracle. It can be moved within a
-    single block by anybody with funds, and a contract that trusted it as a price feed would be
-    manipulable. It is shown here to inform a person, not to be consumed by code.
+    ⛔ Spot price is a <b>reserve ratio read right now</b>, not an oracle. Anybody with funds can
+    move it inside one block, and a contract trusting it as a feed would be manipulable.
   </div>
+  <label>add a token by address — permissionless, nothing is vetted</label>
+  <input id="addToken" placeholder="0x…" spellcheck="false">
+  <button id="add" class="ghost">Add token</button>
   <button id="refresh" class="ghost">Refresh</button>
   <div class="log" id="poolLog"></div>
 </div>
+
+<div class="panel">
+  <h2>04 · factory</h2>
+  <p class="hint">One pool per token, created by anyone, once. Every pool has MOLI on one side,
+  which is what makes any pair reachable in two hops.</p>
+  <label>factory address — leave blank to deploy a new one</label>
+  <input id="factoryAddr" placeholder="0x… (or deploy below)" spellcheck="false">
+  <div class="note">
+    ⛔⛔ <b>An expression token can never get a market.</b> GIZ and anything declaring a social,
+    purchase or electoral purpose live in the chain's registry and are <b>not contracts</b> —
+    there is no bytecode to pool. The factory refuses them structurally, not by a rule it could
+    forget.
+  </div>
+  <button id="deployFactory">Deploy factory</button>
+  <label>create a market for a token</label>
+  <input id="createToken" placeholder="0x…" spellcheck="false">
+  <button id="createPool" class="ghost">Create market</button>
+  <div class="log" id="factoryLog"></div>
+</div>
+
 </div>
 
 <script>
@@ -131,13 +201,12 @@ const NODE = 'http://193.123.191.142:8545';
 const MOLIBRA_CHAIN_ID = '0x4f02';   // 20226
 const POOL = '0x4f34d9bc5db2396640d8eb564667e8701528b43d';
 const TOKEN = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
-const SYMBOL = 'WSRO';
 
 /**
  * ⛔ Selectors are checked against keccak256 of their signatures by
  * test/swap-page.mjs. A plausible-but-wrong selector does not throw — it builds
- * a transaction that calls nothing, which is how settle.html once shipped a
- * `release` selector that was not remotely the right number.
+ * a transaction that calls nothing. Three of the factory selectors below were
+ * wrong when first written by hand, which is why none is hand-written now.
  */
 const SEL = {
   reserves:      '0x75172a8b',   // reserves()
@@ -149,13 +218,11 @@ const SEL = {
   balanceOf:     '0x70a08231',   // balanceOf(address)
   token:         '0xfc0c546a',   // token()
   addLiquidity:  '0x9cd441da',   // addLiquidity(uint256,uint256)
-  // factory
   allMarkets:    '0x375a7cba',   // allMarkets()
   poolOf:        '0x988b1fa7',   // poolOf(address)
   createPool:    '0x9ed93318',   // create(address)
   reservesOf:    '0x802c2ef1',   // reservesOf(address[])
   tokenCount:    '0x9f181b5e',   // tokenCount()
-  // optional ERC-20 metadata: absent on plenty of real tokens, so never required
   symbol:        '0x95d89b41',   // symbol()
   decimals:      '0x313ce567',   // decimals()
 };
@@ -164,7 +231,7 @@ const SEL = {
  * Markets known without asking the factory.
  *
  * ⛔ The MOLI/WSRO pool predates the factory and is therefore NOT in its
- * registry. A page that only listed factory pools would silently drop the one
+ * registry. A page listing only factory pools would silently drop the one
  * market that actually has liquidity today, so seeds and discovery are merged.
  */
 const SEED_MARKETS = [
@@ -172,57 +239,68 @@ const SEED_MARKETS = [
     pool: '0x4f34d9bc5db2396640d8eb564667e8701528b43d', symbol: 'WSRO' },
 ];
 
-/** Set with ?factory=0x… once it is deployed; discovery is skipped until then. */
-let FACTORY = null;
+/** Deploy bytecode, injected from the built artifact — never pasted by hand. */
+const FACTORY_BYTECODE = '0x60808060405234601557611234908161001b8239f35b600080fdfe6080604052600436101561001257600080fd5b60003560e01c8063375a7cba146104435780634f64b2be14610401578063802c2ef114610282578063988b1fa71461023c5780639ed933181461008157639f181b5e1461005e57600080fd5b3461007c57600036600319011261007c576020600154604051908152f35b600080fd5b3461007c57602036600319011261007c576004356001600160a01b0381169081810361007c57811561022b576000828152602081905260409020546001600160a01b0316610200573b156101ef57604051610bdb8082019082821067ffffffffffffffff8311176101cd57602091839161062483398481520301906000f080156101e35760018060a01b03168160005260006020526040600020816bffffffffffffffffffffffff60a01b825416179055600154680100000000000000008110156101cd57806001610156920160015561053e565b81546001600160a01b0360039290921b91821b19169084901b17905560015460001981019081116101b7576020927ff8a0462f666b427ea753848be7e91f9ce413975906f6f39950be296ca9a4d524848493604051908152a3604051908152f35b634e487b7160e01b600052601160045260246000fd5b634e487b7160e01b600052604160045260246000fd5b6040513d6000823e3d90fd5b6309ee12d560e01b60005260046000fd5b5060009081526020819052604081205463fcdc5dc560e01b82526001600160a01b0316600452602490fd5b63d92e233d60e01b60005260046000fd5b3461007c57602036600319011261007c576004356001600160a01b0381169081900361007c576000526000602052602060018060a01b0360406000205416604051908152f35b3461007c57602036600319011261007c5760043567ffffffffffffffff811161007c573660238201121561007c57806004013567ffffffffffffffff811161007c573660248260051b8401011161007c576102dc816105dd565b916102e6826105dd565b9260005b838110156103d3576000906024600582901b850101356001600160a01b038116908190036103cf578252602082905260408220546001600160a01b031680156103c557604080516375172a8b60e01b815291829060049082905afa9081156103ba57838092610376575b5050600192610363838661060f565b5261036e828861060f565b525b016102ea565b91509192506040823d82116103b2575b81610393604093836105a3565b810103126103af57509081602060019351910151909288610354565b80fd5b3d9150610386565b6040513d85823e3d90fd5b5060019150610370565b8280fd5b6103ef826103fd8760405193849360408552604085019061056f565b90838203602085015261056f565b0390f35b3461007c57602036600319011261007c5760043560015481101561007c5761042a60209161053e565b905460405160039290921b1c6001600160a01b03168152f35b3461007c57600036600319011261007c57600154610460816105dd565b9061046a816105dd565b9060005b81811061049f57610491846103fd85604051938493604085526040850190610501565b908382036020850152610501565b806104ab60019261053e565b838060a01b0391549060031b1c166104c3828761060f565b526104cd8161053e565b838060a01b0391549060031b1c166000526000602052818060a01b03604060002054166104fa828661060f565b520161046e565b906020808351928381520192019060005b81811061051f5750505090565b82516001600160a01b0316845260209384019390920191600101610512565b60015481101561055957600160005260206000200190600090565b634e487b7160e01b600052603260045260246000fd5b906020808351928381520192019060005b81811061058d5750505090565b8251845260209384019390920191600101610580565b90601f8019910116810190811067ffffffffffffffff8211176101cd57604052565b67ffffffffffffffff81116101cd5760051b60200190565b906105e7826105c5565b6105f460405191826105a3565b8281528092610605601f19916105c5565b0190602036910137565b80518210156105595760209160051b01019056fe60a034608457601f610bdb38819003918201601f19168301916001600160401b03831184841017608957808492602094604052833981010312608457516001600160a01b03811690819003608457608052604051610b3b90816100a08239608051818181610101015281816101c90152818161040e015281816106dc01526108980152f35b600080fd5b634e487b7160e01b600052604160045260246000fdfe6080604052600436101561002a575b361561001957600080fd5b631dc930eb60e01b60005260046000fd5b60003560e01c80631605b17f146109645780633a98ef39146109465780636446f3fe1461080b57806375172a8b146107e657806378f954c6146107c8578063857620e1146105f85780639cd441da1461034d578063ad615dec1461032c578063ba9a7a5614610327578063ce7c2ac2146102e9578063dfe1601e1461014e578063f4325d6714610130578063fc0c546a146100eb5763fe08b58c0361000e57346100e65760003660031901126100e65760206040516103e58152f35b600080fd5b346100e65760003660031901126100e6576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b346100e65760003660031901126100e6576020600154604051908152f35b346100e65761015c3661099b565b60045460ff81166102d85760ff19166001176004558115610019576101876001546000549084610a8e565b9081159081156102ce575b50610019576040516323b872dd60e01b81523360048201523060248201526044810183905260208160648160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c257600091610293575b50156102825761020c826001546109b1565b60015561021b816000546109be565b600055600080808084335af161022f610a4e565b5015610282576020916040519060008252838201528160408201527ff067e8ca829f67e4f9be38e977ceedd503b4602e190ac8c71415bc72d2b8663a60603392a260ff1960045416600455604051908152f35b6312171d8360e31b60005260046000fd5b6102b5915060203d6020116102bb575b6102ad81836109cb565b810190610a03565b836101fa565b503d6102a3565b6040513d6000823e3d90fd5b9050811083610192565b63769dd35360e11b60005260046000fd5b346100e65760203660031901126100e6576004356001600160a01b038116908190036100e65760005260036020526020604060002054604051908152f35b610964565b346100e657602061034561033f36610981565b91610a8e565b604051908152f35b6103563661099b565b60045460ff81166102d85760ff19166001176004556000341580156105f0575b6105e157600254908161054957505061038f8234610a1b565b6000600382111561053b5750808060011c6001810180911161050657905b82821061051c5750505b6103e8811115610019576103e719810190811161050657906103e86002555b8110610019576040516323b872dd60e01b81523360048201523060248201526044810183905260208160648160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c2576000916104e7575b501561028257602091610454346000546109b1565b600055610463816001546109b1565b600155610472826002546109b1565b6002553360005260038352604060002061048d8382546109b1565b90557f5a3358a3d27a5373c0df2604662088d37894d56b7cfd27f315770440f4e0d919604051806104d285339534846040919493926060820195825260208201520152565b0390a260ff1960045416600455604051908152f35b610500915060203d6020116102bb576102ad81836109cb565b8361043f565b634e487b7160e01b600052601160045260246000fd5b9091506105328261052d8184610a2e565b6109b1565b60011c906103ad565b90156103b7575060016103b7565b61057461056b61056461055c8534610a1b565b845490610a2e565b9386610a1b565b60015490610a2e565b908183036105a7575b508082101561059f5750905b816103d657631dc930eb60e01b60005260046000fd5b905090610589565b818311156105d05760016105bb83856109be565b111561057d57639698399d60e01b8152600490fd5b60016105dc84846109be565b6105bb565b631dc930eb60e01b8152600490fd5b508215610376565b346100e65761060636610981565b9060045460ff81166102d85760ff1916600117600455821580156107b1575b6100195761063560005484610a1b565b916106586106466002548095610a2e565b9361065360015487610a1b565b610a2e565b9183109081156107a7575b506100195733600052600360205260406000206106818482546109be565b905561068f836002546109be565b60025561069e826000546109be565b6000556106ad816001546109be565b60015560405163a9059cbb60e01b81523360048201526024810182905260208160448160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c257600091610788575b501561028257600080808085335af1610724610a4e565b5015610282576040927f4c60206a5c1de41f3376d1d60f0949d96cb682033c90b1c2d9d9a62d4c4120c084518061076f33948688846040919493926060820195825260208201520152565b0390a260ff196004541660045582519182526020820152f35b6107a1915060203d6020116102bb576102ad81836109cb565b8461070d565b9050811084610663565b503360005260036020528260406000205410610625565b346100e65760003660031901126100e6576020600054604051908152f35b346100e65760003660031901126100e657604060005460015482519182526020820152f35b60203660031901126100e65760045460ff81166102d85760ff1916600117600455341561001957600054600154610843818334610a8e565b918215801561093b575b6100195761086991610861849234906109b1565b6000556109be565b60015560405163a9059cbb60e01b81523360048201526024810182905260208160448160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c25760009161091c575b5015610282576020906040516001815234838201528160408201527ff067e8ca829f67e4f9be38e977ceedd503b4602e190ac8c71415bc72d2b8663a60603392a260ff1960045416600455604051908152f35b610935915060203d6020116102bb576102ad81836109cb565b826108c9565b50600435831061084d565b346100e65760003660031901126100e6576020600254604051908152f35b346100e65760003660031901126100e65760206040516103e88152f35b60609060031901126100e657600435906024359060443590565b60409060031901126100e6576004359060243590565b9190820180921161050657565b9190820391821161050657565b90601f8019910116810190811067ffffffffffffffff8211176109ed57604052565b634e487b7160e01b600052604160045260246000fd5b908160209103126100e6575180151581036100e65790565b8181029291811591840414171561050657565b8115610a38570490565b634e487b7160e01b600052601260045260246000fd5b3d15610a89573d9067ffffffffffffffff82116109ed5760405191610a7d601f8201601f1916602001846109cb565b82523d6000602084013e565b606090565b918215808015610afd575b8015610af5575b610aec576103e584029384046103e514171561050657610ac09083610a1b565b906103e88102908082046103e8149015171561050657610ae992610ae3916109b1565b90610a2e565b90565b50505050600090565b508115610aa0565b508215610a9956fea26469706673582212201ba45e4efc5bb216f2fb87bc81042b33c975aa7a27809c040e9ebfac9254dbac64736f6c634300081a0033a2646970667358221220d338c6c6874ae1aeb60932c19b1870de9eb3a6bb99223463b6905cbe6709804c64736f6c634300081a0033';
 
 const $ = (id) => document.getElementById(id);
 const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
 const word = (v) => BigInt(v).toString(16).padStart(64, '0');
 const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
 const hex = (v) => '0x' + BigInt(v).toString(16);
+const isAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a || '').trim());
 const UNIT = 10n ** 18n;
+const MOLI = 'MOLI';
 
-/** Decimal string -> wei, without floating point anywhere near the amount. */
+/** Decimal string -> wei. ⛔ No floating point anywhere near an amount. */
 function toWei(s) {
   const t = String(s ?? '').trim();
   if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return null;
-  const [w, f = ''] = t.split('.');
+  const parts = t.split('.');
+  const w = parts[0];
+  const f = parts[1] || '';
   const frac = (f + '0'.repeat(18)).slice(0, 18);
   const v = BigInt(w || '0') * UNIT + BigInt(frac || '0');
   return v > 0n ? v : null;
 }
-/** wei -> readable, without losing precision to Number on the way. */
-function fromWei(v, places = 6) {
+function fromWei(v, places) {
+  const p = places === undefined ? 6 : places;
   const n = BigInt(v);
-  const w = n / UNIT;
-  const f = (n % UNIT).toString().padStart(18, '0').slice(0, places).replace(/0+$/, '');
-  return f ? `${w}.${f}` : `${w}`;
+  const whole = n / UNIT;
+  const f = (n % UNIT).toString().padStart(18, '0').slice(0, p).replace(/0+$/, '');
+  return f ? whole + '.' + f : String(whole);
 }
 
 let account = null;
-let moliIn = true;   // direction: true = MOLI -> WSRO
-let reserves = { moli: 0n, tok: 0n };
-let lastQuote = 0n;
+let markets = [];
+let lastPlan = null;
 
-const eth = () => {
-  if (!window.ethereum) throw new Error('no wallet in this browser');
-  return window.ethereum;
-};
+const eth = () => { if (!window.ethereum) throw new Error('no wallet in this browser'); return window.ethereum; };
 
 async function rpc(method, params) {
   const r = await fetch(NODE + '/molibra', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params }),
   });
   const j = await r.json();
   if (j.error) throw new Error(j.error.message);
   return j.result;
 }
-const call = (to, data) => rpc('eth_call', [{ to, data }, 'latest']);
+const call = (to, data) => rpc('eth_call', [{ to: to, data: data }, 'latest']);
+
+/** ⛔ symbol() is OPTIONAL on real tokens, so a failure must degrade, not refuse. */
+function decodeString(hexStr) {
+  try {
+    const b = hexStr.replace(/^0x/, '');
+    const len = parseInt(b.slice(64, 128), 16);
+    if (!len || len > 64) return null;
+    const bytes = b.slice(128, 128 + len * 2).match(/../g).map((x) => parseInt(x, 16));
+    return String.fromCharCode.apply(null, bytes).replace(/[^\x20-\x7e]/g, '') || null;
+  } catch (e) { return null; }
+}
 
 async function requireMolibra() {
   if (!account) throw new Error('connect the wallet first');
-  let id = await eth().request({ method: 'eth_chainId' });
+  const id = await eth().request({ method: 'eth_chainId' });
   if (BigInt(id) === BigInt(MOLIBRA_CHAIN_ID)) return;
   try {
     await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MOLIBRA_CHAIN_ID }] });
@@ -235,143 +313,250 @@ async function requireMolibra() {
       }] });
     } else throw e;
   }
-  id = await eth().request({ method: 'eth_chainId' });
-  if (BigInt(id) !== BigInt(MOLIBRA_CHAIN_ID)) throw new Error('still not on Molibra');
+  if (BigInt(await eth().request({ method: 'eth_chainId' })) !== BigInt(MOLIBRA_CHAIN_ID)) {
+    throw new Error('still not on Molibra');
+  }
 }
 
 $('connect').onclick = async () => {
   try {
-    const a = await eth().request({ method: 'eth_requestAccounts' });
-    account = a[0];
-    $('acct').textContent = account;
+    const accs = await eth().request({ method: 'eth_requestAccounts' });
+    account = accs[0];
+    $('acct').textContent = account.slice(0, 10) + '…' + account.slice(-6);
     await requireMolibra();
-    $('banner').textContent = 'connected — nothing is sent until you sign it';
+    $('banner').innerHTML = 'connected — <b>nothing is sent until you sign it</b>';
     await refresh();
-    say('walletLog', 'connected');
   } catch (e) { say('walletLog', e.message, true); }
 };
 
-/* ------------------------------------------------------------- reading */
+/* ----------------------------------------------------------- discovery */
+
+async function discover() {
+  const seen = new Map();
+  for (const m of SEED_MARKETS) seen.set(m.token.toLowerCase(), Object.assign({}, m));
+
+  const f = $('factoryAddr').value.trim();
+  if (isAddr(f)) {
+    try {
+      // allMarkets() returns both arrays in one call, so a list of n tokens
+      // costs one request rather than n.
+      const raw = (await call(f, SEL.allMarkets)).replace(/^0x/, '');
+      const count = parseInt(raw.slice(128, 192), 16);
+      const poolOff = 192 + count * 64 + 64;
+      for (let i = 0; i < count; i++) {
+        const tok = '0x' + raw.slice(192 + i * 64 + 24, 192 + i * 64 + 64);
+        const pool = '0x' + raw.slice(poolOff + i * 64 + 24, poolOff + i * 64 + 64);
+        if (!seen.has(tok)) seen.set(tok, { token: tok, pool: pool, symbol: null });
+      }
+    } catch (e) { say('poolLog', 'factory read failed: ' + e.message, true); }
+  }
+
+  let extras = [];
+  try { extras = JSON.parse(localStorage.getItem('molibra.tokens') || '[]'); } catch (e) { extras = []; }
+  for (const t of extras) {
+    if (isAddr(t) && !seen.has(t.toLowerCase())) {
+      seen.set(t.toLowerCase(), { token: t.toLowerCase(), pool: null, symbol: null });
+    }
+  }
+  return Array.from(seen.values());
+}
 
 async function refresh() {
   try {
-    const raw = (await call(POOL, SEL.reserves)).replace(/^0x/, '');
-    reserves = { moli: BigInt('0x' + raw.slice(0, 64)), tok: BigInt('0x' + raw.slice(64, 128)) };
-    $('rMoli').textContent = fromWei(reserves.moli) + ' MOLI';
-    $('rTok').textContent = fromWei(reserves.tok) + ' ' + SYMBOL;
-    $('poolAddr').textContent = POOL.slice(0, 10) + '…' + POOL.slice(-6);
-    $('spot').textContent = reserves.moli > 0n
-      ? `1 MOLI = ${fromWei(reserves.tok * UNIT / reserves.moli)} ${SYMBOL}`
-      : 'empty';
-
-    const id = await eth?.().request?.({ method: 'eth_chainId' }).catch(() => null);
-    if (id) $('chain').textContent = BigInt(id) === BigInt(MOLIBRA_CHAIN_ID) ? 'Molibra (20226)' : `chain ${BigInt(id)} — not Molibra`;
-
-    if (account) {
-      const bal = await rpc('eth_getBalance', [account, 'latest']);
-      $('balMoli').textContent = fromWei(BigInt(bal)) + ' MOLI';
-      const tb = await call(TOKEN, SEL.balanceOf + addr32(account));
-      $('balTok').textContent = fromWei(BigInt(tb)) + ' ' + SYMBOL;
+    markets = await discover();
+    for (const m of markets) {
+      if (!m.symbol) {
+        const s = await call(m.token, SEL.symbol).catch(() => null);
+        m.symbol = (s && decodeString(s)) || m.token.slice(0, 8);
+      }
+      if (!m.pool) {
+        const f = $('factoryAddr').value.trim();
+        if (isAddr(f)) {
+          const p = '0x' + (await call(f, SEL.poolOf + addr32(m.token)).catch(() => '0x' + '0'.repeat(64))).slice(-40);
+          if (/^0x0{40}$/.test(p) === false) m.pool = p;
+        }
+      }
+      if (m.pool) {
+        try {
+          const raw = (await call(m.pool, SEL.reserves)).replace(/^0x/, '');
+          m.rMoli = BigInt('0x' + raw.slice(0, 64));
+          m.rTok = BigInt('0x' + raw.slice(64, 128));
+        } catch (e) { m.rMoli = 0n; m.rTok = 0n; }
+      } else { m.rMoli = 0n; m.rTok = 0n; }
     }
-    say('poolLog', 'read from the chain just now');
+
+    const dl = $('marketList');
+    dl.innerHTML = '';
+    for (const m of markets) {
+      const price = m.rMoli > 0n ? fromWei(m.rTok * UNIT / m.rMoli, 6) + ' per MOLI' : 'no liquidity';
+      const depth = m.rMoli > 0n ? fromWei(m.rMoli, 2) + ' MOLI · ' : '';
+      dl.insertAdjacentHTML('beforeend', '<dt>' + m.symbol + '</dt><dd>' + depth + price + '</dd>');
+    }
+    if (!markets.length) dl.innerHTML = '<dt>none</dt><dd>deploy a factory or add a token</dd>';
+
+    fillSelectors();
+    if (account) {
+      $('balMoli').textContent = fromWei(BigInt(await rpc('eth_getBalance', [account, 'latest']))) + ' MOLI';
+      const id = await eth().request({ method: 'eth_chainId' });
+      $('chain').textContent = BigInt(id) === BigInt(MOLIBRA_CHAIN_ID) ? 'Molibra 20226' : 'chain ' + BigInt(id);
+    }
+    say('poolLog', markets.length + ' market(s), read from the chain just now');
     await requote();
   } catch (e) { say('poolLog', e.message, true); }
 }
-$('refresh').onclick = refresh;
+$('refresh').onclick = () => refresh();
 
-/* -------------------------------------------------------------- quoting */
+function fillSelectors() {
+  let opts = '<option value="' + MOLI + '">MOLI</option>';
+  for (const m of markets) opts += '<option value="' + m.token + '">' + m.symbol + '</option>';
+  for (const id of ['fromSel', 'toSel']) {
+    const cur = $(id).value;
+    $(id).innerHTML = opts;
+    if (cur) $(id).value = cur;
+  }
+  if (!$('fromSel').value) $('fromSel').value = MOLI;
+  if (!$('toSel').value || $('toSel').value === $('fromSel').value) {
+    $('toSel').value = markets.length ? markets[0].token : MOLI;
+  }
+}
+
+/* -------------------------------------------------------------- routing */
+
+const marketFor = (t) => markets.find((m) => m.token.toLowerCase() === String(t).toLowerCase());
+const symbolOf = (t) => {
+  if (t === MOLI) return MOLI;
+  const m = marketFor(t);
+  return m ? m.symbol : String(t).slice(0, 8);
+};
 
 /**
- * ⛔⛔ The output comes from the CONTRACT's quote(), by eth_call. The page never
- * does its own constant-product arithmetic: a page that computed it locally
- * would eventually disagree with the pool by one rounding step, and the swap
- * would revert on minOut for a reason nobody could see.
+ * ⛔ Every pool has MOLI on one side, so a route is at most two hops and no
+ * pair registry is needed. MOLI↔token is one hop; token→token is two, via MOLI.
  */
-async function requote() {
-  const amount = toWei($('amountIn').value);
-  const inTok = moliIn ? 'MOLI' : SYMBOL;
-  const outTok = moliIn ? SYMBOL : 'MOLI';
-  $('inLabel').textContent = `You pay — ${inTok}`;
-  $('outLabel').textContent = `You receive — ${outTok} (quoted by the contract)`;
+function planRoute(from, to) {
+  if (from === to) return null;
+  if (from === MOLI) { const m = marketFor(to); return (m && m.pool) ? [{ pool: m.pool, moliIn: true, m: m }] : null; }
+  if (to === MOLI) { const m = marketFor(from); return (m && m.pool) ? [{ pool: m.pool, moliIn: false, m: m }] : null; }
+  const a = marketFor(from); const b = marketFor(to);
+  if (!a || !b || !a.pool || !b.pool) return null;
+  return [{ pool: a.pool, moliIn: false, m: a }, { pool: b.pool, moliIn: true, m: b }];
+}
 
-  if (!amount || reserves.moli === 0n) {
-    $('amountOut').textContent = '—';
-    $('rate').textContent = $('impact').textContent = $('fee').textContent = $('minOut').textContent = '—';
-    $('impactNote').textContent = '';
-    $('swap').disabled = true;
-    lastQuote = 0n;
-    return;
+/** ⛔⛔ Quoted by the POOL, hop by hop. The page never does the arithmetic. */
+async function quoteRoute(plan, amount) {
+  let amt = amount;
+  for (const hop of plan) {
+    const rIn = hop.moliIn ? hop.m.rMoli : hop.m.rTok;
+    const rOut = hop.moliIn ? hop.m.rTok : hop.m.rMoli;
+    if (rIn === 0n || rOut === 0n) return 0n;
+    amt = BigInt(await call(hop.pool, SEL.quote + word(amt) + word(rIn) + word(rOut)));
+    if (amt === 0n) return 0n;
   }
+  return amt;
+}
 
-  const rIn = moliIn ? reserves.moli : reserves.tok;
-  const rOut = moliIn ? reserves.tok : reserves.moli;
-  const out = BigInt(await call(POOL, SEL.quote + word(amount) + word(rIn) + word(rOut)));
-  lastQuote = out;
+/** Output with no fee and no depth effect, purely for the impact comparison. */
+function spotOf(plan, amount) {
+  let amt = amount;
+  for (const hop of plan) {
+    const rIn = hop.moliIn ? hop.m.rMoli : hop.m.rTok;
+    const rOut = hop.moliIn ? hop.m.rTok : hop.m.rMoli;
+    if (rIn === 0n) return 0n;
+    amt = amt * rOut / rIn;
+  }
+  return amt;
+}
 
-  $('amountOut').textContent = out === 0n ? '0' : fromWei(out) + ' ' + outTok;
-  $('rate').textContent = `1 ${inTok} = ${fromWei(out * UNIT / amount)} ${outTok}`;
+async function requote() {
+  const from = $('fromSel').value; const to = $('toSel').value;
+  const amount = toWei($('amountIn').value);
+  const reset = (msg) => {
+    $('amountOut').textContent = '—';
+    for (const k of ['route', 'rate', 'impact', 'fee', 'minOut']) $(k).textContent = '—';
+    $('impactNote').className = 'note';
+    $('impactNote').textContent = msg || '';
+    $('swap').disabled = true; lastPlan = null;
+  };
+  if (!from || !to || from === to) return reset('pick two different assets');
+  const plan = planRoute(from, to);
+  if (!plan) return reset('no route — one of these has no pool yet. Create a market in 04.');
+  if (!amount) return reset('');
 
-  // Price impact: how far the executed rate sits below the spot rate. Computed
-  // in integers scaled by 10^6 so a big trade cannot overflow a Number.
-  const spotOut = amount * rOut / rIn;
-  const impactBp = spotOut > 0n ? Number((spotOut - out) * 10000n / spotOut) / 100 : 0;
+  const out = await quoteRoute(plan, amount);
+  lastPlan = { plan: plan, amount: amount, out: out, from: from, to: to };
+  if (out === 0n) return reset('this pool cannot fill that amount');
+
+  $('route').textContent = plan.length === 1
+    ? symbolOf(from) + ' → ' + symbolOf(to)
+    : symbolOf(from) + ' → MOLI → ' + symbolOf(to);
+  $('amountOut').textContent = fromWei(out) + ' ' + symbolOf(to);
+  $('rate').textContent = '1 ' + symbolOf(from) + ' = ' + fromWei(out * UNIT / amount) + ' ' + symbolOf(to);
+
+  const spot = spotOf(plan, amount);
+  const impactBp = spot > 0n ? Number((spot - out) * 10000n / spot) / 100 : 0;
   $('impact').textContent = impactBp.toFixed(2) + '%';
-  $('fee').textContent = '0.3% (997/1000), already inside the quote';
+  $('fee').textContent = plan.length === 1 ? '0.30% (inside the quote)' : '0.60% — two hops';
 
   const slip = Number($('slippage').value);
   const ok = Number.isFinite(slip) && slip >= 0 && slip < 100;
   const minOut = ok ? out * BigInt(Math.round((100 - slip) * 100)) / 10000n : 0n;
-  $('minOut').textContent = ok ? fromWei(minOut) + ' ' + outTok : 'set a tolerance';
+  $('minOut').textContent = ok ? fromWei(minOut) + ' ' + symbolOf(to) : 'set a tolerance';
 
   const note = $('impactNote');
   if (impactBp >= 10) {
     note.className = 'note bad';
-    note.innerHTML = `⛔⛔ <b>Price impact ${impactBp.toFixed(2)}%.</b> You are trading a large `
-      + 'fraction of this pool and will receive far less than the spot rate suggests. '
-      + 'Consider a smaller amount — the impact falls roughly in proportion.';
+    note.innerHTML = '⛔⛔ <b>Impact ' + impactBp.toFixed(2) + '%.</b> You are trading a large '
+      + 'fraction of this pool and will receive far less than spot. A smaller amount reduces it '
+      + 'roughly in proportion.';
   } else if (impactBp >= 2) {
     note.className = 'note warn';
-    note.innerHTML = `⚠ <b>Price impact ${impactBp.toFixed(2)}%.</b> This is a thin pool; the rate `
-      + 'you get is meaningfully worse than spot.';
+    note.innerHTML = '⚠ <b>Impact ' + impactBp.toFixed(2) + '%.</b> Thin pool — the rate is '
+      + 'meaningfully worse than spot.';
   } else {
     note.className = 'note';
-    note.innerHTML = `Price impact ${impactBp.toFixed(2)}%. The quote above is what the contract `
+    note.innerHTML = 'Impact ' + impactBp.toFixed(2) + '%. The figure above is what the contract '
       + 'itself returns for this amount.';
   }
 
-  $('swap').disabled = !account || out === 0n || !ok;
-  await refreshAllowance(amount);
+  if (account && from !== MOLI) {
+    const bal = BigInt(await call(from, SEL.balanceOf + addr32(account)));
+    $('fromBal').textContent = 'balance ' + fromWei(bal) + ' ' + symbolOf(from);
+  } else if (account) {
+    $('fromBal').textContent = 'balance ' + $('balMoli').textContent;
+  }
+
+  $('swap').disabled = !account || !ok;
+  await refreshAllowance();
 }
 
-$('amountIn').oninput = () => requote().catch((e) => say('swapLog', e.message, true));
-$('slippage').oninput = () => requote().catch((e) => say('swapLog', e.message, true));
-$('flip').onclick = () => { moliIn = !moliIn; requote().catch(() => {}); };
+for (const id of ['amountIn', 'slippage']) $(id).oninput = () => requote().catch((e) => say('swapLog', e.message, true));
+for (const id of ['fromSel', 'toSel']) $(id).onchange = () => requote().catch((e) => say('swapLog', e.message, true));
+$('flip').onclick = () => {
+  const a = $('fromSel').value; $('fromSel').value = $('toSel').value; $('toSel').value = a;
+  requote().catch(() => {});
+};
 
 /* ------------------------------------------------------------ approval */
 
-async function refreshAllowance(amount) {
+async function refreshAllowance() {
   const btn = $('approve');
-  if (moliIn || !account) { btn.style.display = 'none'; return; }
-  // Selling the token needs an allowance; selling native MOLI does not.
-  const a = BigInt(await call(TOKEN, SEL.allowance + addr32(account) + addr32(POOL)));
-  if (a >= amount) { btn.style.display = 'none'; return; }
-  btn.style.display = 'inline-block';
-  btn.textContent = `Approve ${SYMBOL}`;
+  if (!lastPlan || !account || lastPlan.from === MOLI) { btn.style.display = 'none'; return; }
+  const spender = lastPlan.plan[0].pool;
+  const a = BigInt(await call(lastPlan.from, SEL.allowance + addr32(account) + addr32(spender)));
+  btn.style.display = a >= lastPlan.amount ? 'none' : 'inline-block';
+  btn.textContent = 'Approve ' + symbolOf(lastPlan.from);
 }
 
 $('approve').onclick = async () => {
   try {
     await requireMolibra();
-    const amount = toWei($('amountIn').value);
-    if (!amount) throw new Error('enter an amount first');
-    // ⛔ Approve exactly this trade, not an unlimited allowance. An infinite
-    // approval is convenient once and permanent afterwards: it leaves the pool
-    // able to move that token from this wallet forever.
-    const data = SEL.approve + addr32(POOL) + word(amount);
-    say('swapLog', `approving exactly ${fromWei(amount)} ${SYMBOL} — not unlimited…`);
-    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: TOKEN, data }] });
+    if (!lastPlan) throw new Error('nothing to approve');
+    // ⛔ Exactly this trade, never an unlimited allowance. Infinite approval is
+    // convenient once and permanent afterwards.
+    const data = SEL.approve + addr32(lastPlan.plan[0].pool) + word(lastPlan.amount);
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: lastPlan.from, data: data }] });
     await waitFor(h, 'approve');
-    say('swapLog', 'approved. You can swap now.');
+    say('swapLog', 'approved for exactly this amount.');
     await requote();
   } catch (e) { say('swapLog', e.message, true); }
 };
@@ -379,13 +564,10 @@ $('approve').onclick = async () => {
 /* ---------------------------------------------------------------- swap */
 
 async function waitFor(hash, label) {
-  say('swapLog', `${label}: sent ${hash}\nwaiting to be mined…`);
+  say('swapLog', label + ': ' + hash + '\nwaiting…');
   for (let i = 0; i < 60; i++) {
     const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
-    if (r) {
-      if (r.status !== '0x1') throw new Error(`${label} reverted`);
-      return r;
-    }
+    if (r) { if (r.status !== '0x1') throw new Error(label + ' reverted'); return r; }
     await new Promise((res) => setTimeout(res, 3000));
   }
   throw new Error('not mined within three minutes');
@@ -394,44 +576,95 @@ async function waitFor(hash, label) {
 $('swap').onclick = async () => {
   try {
     await requireMolibra();
-    const amount = toWei($('amountIn').value);
-    if (!amount) throw new Error('enter an amount');
-
-    // ⛔ Re-quote immediately before signing. The reserves may have moved since
-    // the number on screen was fetched, and minOut must be derived from what is
-    // true now — otherwise the tolerance protects against the wrong price.
+    // ⛔ Re-quote immediately before signing: reserves may have moved since the
+    // number on screen was fetched, and minOut must come from what is true now.
     await refresh();
-    const out = lastQuote;
-    if (out === 0n) throw new Error('the pool cannot fill this trade');
+    const out = lastPlan ? lastPlan.out : 0n;
+    if (!lastPlan || out === 0n) throw new Error('no fillable route');
+    const plan = lastPlan.plan;
     const slip = Number($('slippage').value);
-    const minOut = out * BigInt(Math.round((100 - slip) * 100)) / 10000n;
+    let carried = lastPlan.amount;
 
-    let tx;
-    if (moliIn) {
-      tx = { from: account, to: POOL, value: hex(amount), data: SEL.swapMoliIn + word(minOut) };
-    } else {
-      tx = { from: account, to: POOL, data: SEL.swapTokenIn + word(amount) + word(minOut) };
+    for (let i = 0; i < plan.length; i++) {
+      const hop = plan[i];
+      const last = i === plan.length - 1;
+      const hopOut = await quoteRoute([hop], carried);
+      // ⛔ Only the FINAL hop carries the tolerance. An intermediate hop bounded
+      // by a guess would revert on ordinary movement halfway through a route,
+      // leaving the trader holding MOLI they did not ask for.
+      const minOut = last ? out * BigInt(Math.round((100 - slip) * 100)) / 10000n : 0n;
+      const tx = hop.moliIn
+        ? { from: account, to: hop.pool, value: hex(carried), data: SEL.swapMoliIn + word(minOut) }
+        : { from: account, to: hop.pool, data: SEL.swapTokenIn + word(carried) + word(minOut) };
+      say('swapLog', 'hop ' + (i + 1) + '/' + plan.length + ': awaiting signature…');
+      const h = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
+      await waitFor(h, 'hop ' + (i + 1));
+      carried = hopOut;
     }
-    say('swapLog', `swapping ${fromWei(amount)} ${moliIn ? 'MOLI' : SYMBOL} for at least `
-      + `${fromWei(minOut)} ${moliIn ? SYMBOL : 'MOLI'}…\nawaiting signature.`);
-    const h = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
-    await waitFor(h, 'swap');
-    say('swapLog', 'swapped. The pool paid at least your minimum, or it would have reverted.');
+    say('swapLog', 'done. The pool paid at least your minimum, or it would have reverted.');
     await refresh();
   } catch (e) {
     const m = String(e.message || '');
     say('swapLog', /Insufficient|revert/i.test(m)
       ? m + '\n\n⛔ A revert here usually means the price moved past your tolerance between '
-        + 'quoting and mining, which is the tolerance doing its job. Re-quote and try again.'
+        + 'quoting and mining — the tolerance doing its job. Re-quote and try again.'
       : m, true);
   }
 };
 
+/* ------------------------------------------------------------- factory */
+
+$('deployFactory').onclick = async () => {
+  try {
+    await requireMolibra();
+    if (FACTORY_BYTECODE.indexOf('0x') !== 0) throw new Error('no bytecode built into this page');
+    say('factoryLog', 'deploying MolibraPoolFactory — awaiting signature…');
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, data: FACTORY_BYTECODE }] });
+    const r = await waitFor(h, 'deploy');
+    $('factoryAddr').value = r.contractAddress;
+    say('factoryLog', 'factory at ' + r.contractAddress + '\nGas used: ' + BigInt(r.gasUsed).toLocaleString()
+      + '\nAdd ?factory=' + r.contractAddress + ' to the URL to keep it.');
+    await refresh();
+  } catch (e) { say('factoryLog', e.message, true); }
+};
+
+$('createPool').onclick = async () => {
+  try {
+    await requireMolibra();
+    const f = $('factoryAddr').value.trim();
+    const t = $('createToken').value.trim();
+    if (!isAddr(f)) throw new Error('deploy or paste a factory address first');
+    if (!isAddr(t)) throw new Error('that is not a token address');
+    say('factoryLog', 'creating the market — awaiting signature…');
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: f, data: SEL.createPool + addr32(t) }] });
+    await waitFor(h, 'create');
+    say('factoryLog', 'market created. It is listed in 03 now.');
+    await refresh();
+  } catch (e) {
+    const m = String(e.message || '');
+    say('factoryLog', /revert/i.test(m)
+      ? m + '\n\n⛔ A revert usually means that token already has a market, or it is not a contract '
+        + 'at all — which is exactly what an expression token looks like, and why one can never be pooled.'
+      : m, true);
+  }
+};
+
+$('add').onclick = () => {
+  const t = $('addToken').value.trim();
+  if (!isAddr(t)) return say('poolLog', 'that is not an address', true);
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem('molibra.tokens') || '[]'); } catch (e) { list = []; }
+  if (list.indexOf(t) === -1) list.push(t);
+  try { localStorage.setItem('molibra.tokens', JSON.stringify(list)); } catch (e) {}
+  $('addToken').value = '';
+  refresh();
+};
+
 /* Everything specific to one run comes from the URL, never a hand-edit. */
 const params = new URLSearchParams(location.search);
+if (params.get('factory')) $('factoryAddr').value = params.get('factory');
 if (params.get('amount')) $('amountIn').value = params.get('amount');
 if (params.get('slippage')) $('slippage').value = params.get('slippage');
-if (params.get('sell') === 'wsro') moliIn = false;
 
 refresh().catch((e) => say('poolLog', 'could not reach the node: ' + e.message, true));
 </script>

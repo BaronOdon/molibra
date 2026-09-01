@@ -101,22 +101,22 @@ check('the chain id is Molibra', page.includes('0x4f02'), '20226');
 // arithmetic locally will eventually disagree with the pool by a rounding step,
 // and the swap reverts on minOut for a reason nobody can see.
 check('⛔⛔ the quote comes from the CONTRACT, not from arithmetic in the page',
-  page.includes('SEL.quote + word(amount)'),
+  page.includes('SEL.quote + word(amt) + word(rIn) + word(rOut)'),
   'one source of truth for the output, and it is the chain');
 check('  and the page says so where a reader will find it',
   /never recomputed here|never does its own constant-product/i.test(page));
 
 check('⛔ a minimum-received is sent with every swap',
   page.includes('SEL.swapMoliIn + word(minOut)')
-  && page.includes('SEL.swapTokenIn + word(amount) + word(minOut)'),
+  && page.includes('SEL.swapTokenIn + word(carried) + word(minOut)'),
   'a swap without minOut fills at any price, which is what a sandwich needs');
 
 check('⛔⛔ it re-quotes immediately BEFORE signing',
-  /await refresh\(\);[\s\S]{0,200}const out = lastQuote/.test(page),
+  /await refresh\(\);[\s\S]{0,200}lastPlan \? lastPlan\.out/.test(page),
   'a tolerance derived from a stale quote protects against the wrong price');
 
 check('⛔ approval is for the exact amount, not unlimited',
-  page.includes('SEL.approve + addr32(POOL) + word(amount)')
+  page.includes('SEL.approve + addr32(lastPlan.plan[0].pool) + word(lastPlan.amount)')
   && !/word\(2n \*\* 256n - 1n\)|ffffffffffffffff.*approve/i.test(page),
   'an infinite approval is convenient once and permanent afterwards');
 
@@ -138,6 +138,23 @@ check('⛔ amounts are parsed to wei without floating point',
 check('  and formatted back without it',
   page.includes('function fromWei') && !/Number\(v\)\s*\/\s*1e18/.test(page));
 
+/* ---------------------------------------------------------- many tokens */
+
+check('⭐ any token routes to any other in at most two hops',
+  page.includes('function planRoute') && /via MOLI|through MOLI|MOLI on one side/i.test(page),
+  'every pool has MOLI on one side, so n tokens need n pools, not n²');
+check('  and a token-to-token route goes through MOLI',
+  /moliIn: false, m: a \}, \{ pool: b\.pool, moliIn: true/.test(page));
+check('⛔ only the FINAL hop carries the slippage tolerance',
+  /last \? out \* BigInt/.test(page),
+  'bounding an intermediate hop by a guess strands the trader in MOLI mid-route');
+check('tokens can be added by address, permissionlessly',
+  page.includes('molibra.tokens') && page.includes("$('add')"));
+check('⛔ a missing symbol() degrades rather than refusing the token',
+  page.includes('function decodeString') && /OPTIONAL on real tokens/i.test(page));
+check('the factory can be deployed and markets created from the page',
+  page.includes('deployFactory') && page.includes('SEL.createPool + addr32(t)'));
+
 /* ------------------------------------------------------------- routing */
 
 const rpc = readFileSync(join(ROOT, 'src/rpc.js'), 'utf8');
@@ -146,9 +163,16 @@ check('the page is served by a route', rpc.includes("'web', 'swap.html'"),
 
 /* ------------------------------------------ it holds nothing, by design */
 
+// ⛔ The page carries the factory DEPLOY BYTECODE, which is a long hex string
+// and must not be mistaken for key material. Strip it, then insist that nothing
+// key-shaped remains.
+const withoutBytecode = page.replace(/const FACTORY_BYTECODE = '0x[0-9a-fA-F]*'/, '');
 check('⛔ the page contains no private key material',
-  !/0x[0-9a-fA-F]{64}/.test(page.replace(/0x4f02/g, '')),
+  !/0x[0-9a-fA-F]{64}(?![0-9a-fA-F])/.test(withoutBytecode.replace(/0x4f02/g, '')),
   'a public trading page must never carry a key');
+check('  and the factory bytecode came from the artifact, not a paste',
+  !page.includes('__FACTORY_BYTECODE__') && page.includes('FACTORY_BYTECODE'),
+  'a hand-pasted 4.6KB of bytecode would drift from the contract silently');
 check('  and never asks for one',
   !/private ?key|mnemonic|seed phrase/i.test(page));
 
