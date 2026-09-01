@@ -333,7 +333,11 @@ export function startRpcServer(node, { host, port }) {
    * a known set of nodes and stops being tolerable the moment a public trading
    * page points browsers at the same host.
    */
+  // Canonical on the node, so the audit routes reach the SAME limiter rather
+  // than a second one that has counted nothing. handleAudit only receives
+  // `node`, and a per-server local was invisible to it.
   const limiter = node.rateLimiter ?? new RateLimiter();
+  node.rateLimiter = limiter;
 
   const refuse = (res, retryAfter) => {
     res.writeHead(429, {
@@ -490,6 +494,17 @@ function handleAudit(node, req, res) {
             ? 0 : Number(STATE_MERKLE_ACTIVATION - chain.height),
         },
       },
+      // A COUNT of distinct clients in the last 15 minutes - never the
+      // addresses. A chain whose claim is that participation is voluntary and
+      // never inferred has no business publishing who reads it.
+      //
+      // It exists for flag days. Changing a consensus constant is only safe
+      // once every node has upgraded, and "is anybody else running one?" was
+      // unanswerable from outside: `peers` is what this node dials OUT to and
+      // says nothing about who dials in. A floor, not a census - buckets are
+      // evicted under pressure and a reader who never asks is invisible, so a
+      // low number is "no evidence of others", never "there are none".
+      readers: { distinct: node.rateLimiter?.activeClients() ?? 0, windowSeconds: 900 },
       attribution: chain.genesis.attribution,
       theories: chain.genesis.theories,
       peers: [...node.peers],

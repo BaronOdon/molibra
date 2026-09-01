@@ -145,6 +145,30 @@ export class RateLimiter {
   }
 
   get size() { return this.buckets.size; }
+
+  /**
+   * How many distinct clients this node has served in the last `withinMs`.
+   *
+   * ⛔⛔ A COUNT, never the keys. The keys are socket addresses, and a chain
+   * whose whole claim is that participation is voluntary and never inferred
+   * has no business publishing who reads it. One number answers the question
+   * that needs answering and discloses nobody.
+   *
+   * The question it exists for is a flag day. Changing a consensus constant is
+   * only safe once every node has upgraded, and "has anyone else got a node?"
+   * was previously unanswerable from the outside - the peer list is what this
+   * node dials OUT to, and says nothing about who dials in. A node that cannot
+   * see its own readers cannot tell you whether a flag day is safe to move.
+   *
+   * ⛔ It is a floor, not a census. Buckets are evicted under pressure, the
+   * window is short, and a reader who has never asked is invisible. Treat a
+   * low number as "no evidence of others", never as "there are none".
+   */
+  activeClients(withinMs = 15 * 60_000, now = this.now()) {
+    let n = 0;
+    for (const b of this.buckets.values()) if (now - b.last <= withinMs) n++;
+    return n;
+  }
 }
 
 /**

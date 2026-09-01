@@ -128,6 +128,45 @@ check('  and the sustained rate is enough for a syncing peer',
 check('⛔ a limiter with a zero rate is refused at construction', (() => {
   try { new RateLimiter({ refillPerSecond: 0 }); return false; } catch { return true; }
 })(), 'a silently-zero limiter denies everything forever');
+/* ------------------------------- who is out there, without saying who */
+
+// The count exists for flag days: a consensus constant can only move once
+// every node has upgraded, and `peers` is what this node dials OUT to - it
+// says nothing about who dials in. A node that cannot see its own readers
+// cannot tell you whether a flag day is safe to move.
+
+{
+  const c = clock();
+  const rl = new RateLimiter({ now: c.now });
+  check('a node nobody has asked reports zero readers', rl.activeClients() === 0);
+
+  rl.take('1.2.3.4', 1);
+  rl.take('5.6.7.8', 1);
+  rl.take('1.2.3.4', 1);
+  check('distinct clients are counted once each', rl.activeClients() === 2,
+    `${rl.activeClients()} for two addresses across three requests`);
+
+  c.advance(10 * 60_000);
+  check('a client that asked ten minutes ago is still inside a 15m window',
+    rl.activeClients() === 2);
+
+  c.advance(6 * 60_000);
+  check('and drops out once the window passes', rl.activeClients() === 0,
+    'a reader who stopped asking is not evidence of a live node');
+
+  rl.take('9.9.9.9', 1);
+  check('a fresh request brings the count back', rl.activeClients() === 1);
+
+  // The property the whole design turns on.
+  check('it returns a NUMBER, never the keys',
+    typeof rl.activeClients() === 'number',
+    'publishing socket addresses would make a chain that records voluntary acts '
+    + 'into one that records who reads it');
+
+  check('it uses the injected clock, not wall time',
+    new RateLimiter({ now: () => 0 }).activeClients(1, 0) === 0);
+}
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
