@@ -1,0 +1,254 @@
+<title>MOLI / WSRO · the first price</title>
+<!--
+  OPERATOR page. Holds no key; every transaction is signed in your wallet.
+
+  ⛔⛔ The FIRST deposit sets the price. Nothing else does. A later deposit at
+  the current ratio adds depth at no price impact; only a trade moves price.
+  So this is the one irreversible number on the page.
+
+  Bytecode is embedded from contracts/artifacts/pool.json — rebuild it there if
+  the contract changes, or the page deploys something nobody has read.
+-->
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--bad:#ff5c5c}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;max-width:900px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
+  input{width:100%;background:#0e0e10;border:1px solid var(--line);border-radius:8px;color:var(--ink);
+        padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:10px 16px;
+         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
+  button.ghost{background:#22222a;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
+       white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:200px}
+  .big{font-size:22px;font-family:ui-monospace,Menlo,monospace;color:var(--gold);margin:8px 0}
+</style>
+
+<h1>MOLI / WSRO — the first price</h1>
+<p class="sub" id="banner">not connected</p>
+
+<div class="card">
+  <h2>1 · Wallet on Molibra</h2>
+  <button id="connect">Connect wallet</button>
+  <button id="addNet" class="ghost">Add Molibra (20226)</button>
+  <dl><dt>account</dt><dd id="acct">—</dd><dt>chain</dt><dd id="chain">—</dd>
+      <dt>MOLI</dt><dd id="bal">—</dd><dt>WSRO here</dt><dd id="wsro">—</dd></dl>
+  <div class="log" id="walletLog">This page holds no key.</div>
+</div>
+
+<div class="card">
+  <h2>2 · Deploy the pool</h2>
+  <p class="sub">Constant product, 0.3% fee, pairing native MOLI against the bridged Coinspirit.
+    ⛔ <code>MINIMUM_LIQUIDITY</code> (1000 units) is burned on the first deposit, so the pool
+    can never be re-founded — that is deliberate.</p>
+  <label>Bridged Coinspirit (WSRO) on Molibra</label>
+  <input id="asset" value="0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a">
+  <button id="deploy">Deploy MolibraPool</button>
+  <div class="log" id="deployLog"></div>
+  <label>Pool address — filled in automatically</label>
+  <input id="pool" placeholder="deploy above, or paste an existing pool">
+</div>
+
+<div class="card">
+  <h2>3 · Approve the pool to take the WSRO</h2>
+  <p class="sub">An ERC-20 cannot be pulled without permission. This grants exactly the amount
+    below, not an unlimited allowance.</p>
+  <button id="approve">Approve</button>
+  <div class="log" id="approveLog"></div>
+</div>
+
+<div class="card">
+  <h2>4 · Seed it — and set MOLI's price</h2>
+  <div class="note bad">
+    ⛔⛔ <b>This deposit sets the price. Nothing else does.</b> Depth can be added later at the
+    current ratio with no price impact; only a trade moves price. Check the two numbers.
+  </div>
+  <div class="row">
+    <div><label>MOLI to deposit</label><input id="moli" value="2000"></div>
+    <div><label>WSRO to deposit</label><input id="tok" value="2000"></div>
+  </div>
+  <div class="big" id="priceOut">—</div>
+  <div class="note">
+    ⛔ The WSRO side has a direction. WSRO is capped at 21,000,000 with minting renounced; MOLI
+    issues <b>11,520/day</b>, forever. Rational holders sell MOLI for WSRO, so this side drains —
+    <span id="drain">—</span> That is fine for establishing a price, and it is not a rate that holds.
+  </div>
+  <button id="seed">Seed the pool</button>
+  <div class="log" id="seedLog"></div>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  <button id="refresh" class="ghost">Read the chain</button>
+  <div class="log" id="status">—</div>
+</div>
+
+<script>
+const NODE = 'http://193.123.191.142:8545';
+const CHAIN_ID = 20226, CHAIN_HEX = '0x4f02';
+const WSRO_USD = 1.7215e-5;   // WSRO in USD, from its own Ethereum pool
+
+/* Selectors — every one checked against keccak256 of its signature by a test.
+   ⛔ A constant nobody derives is a constant nobody can check. */
+const SEL = {
+  approve:      '0x095ea7b3',   // approve(address,uint256)
+  addLiquidity: '0x9cd441da',   // addLiquidity(uint256,uint256)
+  reserveMoli:  '0x78f954c6',   // reserveMoli()
+  reserveToken: '0xf4325d67',   // reserveToken()
+  totalShares:  '0x3a98ef39',   // totalShares()
+  balanceOf:    '0x70a08231',   // balanceOf(address)
+};
+const POOL_BYTECODE = '0x60a060405234801561000f575f5ffd5b50604051610edb380380610edb83398101604081905261002e9161003f565b6001600160a01b031660805261006c565b5f6020828403121561004f575f5ffd5b81516001600160a01b0381168114610065575f5ffd5b9392505050565b608051610e3b6100a05f395f818161024a0152818161036f015281816105a6015281816108a60152610b060152610e3b5ff3fe6080604052600436106100dc575f3560e01c8063ad615dec1161007c578063dfe1601e11610057578063dfe1601e14610205578063f4325d6714610224578063fc0c546a14610239578063fe08b58c14610284575f5ffd5b8063ad615dec146101bb578063ba9a7a56146100fe578063ce7c2ac2146101da575f5ffd5b806375172a8b116100b757806375172a8b1461014e57806378f954c614610175578063857620e1146101895780639cd441da146101a8575f5ffd5b80631605b17f146100fe5780633a98ef39146101265780636446f3fe1461013b575f5ffd5b366100fa57604051631dc930eb60e01b815260040160405180910390fd5b5f5ffd5b348015610109575f5ffd5b506101136103e881565b6040519081526020015b60405180910390f35b348015610131575f5ffd5b5061011360025481565b610113610149366004610cea565b610299565b348015610159575f5ffd5b505f546001545b6040805192835260208301919091520161011d565b348015610180575f5ffd5b506101135f5481565b348015610194575f5ffd5b506101606101a3366004610d01565b610450565b6101136101b6366004610d2a565b6106f3565b3480156101c6575f5ffd5b506101136101d5366004610d01565b6109f0565b3480156101e5575f5ffd5b506101136101f4366004610d4a565b60036020525f908152604090205481565b348015610210575f5ffd5b5061011361021f366004610d2a565b610a56565b34801561022f575f5ffd5b5061011360015481565b348015610244575f5ffd5b5061026c7f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200161011d565b34801561028f575f5ffd5b506101136103e581565b6004545f9060ff16156102bf5760405163769dd35360e11b815260040160405180910390fd5b6004805460ff19166001179055345f036102ec57604051631dc930eb60e01b815260040160405180910390fd5b6102fa345f546001546109f0565b905080158061030857508181105b1561032657604051631dc930eb60e01b815260040160405180910390fd5b345f5f8282546103369190610d84565b925050819055508060015f82825461034e9190610d9d565b909155505060405163a9059cbb60e01b8152336004820152602481018290527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03169063a9059cbb906044016020604051808303815f875af11580156103bd573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906103e19190610db0565b6103fe576040516312171d8360e31b815260040160405180910390fd5b604080516001815234602082015290810182905233907ff067e8ca829f67e4f9be38e977ceedd503b4602e190ac8c71415bc72d2b8663a9060600160405180910390a26004805460ff19169055919050565b6004545f90819060ff16156104785760405163769dd35360e11b815260040160405180910390fd5b6004805460ff1916600117905584158061049f5750335f9081526003602052604090205485115b156104bd57604051631dc930eb60e01b815260040160405180910390fd5b6002545f546104cc9087610dcf565b6104d69190610de6565b9150600254600154866104e99190610dcf565b6104f39190610de6565b90508382108061050257508281105b1561052057604051631dc930eb60e01b815260040160405180910390fd5b335f908152600360205260408120805487929061053e908490610d9d565b925050819055508460025f8282546105569190610d9d565b92505081905550815f5f82825461056d9190610d9d565b925050819055508060015f8282546105859190610d9d565b909155505060405163a9059cbb60e01b8152336004820152602481018290527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03169063a9059cbb906044016020604051808303815f875af11580156105f4573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106189190610db0565b610635576040516312171d8360e31b815260040160405180910390fd5b6040515f90339084908381818185875af1925050503d805f8114610674576040519150601f19603f3d011682016040523d82523d5f602084013e610679565b606091505b505090508061069b576040516312171d8360e31b815260040160405180910390fd5b604080518481526020810184905290810187905233907f4c60206a5c1de41f3376d1d60f0949d96cb682033c90b1c2d9d9a62d4c4120c09060600160405180910390a2506004805460ff191690559094909350915050565b6004545f9060ff16156107195760405163769dd35360e11b815260040160405180910390fd5b6004805460ff19166001179055341580610731575082155b1561074f57604051631dc930eb60e01b815260040160405180910390fd5b6002545f036107a75761076a6107658434610dcf565b610c7c565b90506103e8811161078e57604051631dc930eb60e01b815260040160405180910390fd5b61079a6103e882610d9d565b6103e86002559050610863565b5f80546002546107b79034610dcf565b6107c19190610de6565b90505f600154600254866107d59190610dcf565b6107df9190610de6565b905080821461082f575f8183116107ff576107fa8383610d9d565b610809565b6108098284610d9d565b9050600181111561082d57604051639698399d60e01b815260040160405180910390fd5b505b80821061083c578061083e565b815b9250825f0361086057604051631dc930eb60e01b815260040160405180910390fd5b50505b8181101561088457604051631dc930eb60e01b815260040160405180910390fd5b6040516323b872dd60e01b8152336004820152306024820152604481018490527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316906323b872dd906064016020604051808303815f875af11580156108f4573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906109189190610db0565b610935576040516312171d8360e31b815260040160405180910390fd5b345f5f8282546109459190610d84565b925050819055508260015f82825461095d9190610d84565b925050819055508060025f8282546109759190610d84565b9091555050335f9081526003602052604081208054839290610998908490610d84565b9091555050604080513481526020810185905290810182905233907f5a3358a3d27a5373c0df2604662088d37894d56b7cfd27f315770440f4e0d9199060600160405180910390a26004805460ff1916905592915050565b5f8315806109fc575082155b80610a05575081155b15610a1157505f610a4f565b5f610a1e6103e586610dcf565b905080610a2d6103e886610dcf565b610a379190610d84565b610a418483610dcf565b610a4b9190610de6565b9150505b9392505050565b6004545f9060ff1615610a7c5760405163769dd35360e11b815260040160405180910390fd5b6004805460ff191660011790555f839003610aaa57604051631dc930eb60e01b815260040160405180910390fd5b610ab8836001545f546109f0565b9050801580610ac657508181105b15610ae457604051631dc930eb60e01b815260040160405180910390fd5b6040516323b872dd60e01b8152336004820152306024820152604481018490527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316906323b872dd906064016020604051808303815f875af1158015610b54573d5f5f3e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610b789190610db0565b610b95576040516312171d8360e31b815260040160405180910390fd5b8260015f828254610ba69190610d84565b92505081905550805f5f828254610bbd9190610d9d565b90915550506040515f90339083908381818185875af1925050503d805f8114610c01576040519150601f19603f3d011682016040523d82523d5f602084013e610c06565b606091505b5050905080610c28576040516312171d8360e31b815260040160405180910390fd5b604080515f81526020810186905290810183905233907ff067e8ca829f67e4f9be38e977ceedd503b4602e190ac8c71415bc72d2b8663a9060600160405180910390a2506004805460ff1916905592915050565b5f6003821115610cdb5750805f610c94600283610de6565b610c9f906001610d84565b90505b81811015610cd557905080600281610cba8186610de6565b610cc49190610d84565b610cce9190610de6565b9050610ca2565b50919050565b8115610ce5575060015b919050565b5f60208284031215610cfa575f5ffd5b5035919050565b5f5f5f60608486031215610d13575f5ffd5b505081359360208301359350604090920135919050565b5f5f60408385031215610d3b575f5ffd5b50508035926020909101359150565b5f60208284031215610d5a575f5ffd5b81356001600160a01b0381168114610a4f575f5ffd5b634e487b7160e01b5f52601160045260245ffd5b80820180821115610d9757610d97610d70565b92915050565b81810381811115610d9757610d97610d70565b5f60208284031215610dc0575f5ffd5b81518015158114610a4f575f5ffd5b8082028115828204841417610d9757610d97610d70565b5f82610e0057634e487b7160e01b5f52601260045260245ffd5b50049056fea26469706673582212209eff7f6b68b047a3d11becae37be78f01acd401a7a8a966f2a20730b6304d13264736f6c63430008240033';
+
+const $ = (id) => document.getElementById(id);
+const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
+const eth = () => { if (!window.ethereum) throw new Error('no wallet in this browser'); return window.ethereum; };
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const isAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a).trim());
+const wei = (n) => BigInt(Math.round(Number(n) * 1e18));
+let account = null;
+
+const params = new URLSearchParams(location.search);
+for (const [k, f] of Object.entries({ pool: 'pool', asset: 'asset', moli: 'moli', wsro: 'tok' })) {
+  if (params.get(k)) $(f).value = params.get(k);
+}
+
+function showPrice() {
+  const m = Number($('moli').value), t = Number($('tok').value);
+  if (!(m > 0 && t > 0)) { $('priceOut').textContent = '—'; return; }
+  const wsroPerMoli = t / m;
+  $('priceOut').textContent = `1 MOLI = ${wsroPerMoli} WSRO = $${(wsroPerMoli * WSRO_USD).toFixed(8)}`;
+  // How much one-way selling empties the WSRO side: x*y=k means ~3.3x the
+  // reserve of MOLI takes out ~77% of the WSRO. Stated in days of issuance,
+  // because that is the supply actually arriving.
+  $('drain').textContent = `about ${(m * 3.3 / 11520).toFixed(2)} days of your own mining `
+    + `(${Math.round(m * 3.3).toLocaleString()} MOLI) would take most of it.`;
+}
+$('moli').oninput = showPrice; $('tok').oninput = showPrice; showPrice();
+
+const rpc = async (m, p = []) => {
+  const r = await fetch(NODE, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: m, params: p }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+};
+const call = (to, data) => rpc('eth_call', [{ to, data }, 'latest']);
+
+async function refreshWallet() {
+  const id = Number(await eth().request({ method: 'eth_chainId' }));
+  $('chain').textContent = id === CHAIN_ID ? `Molibra (${id})` : `chain ${id} — NOT Molibra`;
+  if (account && id === CHAIN_ID) {
+    $('bal').textContent = (Number(BigInt(await rpc('eth_getBalance', [account, 'latest']))) / 1e18).toLocaleString() + ' MOLI';
+    try {
+      const b = await call($('asset').value.trim(), SEL.balanceOf + addr32(account));
+      $('wsro').textContent = (Number(BigInt(b)) / 1e18).toLocaleString() + ' WSRO';
+    } catch { $('wsro').textContent = '—'; }
+  }
+  return id;
+}
+$('addNet').onclick = async () => {
+  try {
+    await eth().request({ method: 'wallet_addEthereumChain', params: [{
+      chainId: CHAIN_HEX, chainName: 'Molibra',
+      nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
+      rpcUrls: [NODE], blockExplorerUrls: [NODE + '/molibra'] }] });
+    await refreshWallet();
+  } catch (e) { say('walletLog', e.message, true); }
+};
+$('connect').onclick = async () => {
+  try {
+    account = (await eth().request({ method: 'eth_requestAccounts' }))[0];
+    $('acct').textContent = account;
+    await refreshWallet();
+    $('banner').textContent = 'connected — nothing is sent until you sign it';
+  } catch (e) { say('walletLog', e.message, true); }
+};
+async function requireMolibra() {
+  if (!account) throw new Error('connect the wallet first');
+  if (await refreshWallet() === CHAIN_ID) return;
+  await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] });
+  if (await refreshWallet() !== CHAIN_ID) throw new Error('still not on Molibra');
+}
+
+async function send(tx, logId, label) {
+  await requireMolibra();
+  say(logId, label + '\nawaiting signature…');
+  const hash = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, ...tx }] });
+  say(logId, label + '\nsent ' + hash + '\nwaiting…');
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const r = await eth().request({ method: 'eth_getTransactionReceipt', params: [hash] }).catch(() => null);
+    if (r) {
+      say(logId, r.status === '0x1' ? `⭐ mined. gas ${BigInt(r.gasUsed)}` : `⛔ reverted: ${hash}`, r.status !== '0x1');
+      $('refresh').onclick();
+      return r;
+    }
+  }
+  throw new Error('not mined within 5 minutes');
+}
+
+$('deploy').onclick = async () => {
+  try {
+    const a = $('asset').value.trim();
+    if (!isAddr(a)) throw new Error('the asset address is not an address');
+    const r = await send({ data: POOL_BYTECODE + addr32(a), gas: '0x1e8480' }, 'deployLog',
+      'Deploy MolibraPool against ' + a);
+    if (r.status === '0x1') { $('pool').value = r.contractAddress; say('deployLog', 'deployed at ' + r.contractAddress); }
+  } catch (e) { say('deployLog', e.message, true); }
+};
+
+$('approve').onclick = async () => {
+  try {
+    const p = $('pool').value.trim();
+    if (!isAddr(p)) throw new Error('deploy the pool first');
+    const amt = wei($('tok').value);
+    await send({ to: $('asset').value.trim(), data: SEL.approve + addr32(p) + word(amt), gas: '0x30d40' },
+      'approveLog', `Approve ${$('tok').value} WSRO for ${p}`);
+  } catch (e) { say('approveLog', e.message, true); }
+};
+
+$('seed').onclick = async () => {
+  try {
+    const p = $('pool').value.trim();
+    if (!isAddr(p)) throw new Error('deploy the pool first');
+    const m = wei($('moli').value), t = wei($('tok').value);
+    if (!(m > 0n && t > 0n)) throw new Error('both amounts must be positive');
+    if (!confirm(`Seed ${$('moli').value} MOLI : ${$('tok').value} WSRO?\n\n`
+      + `This SETS MOLI's price at ${Number($('tok').value) / Number($('moli').value)} WSRO `
+      + `($${(Number($('tok').value) / Number($('moli').value) * WSRO_USD).toFixed(8)}).\n\n`
+      + 'Only a trade can move it afterwards.')) return;
+    // ⛔ minShares 0: this is the FIRST deposit, so there is no ratio to be
+    // front-run against. On any later deposit it must not be zero.
+    await send({ to: p, value: '0x' + m.toString(16), data: SEL.addLiquidity + word(t) + word(0), gas: '0x7a120' },
+      'seedLog', `Seed ${$('moli').value} MOLI + ${$('tok').value} WSRO`);
+  } catch (e) { say('seedLog', e.message, true); }
+};
+
+$('refresh').onclick = async () => {
+  try {
+    const p = $('pool').value.trim();
+    const n = await (await fetch(NODE + '/molibra')).json();
+    if (!isAddr(p)) { say('status', `node height ${n.height} · no pool yet`); return; }
+    const [rm, rt, ts] = await Promise.all([
+      call(p, SEL.reserveMoli), call(p, SEL.reserveToken), call(p, SEL.totalShares)]);
+    const M = Number(BigInt(rm)) / 1e18, T = Number(BigInt(rt)) / 1e18;
+    say('status', `node height ${n.height}\npool ${p}\n`
+      + `reserves ${M.toLocaleString()} MOLI · ${T.toLocaleString()} WSRO\n`
+      + `shares ${(Number(BigInt(ts)) / 1e18).toFixed(6)}\n`
+      + (M > 0 ? `\n⭐ 1 MOLI = ${(T / M).toFixed(6)} WSRO = $${(T / M * WSRO_USD).toFixed(8)}` : ''));
+  } catch (e) { say('status', e.message, true); }
+};
+$('refresh').onclick();
+</script>

@@ -1,0 +1,352 @@
+<title>Coinspirit → Molibra · inbound</title>
+<!--
+  OPERATOR page. It holds no key; every transaction is signed in your wallet.
+
+  ⛔⛔ Signing REGISTER makes you this asset's HEADER AUTHORITY, permanently.
+  Every WSRO claim on Molibra will rest on Ethereum headers you attest. That is
+  the one thing on this page that cannot be undone by another transaction.
+
+  Payloads for the later steps arrive in the URL, never hand-edited in:
+    ?commit=0x…&claim=0x…
+-->
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;
+        --gold:#FFD100;--ok:#4ade80;--bad:#ff5c5c}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;max-width:920px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
+  input{width:100%;background:#0e0e10;border:1px solid var(--line);border-radius:8px;color:var(--ink);
+        padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:10px 16px;
+         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
+  button.ghost{background:#22222a;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
+       white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)} .log.ok{color:var(--ok)}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+</style>
+
+<h1>Coinspirit (WSRO) → Molibra · inbound</h1>
+<p class="sub" id="banner">not connected</p>
+
+<div class="card">
+  <h2>1 · Wallet on Molibra</h2>
+  <p class="sub">Molibra is EVM-compatible, so the same key that signs on Ethereum signs here.
+    Adding the network is a wallet setting, not a transaction — nothing is sent.</p>
+  <button id="connect">Connect wallet</button>
+  <button id="addNet" class="ghost">Add Molibra (chainId 20226)</button>
+  <dl>
+    <dt>account</dt><dd id="acct">—</dd>
+    <dt>chain</dt><dd id="chain">—</dd>
+    <dt>MOLI</dt><dd id="bal">—</dd>
+  </dl>
+  <div class="log" id="walletLog">This page holds no key.</div>
+</div>
+
+<div class="card">
+  <h2>2 · Register the asset</h2>
+  <div class="note bad">
+    ⛔⛔ <b>Signing this makes you WSRO-on-Molibra's header authority, permanently.</b>
+    Every claim will rest on Ethereum headers you attest, and no later transaction changes that.
+    The asset id is derived from (chain 1, contract), so it cannot be squatted — but the
+    authority slot is claimed once, by whoever signs first.
+  </div>
+  <dl>
+    <dt>origin</dt><dd>Ethereum chainId 1 · 0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8</dd>
+    <dt>Molibra token</dt><dd>0x3f95fe48b15b54152f96490e8a1b7d12c3bc5a10e95b3e7491e5ad83748a33c1</dd>
+    <dt>ERC-20 here</dt><dd>0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a</dd>
+    <dt>mint authority</dt><dd>0xe76ffdb261c07b9d592b32e931b16e1fd86e4185 — keyless, no signature reaches it</dd>
+    <dt>cap</dt><dd>100,000 WSRO — lowerable instantly, raisable only with a delay</dd>
+    <dt>addressed to</dt><dd>0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a — the payload is native, so this is never called</dd>
+  </dl>
+  <label>Calldata (decoded live below — check it before signing)</label>
+  <input id="registerData" value="0x3ff035a700000000000000000000000000000000000000000000000000000000000000018bda622a10fbb1e4a15b37507f65fc5b5755ceb8cedb6badceceeb46e21877c45b8b9087cb8e4d6a00000000000000000000000000000000000000000000152d02c7e14af68000005753524f">
+  <div class="log" id="decoded"></div>
+  <button id="register">Register — I will be the header authority</button>
+  <div class="log" id="registerLog"></div>
+</div>
+
+<div class="card">
+  <h2>2b · Burn the WSRO on Ethereum</h2>
+  <div class="note bad">
+    ⛔⛔ <b>Irreversible, and uniquely so.</b> Ownership of the Coinspirit contract is
+    <b>renounced</b> — <code>owner()</code> is the zero address — so <code>mint</code> is
+    permanently unreachable. Burned WSRO can never be re-created, by you or anyone.
+    Bridging is one-way and always will be.
+  </div>
+  <p class="sub">⭐ The upside of the same fact: 21,000,000 is now a <b>ceiling</b>. What remains
+    on Ethereum plus what exists on Molibra is conserved by arithmetic, not by a promise.</p>
+  <dl>
+    <dt>to</dt><dd>0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8 — Coinspirit</dd>
+    <dt>function</dt><dd>burn(uint256)</dd>
+    <dt>after</dt><dd>supply 21,000,000 → 20,998,000 · +2,000 claimable here</dd>
+  </dl>
+  <label>Amount to burn, in WSRO</label>
+  <input id="burnAmount" value="2000">
+  <div class="log" id="burnDecoded"></div>
+  <button id="burn">Burn on Ethereum</button>
+  <div class="log" id="burnLog"></div>
+</div>
+
+<div class="card">
+  <h2>3 · Commit the Ethereum header</h2>
+  <p class="sub">Produced by <code>scripts-inbound/prove-burn.mjs</code> after the burn is mined.
+    ⛔ A height already committed cannot be re-committed with a different root.</p>
+  <label>HEADER_COMMIT calldata</label>
+  <input id="commitData" placeholder="arrives in the URL as ?commit=0x…">
+  <button id="commit" disabled>Commit the header</button>
+  <div class="log" id="commitLog"></div>
+</div>
+
+<div class="card">
+  <h2>4 · Claim the burn</h2>
+  <p class="sub">The full Merkle-Patricia proof travels in this transaction; every node verifies
+    it independently. ⛔ The recipient and amount come out of the proved burn.</p>
+  <label>BRIDGE_CLAIM calldata</label>
+  <input id="claimData" placeholder="arrives in the URL as ?claim=0x…">
+  <button id="claim" disabled>Claim — mint against the proved burn</button>
+  <div class="log" id="claimLog"></div>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  <button id="refresh" class="ghost">Read the chain</button>
+  <div class="log" id="status">—</div>
+</div>
+
+<script>
+const NODE = 'http://193.123.191.142:8545';
+const CHAIN_ID = 20226;
+const CHAIN_HEX = '0x4f02';
+const $ = (id) => document.getElementById(id);
+const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
+const eth = () => { if (!window.ethereum) throw new Error('no wallet in this browser'); return window.ethereum; };
+let account = null;
+
+// Run-specific payloads arrive in the URL — never hand-edited into this file.
+const params = new URLSearchParams(location.search);
+for (const [k, f] of Object.entries({ commit: 'commitData', claim: 'claimData', register: 'registerData' })) {
+  if (params.get(k)) $(f).value = params.get(k);
+}
+
+/** Decode the register payload so what is signed is READ, not trusted. */
+function decodeRegister() {
+  try {
+    const h = $('registerData').value.trim().replace(/^0x/, '');
+    if (h.slice(0, 8) !== '3ff035a7') { say('decoded', 'not a BRIDGE_REGISTER payload', true); return; }
+    const chain = BigInt('0x' + h.slice(8, 72));
+    const contract = '0x' + h.slice(72, 112);
+    const asset = '0x' + h.slice(112, 152);
+    const cap = BigInt('0x' + h.slice(152, 216));
+    const symbol = decodeURIComponent(h.slice(216).replace(/../g, '%$&'));
+    say('decoded', `origin chain ${chain} · contract ${contract}\nERC-20 here ${asset}`
+      + `\ncap ${(Number(cap) / 1e18).toLocaleString()} · symbol ${symbol}`);
+  } catch (e) { say('decoded', 'could not decode: ' + e.message, true); }
+}
+$('registerData').oninput = decodeRegister;
+decodeRegister();
+
+async function refreshWallet() {
+  const id = Number(await eth().request({ method: 'eth_chainId' }));
+  $('chain').textContent = id === CHAIN_ID ? `Molibra (${id})` : `chain ${id} — NOT Molibra`;
+  if (account && id === CHAIN_ID) {
+    const b = await eth().request({ method: 'eth_getBalance', params: [account, 'latest'] });
+    $('bal').textContent = (Number(BigInt(b)) / 1e18).toLocaleString() + ' MOLI';
+  }
+  return id;
+}
+
+$('addNet').onclick = async () => {
+  try {
+    await eth().request({
+      method: 'wallet_addEthereumChain',
+      params: [{
+        chainId: CHAIN_HEX, chainName: 'Molibra',
+        nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
+        rpcUrls: [NODE], blockExplorerUrls: [NODE + '/molibra'],
+      }],
+    });
+    say('walletLog', 'Molibra added and selected.');
+    await refreshWallet();
+  } catch (e) { say('walletLog', e.message, true); }
+};
+
+$('connect').onclick = async () => {
+  try {
+    account = (await eth().request({ method: 'eth_requestAccounts' }))[0];
+    $('acct').textContent = account;
+    await refreshWallet();
+    $('banner').textContent = 'connected — nothing is sent until you sign it';
+    say('walletLog', 'connected');
+  } catch (e) { say('walletLog', e.message, true); }
+};
+
+async function requireMolibra() {
+  if (!account) throw new Error('connect the wallet first');
+  let id = await refreshWallet();
+  if (id === CHAIN_ID) return;
+  try {
+    await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] });
+  } catch (e) {
+    if (e.code === 4902) throw new Error('Molibra is not in your wallet yet — press "Add Molibra" first');
+    throw e;
+  }
+  if (await refreshWallet() !== CHAIN_ID) throw new Error('still not on Molibra');
+}
+
+/**
+ * A native Molibra payload moves no value; only its `data` matters.
+ *
+ * ⛔ It used to be SELF-ADDRESSED, which MetaMask refuses:
+ *
+ *     "External transactions to internal accounts cannot include data"
+ *
+ * "internal account" is MetaMask's term for an account IT manages — it blocks
+ * calldata sent to your own address, on the reasonable assumption that it is a
+ * mistake. So these are addressed to the asset contract instead.
+ *
+ * ⭐ Consensus is unaffected, and that was checked rather than assumed: every
+ * Molibra decoder runs BEFORE the EVM branch, so a payload the validator
+ * claims is `native` and never reaches `isCall`. Verified with `to` set to a
+ * real deployed contract — the payload registered, the EVM was not invoked,
+ * and the contract's code was untouched.
+ */
+const PAYLOAD_TO = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';   // the Coinspirit ERC-20
+
+async function sendNative(data, logId, label) {
+  await requireMolibra();
+  const hex = data.trim();
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) throw new Error('that is not calldata');
+  if (PAYLOAD_TO.toLowerCase() === (account ?? '').toLowerCase()) {
+    throw new Error('the payload address must not be one of your own accounts');
+  }
+  say(logId, label + '\nawaiting signature…');
+  // ⛔ An EXPLICIT gas limit, because estimation cannot see this transaction.
+  //
+  // `eth_estimateGas` simulates the calldata as a CONTRACT CALL against
+  // PAYLOAD_TO. A native payload is not a contract call — consensus routes it
+  // away from the EVM entirely — so the simulation reverts early, reports
+  // almost no gas, and the wallet would send a transaction that runs out
+  // partway through the mint. Intrinsic gas alone is ~66k for a 2.8 KB claim,
+  // and the mint on top of it another ~50k. 500,000 covers both several times
+  // over and costs 0.0005 MOLI at the node's 1 gwei minimum.
+  const hash = await eth().request({
+    method: 'eth_sendTransaction',
+    params: [{ from: account, to: PAYLOAD_TO, value: '0x0', data: hex, gas: '0x7a120' }],
+  });
+  say(logId, label + '\nsent: ' + hash + '\nwaiting to be mined…');
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const r = await eth().request({ method: 'eth_getTransactionReceipt', params: [hash] }).catch(() => null);
+    if (r) {
+      say(logId, r.status === '0x1'
+        ? `⭐ mined. gas ${BigInt(r.gasUsed)}. ${hash}`
+        : `⛔ the transaction was rejected by consensus: ${hash}`, r.status !== '0x1');
+      $('refresh').onclick();
+      return r;
+    }
+  }
+  throw new Error('not mined within 5 minutes');
+}
+
+/* ------------------------------------------------------ the burn, on Ethereum */
+
+const WSRO_CONTRACT = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+const BURN_SELECTOR = '0x42966c68';   // burn(uint256) — verified against keccak
+
+/** Show the exact calldata, so what is signed is read rather than trusted. */
+function burnCalldata() {
+  const n = Number($('burnAmount').value);
+  if (!(n > 0)) throw new Error('the amount must be positive');
+  const wei = BigInt(Math.round(n * 1e18));
+  return { wei, data: BURN_SELECTOR + wei.toString(16).padStart(64, '0') };
+}
+function showBurn() {
+  try {
+    const { wei, data } = burnCalldata();
+    say('burnDecoded', `calldata ${data}\ndecodes as burn(${wei}) = `
+      + `${(Number(wei) / 1e18).toLocaleString()} WSRO — destroyed permanently`);
+  } catch (e) { say('burnDecoded', e.message, true); }
+}
+$('burnAmount').oninput = showBurn;
+showBurn();
+
+$('burn').onclick = async () => {
+  try {
+    if (!account) throw new Error('connect the wallet first');
+    const { wei, data } = burnCalldata();
+    // ⛔ This one is on ETHEREUM, not Molibra. Switching is the whole point of
+    // asking: a burn signed on the wrong chain would do something else entirely.
+    let id = Number(await eth().request({ method: 'eth_chainId' }));
+    if (id !== 1) {
+      say('burnLog', 'switching your wallet to Ethereum mainnet…');
+      await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1' }] });
+      id = Number(await eth().request({ method: 'eth_chainId' }));
+      if (id !== 1) throw new Error('still not on Ethereum mainnet');
+    }
+    if (!confirm(`Burn ${(Number(wei) / 1e18).toLocaleString()} WSRO on Ethereum?\n\n`
+      + 'Minting is RENOUNCED on that contract. This can never be undone by anyone.')) return;
+    say('burnLog', 'awaiting signature…');
+    const hash = await eth().request({
+      method: 'eth_sendTransaction',
+      params: [{ from: account, to: WSRO_CONTRACT, value: '0x0', data }],
+    });
+    say('burnLog', `sent: ${hash}\nwaiting to be mined…`);
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const r = await eth().request({ method: 'eth_getTransactionReceipt', params: [hash] }).catch(() => null);
+      if (r) {
+        say('burnLog', r.status === '0x1'
+          ? `⭐ burned in block ${BigInt(r.blockNumber)}.\n\nTRANSACTION HASH — send this back:\n${hash}`
+          : `⛔ the burn reverted: ${hash}`, r.status !== '0x1');
+        return;
+      }
+    }
+    say('burnLog', `not mined within 7 minutes — check the explorer.\nhash: ${hash}`, true);
+  } catch (e) { say('burnLog', e.message, true); }
+};
+
+$('register').onclick = async () => {
+  try {
+    if (!confirm('This makes you WSRO-on-Molibra\'s header authority PERMANENTLY.\n\n'
+      + 'Every claim will rest on Ethereum headers you attest. Continue?')) return;
+    await sendNative($('registerData').value, 'registerLog', 'BRIDGE_REGISTER');
+  } catch (e) { say('registerLog', e.message, true); }
+};
+$('commit').onclick = async () => {
+  try { await sendNative($('commitData').value, 'commitLog', 'HEADER_COMMIT'); }
+  catch (e) { say('commitLog', e.message, true); }
+};
+$('claim').onclick = async () => {
+  try { await sendNative($('claimData').value, 'claimLog', 'BRIDGE_CLAIM'); }
+  catch (e) { say('claimLog', e.message, true); }
+};
+
+// Steps 3 and 4 stay disabled until their payload exists — a button that cannot
+// work should not look like one that can.
+const gate = () => {
+  $('commit').disabled = !/^0x[0-9a-f]+$/i.test($('commitData').value.trim());
+  $('claim').disabled = !/^0x[0-9a-f]+$/i.test($('claimData').value.trim());
+};
+$('commitData').oninput = gate; $('claimData').oninput = gate; gate();
+
+$('refresh').onclick = async () => {
+  try {
+    const j = await (await fetch(NODE + '/molibra/bridge')).json();
+    const n = await (await fetch(NODE + '/molibra')).json();
+    const a = j.assets[0];
+    say('status', `node height ${n.height}\n`
+      + `registered assets ${j.assets.length} · claims honoured ${j.claimsHonoured} · headers ${j.headers.length}`
+      + (a ? `\n\n${a.symbol}: minted ${(Number(BigInt(a.minted)) / 1e18).toLocaleString()} of cap `
+        + `${(Number(BigInt(a.cap)) / 1e18).toLocaleString()}\nregistrar ${a.registrar}\nauthority ${a.authority}` : ''));
+  } catch (e) { say('status', e.message, true); }
+};
+$('refresh').onclick();
+</script>
