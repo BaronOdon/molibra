@@ -31,6 +31,12 @@ jobs:
       # was reviewed.
       - run: npm ci
       - run: npm test
+      # Runs on Linux only. The checks all pass on Windows too, but the process
+      # aborts on exit there (libuv src/win/async.c, after every assertion has
+      # already reported) tearing down the pooled fetch socket the sync used.
+      # Keeping it out of the `npm test` chain means that abort cannot stop the
+      # rest of the suite on a developer's machine.
+      - run: npm run test:sync
 
   secrets:
     name: secret scan

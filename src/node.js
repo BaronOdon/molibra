@@ -14,6 +14,12 @@ import { normalizeAddress } from './crypto.js';
 import { Treasury } from './faucet.js';
 import { Issuer } from './issuer.js';
 
+/** How many blocks a sync verifies between yielding the loop AND writing to
+ *  disk. One number, deliberately, so the two cadences cannot drift apart:
+ *  the pause that keeps the node answering is also the point at which its
+ *  progress becomes durable. */
+const SYNC_BATCH = 32;
+
 export class Node {
   constructor({ genesisPath, dataDir, miner = null, peers = [], minGasPrice = 1000000000n,
                 limits = {} }) {
@@ -64,7 +70,14 @@ export class Node {
   async stop() {
     this.stopMining();
     this.stopSyncing();
-    if (this.server) await new Promise((resolve) => this.server.close(resolve));
+    if (this.server) {
+      // close() alone only stops NEW connections and then waits for every
+      // keep-alive socket to go idle - so a node with a wallet or a syncing
+      // peer attached shuts down when that client feels like it, not when it
+      // is asked to. Drop the established sockets too.
+      this.server.closeAllConnections?.();
+      await new Promise((resolve) => this.server.close(resolve));
+    }
   }
 
   // --------------------------------------------------------------- mining
@@ -297,7 +310,15 @@ export class Node {
       for (const serialized of payload.blocks) {
         if (Number(serialized.header.number) === 0) continue; // genesis is ours already
         if (this.chain.blockByHash(serialized.hash)) continue;
-        const result = await this.chain.appendSerialized(serialized);
+        // ⛔⛔ persist: false, then a write per BATCH below - not per block.
+        // persist() rewrites the entire chain file, so persisting per block
+        // makes a sync quadratic in its own length: recovering the public node's
+        // 13,319 blocks wrote ~47.7 GB to disk to store 7 MB. Batching at the
+        // cadence that already exists here costs 32x less and risks only the
+        // blocks since the last write, which an interrupted sync re-fetches
+        // anyway. Same lesson as load(), from the acquiring side rather than
+        // the reading side.
+        const result = await this.chain.appendSerialized(serialized, { persist: false });
         if (result.accepted) accepted++;
         // Yield periodically. Verifying a block re-executes every transaction
         // in it, and doing a whole page without pause means the node answers
@@ -305,11 +326,15 @@ export class Node {
         // loop, which grinds in bounded slices for exactly this reason. A
         // node that goes silent whenever it syncs looks down to every wallet
         // pointed at it.
-        if (++sinceYield >= 32) {
+        if (++sinceYield >= SYNC_BATCH) {
           sinceYield = 0;
+          this.chain.persist();
           await new Promise((resolve) => setImmediate(resolve));
         }
       }
+      // Whatever the last partial batch acquired is durable before the next
+      // page is requested, so progress is never lost a page at a time.
+      this.chain.persist();
       const last = Number(payload.to ?? cursor);
       if (last < cursor) break; // no progress; stop rather than spin
       cursor = last + 1;
