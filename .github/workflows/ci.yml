@@ -63,14 +63,20 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The action does NOT pick up .gitleaks.toml on its own, so without
-          # this it scanned with bare defaults and failed on two 20-byte
-          # contract addresses in swap.html - public by construction, and the
-          # exact case the repo's allowlist was written for. A scan that cries
-          # wolf on every published address is a scan people learn to ignore.
-          # The allowlist is anchored to 0x + 40 hex; a secp256k1 key is 64 hex
-          # and cannot match it, so this narrows the noise and not the net.
-          GITLEAKS_CONFIG: .gitleaks.toml
+          # The action does NOT pick up .gitleaks.toml on its own: it
+          # auto-detects `gitleaks.toml` WITHOUT the leading dot, and this
+          # repository uses the conventional dotted name. Without a config it
+          # scans with bare defaults and fails on two 20-byte contract
+          # addresses in swap.html - public by construction, and the exact case
+          # the repo's allowlist was written for. A scan that cries wolf on
+          # every published address is a scan people learn to ignore, and the
+          # allowlist is anchored to 0x + 40 hex, so a 64-hex private key
+          # cannot match it: this narrows the noise and not the net.
+          #
+          # ⛔ ABSOLUTE path. A bare `.gitleaks.toml` here was still ignored -
+          # the action does not resolve it against the checkout - and the run
+          # failed identically while looking configured.
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
 
   hygiene:
     name: nothing private is tracked
