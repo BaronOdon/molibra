@@ -69,8 +69,25 @@ export const MOLI_BURN_TAG = toHex(keccak256(utf8('moliBurn(address,uint256)')))
  * ⛔ It must be far enough ahead that every node has upgraded first: the
  * public node at 193.123.191.142, the operator's miner, and anyone who joined
  * from the public repo. Molibra makes ~5,760 blocks a day.
+ *
+ * ⛔⛔ **This number is free to change now and FROZEN once the first burn is
+ * mined.** Replay re-applies every historical transaction with the height of
+ * its own block (src/chain.js) and this constant compiled in. So if a burn
+ * landed at 61,000 under an activation of 60,000 and this were later raised,
+ * replay would read that transaction as ordinary data, compute a different
+ * state root, and the node would reject its own chain. The window in which
+ * this is a one-line change is exactly "before anybody burns".
+ *
+ * ⚠ Mismatched values across nodes are not automatically a split: the
+ * divergence is triggered by a TRANSACTION, not by a height. A node still on
+ * an older value agrees on every block until a `moliBurn` actually appears
+ * above the lower of the two. That is what the margin below buys - not
+ * certainty that everyone upgraded, but a long stretch in which being late
+ * costs nothing.
+ *
+ * Set to 60,000 on 1 Sep 2026, when the tip was 12,432: about eight days.
  */
-export const MOLI_BURN_ACTIVATION = 20_000n;
+export const MOLI_BURN_ACTIVATION = 60_000n;
 
 /** Build the `data` for a burn-to-bridge instruction. */
 export function encodeMoliBurn(recipient, amount) {
