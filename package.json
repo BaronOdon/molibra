@@ -42,7 +42,7 @@
   "scripts": {
     "start": "node src/cli.js node",
     "keys": "node src/cli.js keys",
-    "test": "node test/run.js && node test/browser-work.mjs && node test/wallet.mjs && node test/blind.mjs && node test/create-page.mjs && node test/proof.mjs && node test/foreign.mjs && node test/anchor.mjs && node test/broker-page.mjs && node test/inbound.mjs && node test/evm-state.mjs && node test/evm.mjs && node test/burnproof.mjs && node test/credential.mjs && node test/pool.mjs && node test/bridgemint.mjs && node test/moliburn.mjs && node test/web-routes.mjs"
+    "test": "node test/run.js && node test/browser-work.mjs && node test/wallet.mjs && node test/blind.mjs && node test/create-page.mjs && node test/proof.mjs && node test/foreign.mjs && node test/anchor.mjs && node test/broker-page.mjs && node test/inbound.mjs && node test/evm-state.mjs && node test/evm.mjs && node test/burnproof.mjs && node test/credential.mjs && node test/pool.mjs && node test/bridgemint.mjs && node test/moliburn.mjs && node test/bridgedmoli-page.mjs && node test/web-routes.mjs"
   },
   "dependencies": {
     "@ethereumjs/common": "^10.1.3",

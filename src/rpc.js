@@ -404,7 +404,16 @@ function handleAudit(node, req, res) {
       attribution: chain.genesis.attribution,
       theories: chain.genesis.theories,
       peers: [...node.peers],
-      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle'],
+      // MOLI destroyed to be minted on another chain. It is the number a reader
+      // checks a bridged token's totalSupply against - which is only meaningful
+      // if the chain states it, rather than the bridge stating it about itself.
+      outbound: {
+        burned: chain.state.outbound.burned.toString(),
+        byRecipient: Object.fromEntries(
+          [...chain.state.outbound.byRecipient].map(([k, v]) => [k, v.toString()]),
+        ),
+      },
+      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli'],
     });
   }
 
@@ -494,6 +503,18 @@ function handleAudit(node, req, res) {
    */
   if (path === '/molibra/pool') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'pool.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * MOLI on Ethereum: burn here, mint there, against a proof of the burn.
+   * ⛔ One-way, and backed by the bonded anchor rather than verified work -
+   * both said on the page itself, where a reader can see them.
+   */
+  if (path === '/molibra/bridgedmoli') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridgedmoli.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
