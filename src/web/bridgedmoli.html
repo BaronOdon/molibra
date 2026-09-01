@@ -144,6 +144,7 @@
   </div>
   <dl>
     <dt>node tip</dt><dd id="stNode">—</dd>
+    <dt>burn gate</dt><dd id="stBurnGate">—</dd>
     <dt>anchor tip</dt><dd id="stTip">—</dd>
     <dt>window</dt><dd id="stWindow">—</dd>
     <dt>agree</dt><dd id="stAgree">—</dd>
@@ -200,6 +201,12 @@ const eth = () => {
 };
 
 let account = null;
+// ⛔⛔ Read from the node, never hardcoded here. Below this height a moliBurn
+// payload is not decoded as a burn at all: it takes the ordinary path, value is
+// zero, and NOTHING is destroyed. The page would have said "this destroys 1
+// MOLI" and been wrong at the exact moment somebody clicked.
+let burnActivation = null;
+let nodeHeight = null;
 
 async function rpc(url, method, params) {
   const r = await fetch(url, {
@@ -348,6 +355,19 @@ function buildBurn() {
 }
 function showBurn() {
   const b = buildBurn();
+  // ⛔⛔ Below the flag day this payload is not a burn. Saying "this destroys"
+  // would be false at the one moment it matters.
+  if (!b.error && burnActivation && !burnActivation.active) {
+    $('burnDecoded').innerHTML = `⛔ <b>Burning is not active yet.</b> Until Molibra height `
+      + `<b>${burnActivation.height.toLocaleString()}</b> this payload is not decoded as a burn: `
+      + `it takes the ordinary path, carries no value, and <b>destroys nothing</b>. You would pay `
+      + `the fee and have nothing to claim against. `
+      + `${burnActivation.blocksAway.toLocaleString()} blocks to go, about `
+      + `${Math.ceil(burnActivation.blocksAway * 15 / 86400)} days at a 15-second target.`;
+    $('burn').disabled = true;
+    return;
+  }
+  $('burn').disabled = false;
   $('burnDecoded').innerHTML = b.error
     ? '⛔ ' + b.error
     : `This destroys <b>${units(b.wei)} MOLI</b> and entitles <b>${b.to}</b> to exactly that much `
@@ -360,6 +380,19 @@ $('burnAmount').oninput = showBurn;
 $('burn').onclick = async () => {
   try {
     await requireMolibra();
+    // Re-read rather than trust what the panel last rendered: the gate may have
+    // opened, or the page may have been sitting here since before it was known.
+    const live = await (await fetch(NODE + '/molibra')).json();
+    const gate = live.activations?.moliBurn;
+    if (gate && !gate.active) {
+      throw new Error(`burning is not active until height ${gate.height} - the chain is at `
+        + `${live.height}, ${gate.blocksAway} blocks away. Below it this payload destroys nothing, `
+        + 'so there would be nothing to claim.');
+    }
+    if (!gate) {
+      throw new Error('this node does not publish its activation heights, so the page cannot tell '
+        + 'whether a burn would be decoded as one. Refusing rather than guessing.');
+    }
     const b = buildBurn();
     if (b.error) throw new Error(b.error);
     const target = $('burnTarget').value.trim();
@@ -527,6 +560,16 @@ async function refreshStatus() {
   try {
     const j = await (await fetch(NODE + '/molibra')).json();
     $('stNode').textContent = j.height + '  ' + j.head;
+    burnActivation = j.activations?.moliBurn ?? null;
+    nodeHeight = Number(j.height);
+    $('stBurnGate').textContent = !burnActivation
+      ? 'not published by this node'
+      : burnActivation.active
+        ? 'active since height ' + burnActivation.height
+        : 'NOT ACTIVE - ' + burnActivation.blocksAway.toLocaleString() + ' blocks to go (height '
+          + burnActivation.height.toLocaleString() + ', about '
+          + Math.ceil(burnActivation.blocksAway * 15 / 86400) + ' days at 15s)';
+    showBurn();
 
     // What Molibra says it destroyed. Absent on a node that has never seen a
     // burn, which is not an error - it is zero.

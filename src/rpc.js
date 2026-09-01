@@ -19,6 +19,7 @@ import { PURPOSE_LABELS } from './token.js';
 import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
 import { simulate } from './evm.js';
+import { MOLI_BURN_ACTIVATION } from './moliburn.js';
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
 
@@ -468,6 +469,27 @@ function handleAudit(node, req, res) {
       totalDifficulty: chain.totalDifficulty.toString(),
       knownBlocks: chain.byHash.size,
       lastReorg: chain.lastReorg,
+      // ⛔⛔ Flag days, stated rather than buried in source. Below its
+      // activation a moliBurn payload is NOT decoded as a burn - it takes the
+      // ordinary path and destroys nothing, which is exactly what a node on
+      // the old code does with it, and exactly what makes it dangerous to a
+      // reader who cannot see the number. A page that offers to destroy MOLI
+      // has to be able to check first, and so does anybody auditing why a
+      // burn did nothing.
+      activations: {
+        moliBurn: {
+          height: Number(MOLI_BURN_ACTIVATION),
+          active: chain.height >= MOLI_BURN_ACTIVATION,
+          blocksAway: chain.height >= MOLI_BURN_ACTIVATION
+            ? 0 : Number(MOLI_BURN_ACTIVATION - chain.height),
+        },
+        stateMerkle: {
+          height: Number(STATE_MERKLE_ACTIVATION),
+          active: chain.height >= STATE_MERKLE_ACTIVATION,
+          blocksAway: chain.height >= STATE_MERKLE_ACTIVATION
+            ? 0 : Number(STATE_MERKLE_ACTIVATION - chain.height),
+        },
+      },
       attribution: chain.genesis.attribution,
       theories: chain.genesis.theories,
       peers: [...node.peers],

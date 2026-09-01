@@ -119,6 +119,36 @@ check('the page is served by a route',
 check('and the node publishes the burn total the page reads',
   rpc.includes('outbound') && rpc.includes('burned'),
   'the conservation panel checks totalSupply against this');
+/* ------------------------------------------- the flag day the page must obey */
+
+// Below MOLI_BURN_ACTIVATION a moliBurn payload is NOT decoded as a burn:
+// state.js takes the ordinary path, the value is zero, and nothing is
+// destroyed. The page used to render "This destroys 1 MOLI" and enable the
+// button anyway - false at the one moment somebody acts on it. These checks
+// exist because a page that offers to destroy money must be able to say when
+// it cannot.
+
+check('the node publishes its activation heights',
+  rpc.includes('activations') && rpc.includes('MOLI_BURN_ACTIVATION'),
+  'a flag day nobody can read is one every page has to hardcode');
+check('and whether the gate is open, not just the number',
+  rpc.includes('active:') && rpc.includes('blocksAway'),
+  'a reader should not have to fetch the height and do the comparison');
+check('the page reads the gate from the node rather than hardcoding it',
+  page.includes('activations?.moliBurn') && !/const\s+MOLI_BURN_ACTIVATION/.test(page),
+  'a constant copied into a page drifts the moment the chain changes it');
+check('the page disables the burn button when the gate is shut',
+  /\$\('burn'\)\.disabled = true/.test(page));
+check('and refuses on click too, re-reading the node',
+  page.includes('burning is not active until height')
+  && page.includes('live.activations?.moliBurn'),
+  'the preview is advisory; the click is the gate');
+check('it refuses rather than guessing when a node publishes no activations',
+  page.includes('Refusing rather than guessing'),
+  'an old node that cannot answer is not evidence the gate is open');
+check('the gate is shown in the status panel, not only at the button',
+  page.includes('stBurnGate'));
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
