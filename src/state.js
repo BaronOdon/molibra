@@ -32,6 +32,7 @@ import {
   bridgeAuthority, mintCall, burnCall, isBurnCall, BRIDGE_GETTER,
 } from './bridgemint.js';
 import { InboundLedger } from './inbound.js';
+import { decodeMoliBurn, OutboundLedger, MOLI_BURN_ACTIVATION } from './moliburn.js';
 import { foreignAssetRecord } from './foreign.js';
 import { proveBurn } from './burnproof.js';
 
@@ -96,6 +97,11 @@ export class State {
     // that no longer exists. Assigned rather than passed in, so every existing
     // caller of this constructor keeps working unchanged.
     this.inbound = new InboundLedger();
+    // The outbound counter: MOLI destroyed to be minted on another chain.
+    // State for the same reason the inbound ledger is - a reorg must unwind
+    // a burn with the block that made it, or the far side would be holding a
+    // proof against a destruction this chain no longer records.
+    this.outbound = new OutboundLedger();
   }
 
   hasVoteKey(key) {
@@ -209,6 +215,7 @@ export class State {
       for (const [slot, value] of Object.entries(slots)) state.setStorage(address, slot, value);
     }
     if (obj && obj.inbound) state.inbound = InboundLedger.fromJSON(obj.inbound);
+    if (obj && obj.outbound) state.outbound = OutboundLedger.fromJSON(obj.outbound);
     return state;
   }
 
@@ -236,6 +243,8 @@ export class State {
     // so a datadir written before the bridge existed round-trips unchanged.
     const inbound = this.inbound.toJSON();
     if (inbound) out.inbound = inbound;
+    const outbound = this.outbound.toJSON();
+    if (outbound) out.outbound = outbound;
     return out;
   }
 
@@ -248,6 +257,7 @@ export class State {
     // The bridge ledger is copied, not shared: a candidate block honouring a
     // burn must not consume that burn in its parent's state.
     copy.inbound = this.inbound.clone();
+    copy.outbound = this.outbound.clone();
     return copy;
   }
 
@@ -433,6 +443,8 @@ export class State {
     // Appended only when present, so the chain that exists today, which has no
     // bridged asset on it, hashes to exactly the root it already has.
     lines.push(...this.inbound.rootLines());
+    // What has been destroyed to exist elsewhere, on the same terms.
+    lines.push(...this.outbound.rootLines());
     return toHex(keccak256(new TextEncoder().encode(lines.join('\n'))));
   }
 }
@@ -725,6 +737,32 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     releasingAsset = asset;
   }
 
+  // ⛔⛔ The outbound leg for MOLI ITSELF: destroy it here so it may be minted
+  // there. Unlike `bridgeOut` in src/bridge.js - which moves nothing and is a
+  // signed statement - this one really takes the coin out of existence, and
+  // that destruction is the only thing backing a unit on the far side.
+  //
+  // Checked here with everything else and executed below, because a burn that
+  // half-happened would either destroy MOLI the far side can never mint
+  // against, or mint against MOLI that still exists here.
+  // ⛔⛔ Gated by height. Below activation this decodes to null and the
+  // payload takes the ordinary path - which is EXACTLY what a node running
+  // the old code does with it, so the two agree until the flag day. See the
+  // note on MOLI_BURN_ACTIVATION before changing this.
+  const burningMoli = blockNumber >= MOLI_BURN_ACTIVATION ? decodeMoliBurn(tx.data) : null;
+  if (burningMoli) {
+    if (tx.value !== 0n) {
+      throw new Error('a MOLI burn carries its amount in the payload, not in value');
+    }
+    // The fee is taken on top of the burn, so the sender must cover both. The
+    // check is here, before any mutation, rather than relying on `debit` to
+    // throw halfway through applying the transaction.
+    if (state.balanceOf(tx.from) < total + burningMoli.amount) {
+      throw new Error(
+        `insufficient funds to burn: ${tx.from} needs ${total + burningMoli.amount}`);
+    }
+  }
+
   // ------------------------------------------------------------------ EVM
   //
   // A transaction reaches the EVM only when it is NOT one of Molibra's own
@@ -734,7 +772,8 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   // vote both live in `data`; if a contract could claim a vote payload, or a
   // vote could be routed to bytecode, the electoral rules would be optional.
   const native = Boolean(expression || creation || issue || moved || express
-    || opening || credential || registration || header || claimed || releasing);
+    || opening || credential || registration || header || claimed || releasing
+    || burningMoli);
 
   // ⛔ A bridged asset's units are destroyed through BRIDGE_RELEASE, never by
   // calling `burn` on the contract directly.
@@ -873,6 +912,14 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   }
   if (releasingAsset) {
     state.inbound.release({ tokenId: releasingAsset.id, amount: releasing.amount });
+  }
+  if (burningMoli) {
+    // ⛔ Debited and credited to NOBODY. There is no vault address, no
+    // treasury, no holding account - those are the things a bridge gets robbed
+    // through. The supply of MOLI simply falls, and the counter below is what
+    // the far side's totalSupply is checked against.
+    state.debit(tx.from, burningMoli.amount);
+    state.outbound.burn(burningMoli.recipient, burningMoli.amount);
   }
 
   if (issued) {
