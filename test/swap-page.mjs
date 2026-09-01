@@ -156,6 +156,9 @@ check('⛔⛔ deploy and create carry EXPLICIT gas',
   /data: FACTORY_BYTECODE, gas: '0x1E8480'/.test(page)
   && /SEL\.createPool \+ addr32\(t\), gas: '0x16E360'/.test(page),
   'a create quoted by a node that does not simulate creates runs out of gas and reads as a revert');
+check('⛔⛔ the page refuses to create a market for an already-seeded token',
+  page.includes('already has a pool at') && page.includes('SEED_MARKETS.find'),
+  'the factory only guards pools IT created; a hand-deployed pool is invisible to it');
 check('the factory can be deployed and markets created from the page',
   page.includes('deployFactory') && page.includes('SEL.createPool + addr32(t)'));
 

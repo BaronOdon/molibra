@@ -641,6 +641,24 @@ $('createPool').onclick = async () => {
     const t = $('createToken').value.trim();
     if (!isAddr(f)) throw new Error('deploy or paste a factory address first');
     if (!isAddr(t)) throw new Error('that is not a token address');
+
+    /**
+     * ⛔⛔ Refuse a token that ALREADY has a pool the factory cannot see.
+     *
+     * The factory's duplicate guard only knows about pools it created. The
+     * MOLI/WSRO pool was deployed by hand before the factory existed, so
+     * create() on that token SUCCEEDS and deploys a second pool - splitting
+     * the liquidity and giving one asset two prices. Verified by simulation,
+     * not assumed. The seed list is exactly the set of pools the factory is
+     * blind to, so it is the right thing to check against.
+     */
+    const seeded = SEED_MARKETS.find((m) => m.token.toLowerCase() === t.toLowerCase());
+    if (seeded) {
+      throw new Error(seeded.symbol + ' already has a pool at ' + seeded.pool
+        + ', created before this factory existed. The factory cannot see it and would deploy a '
+        + 'SECOND one, splitting the liquidity and giving the asset two prices. Nothing was sent.');
+    }
+
     say('factoryLog', 'creating the market — awaiting signature…');
     // ⛔ create() DEPLOYS a pool, so it costs far more than an ordinary call -
     // same explicit-gas reasoning as the factory deploy above.
