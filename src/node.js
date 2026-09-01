@@ -261,8 +261,22 @@ export class Node {
    * Returns how many new blocks entered the tree.
    */
   async syncFrom(peerUrl) {
-    const base = peerUrl.replace(/\/$/, '');
+    // ⛔ A peer is an ORIGIN, and every route below adds its own /molibra
+    // prefix. Passing the RPC path - which is what a wallet is configured with,
+    // and therefore what anyone reaches for - used to build /molibra/molibra/head,
+    // whose 404 arrived here as "cannot read properties of undefined (reading
+    // 'number')". On 1 Sep 2026 that error stopped a recovery mid-way and left
+    // a node mining from genesis with its history already moved aside. The two
+    // forms are unambiguous, so accept both rather than blaming the operator.
+    const base = peerUrl.replace(/\/$/, '').replace(/\/molibra$/, '');
     const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(5000) })).json();
+    if (!head?.header?.number) {
+      // Say which URL was asked and what came back. A TypeError three lines
+      // later tells an operator mid-recovery nothing at all.
+      throw new Error(`${base}/molibra/head did not answer with a head`
+        + ` (got ${JSON.stringify(head)?.slice(0, 120)}). --peer wants an origin like`
+        + ' http://host:8545, with or without a trailing /molibra.');
+    }
     const peerHeight = Number(head.header.number);
 
     // Walk back far enough to cover a fork, not just the gap in height, and
