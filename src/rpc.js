@@ -240,6 +240,34 @@ export function createRpcHandlers(node) {
     eth_estimateGas: async ([call]) => {
       const data = call?.data ?? call?.input ?? '0x';
       const base = intrinsicGas({ data });
+
+      /**
+       * ⛔⛔ A CREATE has no `to`, and this used to fall straight through to the
+       * intrinsic cost — so deploying a contract was quoted at the price of its
+       * calldata and nothing else. A 4,660-byte contract costs ~932,000 gas in
+       * code deposit alone at 200 gas per byte; the estimate came back 91,436.
+       * Every wallet that trusted it sent a transaction that ran out of gas,
+       * and out-of-gas presents to the user as "reverted", which points at the
+       * contract instead of at this line.
+       *
+       * Found by a real deploy failing from the swap page, not by a test.
+       */
+      const isCreate = !call?.to && data && data !== '0x';
+      if (isCreate) {
+        const r = await simulate(chain.state, {
+          from: call.from ? normalizeAddress(call.from) : '0x' + '00'.repeat(20),
+          to: null,
+          value: call.value ? BigInt(call.value) : 0n,
+          data: fromHex(data),
+          gasLimit: BigInt(chain.genesis.blockGasLimit),
+          chainId: BigInt(chain.chainId),
+          blockNumber: chain.head.header.number,
+          timestamp: BigInt(chain.head.header.timestamp),
+        });
+        if (r.failed) throw new RpcError(INVALID_PARAMS, `the deployment reverts: ${r.error}`);
+        return toQuantity(base + (r.gasUsed * 11n) / 10n);
+      }
+
       if (!call?.to || !chain.state.hasCode(call.to)) return toQuantity(base);
       const r = await simulate(chain.state, {
         from: call.from ? normalizeAddress(call.from) : '0x' + '00'.repeat(20),

@@ -618,8 +618,14 @@ $('deployFactory').onclick = async () => {
   try {
     await requireMolibra();
     if (FACTORY_BYTECODE.indexOf('0x') !== 0) throw new Error('no bytecode built into this page');
+    // ⛔⛔ Gas set EXPLICITLY. A deploy is quoted by the wallet's own
+    // eth_estimateGas, and a node that does not simulate creates answers with
+    // the calldata cost alone - which is what made the first attempt run out of
+    // gas and report "reverted". The node is fixed too, but a page that only
+    // works against a fixed node is a page that breaks on someone else's.
     say('factoryLog', 'deploying MolibraPoolFactory — awaiting signature…');
-    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, data: FACTORY_BYTECODE }] });
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [{
+      from: account, data: FACTORY_BYTECODE, gas: '0x1E8480' }] });   // 2,000,000
     const r = await waitFor(h, 'deploy');
     $('factoryAddr').value = r.contractAddress;
     say('factoryLog', 'factory at ' + r.contractAddress + '\nGas used: ' + BigInt(r.gasUsed).toLocaleString()
@@ -636,7 +642,10 @@ $('createPool').onclick = async () => {
     if (!isAddr(f)) throw new Error('deploy or paste a factory address first');
     if (!isAddr(t)) throw new Error('that is not a token address');
     say('factoryLog', 'creating the market — awaiting signature…');
-    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: f, data: SEL.createPool + addr32(t) }] });
+    // ⛔ create() DEPLOYS a pool, so it costs far more than an ordinary call -
+    // same explicit-gas reasoning as the factory deploy above.
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [{
+      from: account, to: f, data: SEL.createPool + addr32(t), gas: '0x16E360' }] });   // 1,500,000
     await waitFor(h, 'create');
     say('factoryLog', 'market created. It is listed in 03 now.');
     await refresh();

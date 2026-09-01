@@ -152,6 +152,10 @@ check('tokens can be added by address, permissionlessly',
   page.includes('molibra.tokens') && page.includes("$('add')"));
 check('⛔ a missing symbol() degrades rather than refusing the token',
   page.includes('function decodeString') && /OPTIONAL on real tokens/i.test(page));
+check('⛔⛔ deploy and create carry EXPLICIT gas',
+  /data: FACTORY_BYTECODE, gas: '0x1E8480'/.test(page)
+  && /SEL\.createPool \+ addr32\(t\), gas: '0x16E360'/.test(page),
+  'a create quoted by a node that does not simulate creates runs out of gas and reads as a revert');
 check('the factory can be deployed and markets created from the page',
   page.includes('deployFactory') && page.includes('SEL.createPool + addr32(t)'));
 
