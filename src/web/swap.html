@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOLI / WSRO · swap</title>
+<!--
+  A PUBLIC page. Anyone may connect a wallet and trade against the pool.
+
+  It holds no key, custodies nothing, and cannot move anybody's funds: every
+  transaction is signed in the reader's own wallet, and the only contract it
+  talks to is the pool itself.
+
+  ⛔⛔ The quoted output is ALWAYS read from the contract's own `quote()` by
+  eth_call, never recomputed here. A page that does its own constant-product
+  arithmetic will eventually disagree with the pool by a rounding step, and the
+  swap will revert on `minOut` for a reason the person cannot see. One source of
+  truth, and it is the chain.
+
+  ⛔ The pool is SMALL. Slippage in a constant-product pool is scale-invariant -
+  trading 2% of the pool moves the price about 4% no matter how big the pool is -
+  so the page shows price impact as a first-class number rather than hiding it
+  behind a default tolerance.
+-->
+<style>
+  :root{ --bg:#0b0b0c; --panel:#141416; --line:#26262b; --ink:#ececf0; --dim:#8b8b94;
+         --gold:#FFD100; --ok:#4ade80; --bad:#ff5c5c; --warn:#f0a500; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 20px}
+  .wrap{max-width:620px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:16px;margin-bottom:16px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
+  input{width:100%;background:#0e0e10;border:1px solid var(--line);border-radius:8px;
+        color:var(--ink);padding:11px;font-family:ui-monospace,Menlo,monospace;font-size:16px}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:11px 16px;
+         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
+  button.ghost{background:#22222a;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
+       white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)} .log.ok{color:var(--ok)}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
+  .note.warn{border-left-color:var(--warn);background:#1c1608}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:12px 0 0;font-size:13px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;text-align:right}
+  .out{font-size:26px;font-weight:650;font-family:ui-monospace,Menlo,monospace;margin:6px 0 0}
+  .flip{display:flex;align-items:center;justify-content:center;margin:10px 0}
+  .flip button{margin:0;background:#22222a;color:var(--gold);border:1px solid var(--line);
+               border-radius:999px;width:38px;height:38px;font-size:17px;padding:0}
+  .pair{display:flex;justify-content:space-between;align-items:baseline}
+  .pair span{color:var(--dim);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>MOLI / WSRO</h1>
+<p class="sub" id="banner">not connected — nothing is sent until you sign it</p>
+
+<div class="note bad">
+  <b>⛔ This pool is small.</b> Slippage in a constant-product pool is the same proportion at any
+  size: trading 2% of the pool moves the price about 4% whether the pool holds a hundred units or
+  a million. Check <b>price impact</b> below before you sign — it is shown for every trade, not
+  hidden behind a tolerance.
+</div>
+
+<div class="card">
+  <h2>1 · Wallet</h2>
+  <button id="connect">Connect wallet</button>
+  <dl>
+    <dt>account</dt><dd id="acct">—</dd>
+    <dt>network</dt><dd id="chain">—</dd>
+    <dt>MOLI</dt><dd id="balMoli">—</dd>
+    <dt>WSRO</dt><dd id="balTok">—</dd>
+  </dl>
+  <div class="log" id="walletLog"></div>
+</div>
+
+<div class="card">
+  <h2>2 · Swap</h2>
+
+  <div class="pair"><label id="inLabel">You pay — MOLI</label><span id="inBal"></span></div>
+  <input id="amountIn" value="1" spellcheck="false" inputmode="decimal">
+
+  <div class="flip"><button id="flip" title="Swap direction">⇅</button></div>
+
+  <label id="outLabel">You receive — WSRO (quoted by the contract)</label>
+  <div class="out" id="amountOut">—</div>
+
+  <dl>
+    <dt>rate</dt><dd id="rate">—</dd>
+    <dt>price impact</dt><dd id="impact">—</dd>
+    <dt>fee</dt><dd id="fee">—</dd>
+    <dt>minimum received</dt><dd id="minOut">—</dd>
+  </dl>
+
+  <label>Slippage tolerance, percent — the trade reverts rather than filling worse than this</label>
+  <input id="slippage" value="0.5" spellcheck="false" inputmode="decimal">
+
+  <div class="note" id="impactNote"></div>
+
+  <button id="approve" class="ghost" style="display:none">Approve WSRO</button>
+  <button id="swap" disabled>Swap</button>
+  <div class="log" id="swapLog"></div>
+</div>
+
+<div class="card">
+  <h2>3 · Pool</h2>
+  <dl>
+    <dt>MOLI reserve</dt><dd id="rMoli">—</dd>
+    <dt>WSRO reserve</dt><dd id="rTok">—</dd>
+    <dt>spot price</dt><dd id="spot">—</dd>
+    <dt>pool</dt><dd id="poolAddr">—</dd>
+  </dl>
+  <div class="note">
+    ⛔ Spot price is a <b>reserve ratio read right now</b>, not an oracle. It can be moved within a
+    single block by anybody with funds, and a contract that trusted it as a price feed would be
+    manipulable. It is shown here to inform a person, not to be consumed by code.
+  </div>
+  <button id="refresh" class="ghost">Refresh</button>
+  <div class="log" id="poolLog"></div>
+</div>
+</div>
+
+<script>
+const NODE = 'http://193.123.191.142:8545';
+const MOLIBRA_CHAIN_ID = '0x4f02';   // 20226
+const POOL = '0x4f34d9bc5db2396640d8eb564667e8701528b43d';
+const TOKEN = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
+const SYMBOL = 'WSRO';
+
+/**
+ * ⛔ Selectors are checked against keccak256 of their signatures by
+ * test/swap-page.mjs. A plausible-but-wrong selector does not throw — it builds
+ * a transaction that calls nothing, which is how settle.html once shipped a
+ * `release` selector that was not remotely the right number.
+ */
+const SEL = {
+  reserves:      '0x75172a8b',   // reserves()
+  quote:         '0xad615dec',   // quote(uint256,uint256,uint256)
+  swapMoliIn:    '0x6446f3fe',   // swapMoliForToken(uint256)
+  swapTokenIn:   '0xdfe1601e',   // swapTokenForMoli(uint256,uint256)
+  approve:       '0x095ea7b3',   // approve(address,uint256)
+  allowance:     '0xdd62ed3e',   // allowance(address,address)
+  balanceOf:     '0x70a08231',   // balanceOf(address)
+  token:         '0xfc0c546a',   // token()
+  addLiquidity:  '0x9cd441da',   // addLiquidity(uint256,uint256)
+  // factory
+  allMarkets:    '0x375a7cba',   // allMarkets()
+  poolOf:        '0x988b1fa7',   // poolOf(address)
+  createPool:    '0x9ed93318',   // create(address)
+  reservesOf:    '0x802c2ef1',   // reservesOf(address[])
+  tokenCount:    '0x9f181b5e',   // tokenCount()
+  // optional ERC-20 metadata: absent on plenty of real tokens, so never required
+  symbol:        '0x95d89b41',   // symbol()
+  decimals:      '0x313ce567',   // decimals()
+};
+
+/**
+ * Markets known without asking the factory.
+ *
+ * ⛔ The MOLI/WSRO pool predates the factory and is therefore NOT in its
+ * registry. A page that only listed factory pools would silently drop the one
+ * market that actually has liquidity today, so seeds and discovery are merged.
+ */
+const SEED_MARKETS = [
+  { token: '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a',
+    pool: '0x4f34d9bc5db2396640d8eb564667e8701528b43d', symbol: 'WSRO' },
+];
+
+/** Set with ?factory=0x… once it is deployed; discovery is skipped until then. */
+let FACTORY = null;
+
+const $ = (id) => document.getElementById(id);
+const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const hex = (v) => '0x' + BigInt(v).toString(16);
+const UNIT = 10n ** 18n;
+
+/** Decimal string -> wei, without floating point anywhere near the amount. */
+function toWei(s) {
+  const t = String(s ?? '').trim();
+  if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return null;
+  const [w, f = ''] = t.split('.');
+  const frac = (f + '0'.repeat(18)).slice(0, 18);
+  const v = BigInt(w || '0') * UNIT + BigInt(frac || '0');
+  return v > 0n ? v : null;
+}
+/** wei -> readable, without losing precision to Number on the way. */
+function fromWei(v, places = 6) {
+  const n = BigInt(v);
+  const w = n / UNIT;
+  const f = (n % UNIT).toString().padStart(18, '0').slice(0, places).replace(/0+$/, '');
+  return f ? `${w}.${f}` : `${w}`;
+}
+
+let account = null;
+let moliIn = true;   // direction: true = MOLI -> WSRO
+let reserves = { moli: 0n, tok: 0n };
+let lastQuote = 0n;
+
+const eth = () => {
+  if (!window.ethereum) throw new Error('no wallet in this browser');
+  return window.ethereum;
+};
+
+async function rpc(method, params) {
+  const r = await fetch(NODE + '/molibra', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+const call = (to, data) => rpc('eth_call', [{ to, data }, 'latest']);
+
+async function requireMolibra() {
+  if (!account) throw new Error('connect the wallet first');
+  let id = await eth().request({ method: 'eth_chainId' });
+  if (BigInt(id) === BigInt(MOLIBRA_CHAIN_ID)) return;
+  try {
+    await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MOLIBRA_CHAIN_ID }] });
+  } catch (e) {
+    if (e.code === 4902) {
+      await eth().request({ method: 'wallet_addEthereumChain', params: [{
+        chainId: MOLIBRA_CHAIN_ID, chainName: 'Molibra',
+        nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 },
+        rpcUrls: [NODE + '/molibra'],
+      }] });
+    } else throw e;
+  }
+  id = await eth().request({ method: 'eth_chainId' });
+  if (BigInt(id) !== BigInt(MOLIBRA_CHAIN_ID)) throw new Error('still not on Molibra');
+}
+
+$('connect').onclick = async () => {
+  try {
+    const a = await eth().request({ method: 'eth_requestAccounts' });
+    account = a[0];
+    $('acct').textContent = account;
+    await requireMolibra();
+    $('banner').textContent = 'connected — nothing is sent until you sign it';
+    await refresh();
+    say('walletLog', 'connected');
+  } catch (e) { say('walletLog', e.message, true); }
+};
+
+/* ------------------------------------------------------------- reading */
+
+async function refresh() {
+  try {
+    const raw = (await call(POOL, SEL.reserves)).replace(/^0x/, '');
+    reserves = { moli: BigInt('0x' + raw.slice(0, 64)), tok: BigInt('0x' + raw.slice(64, 128)) };
+    $('rMoli').textContent = fromWei(reserves.moli) + ' MOLI';
+    $('rTok').textContent = fromWei(reserves.tok) + ' ' + SYMBOL;
+    $('poolAddr').textContent = POOL.slice(0, 10) + '…' + POOL.slice(-6);
+    $('spot').textContent = reserves.moli > 0n
+      ? `1 MOLI = ${fromWei(reserves.tok * UNIT / reserves.moli)} ${SYMBOL}`
+      : 'empty';
+
+    const id = await eth?.().request?.({ method: 'eth_chainId' }).catch(() => null);
+    if (id) $('chain').textContent = BigInt(id) === BigInt(MOLIBRA_CHAIN_ID) ? 'Molibra (20226)' : `chain ${BigInt(id)} — not Molibra`;
+
+    if (account) {
+      const bal = await rpc('eth_getBalance', [account, 'latest']);
+      $('balMoli').textContent = fromWei(BigInt(bal)) + ' MOLI';
+      const tb = await call(TOKEN, SEL.balanceOf + addr32(account));
+      $('balTok').textContent = fromWei(BigInt(tb)) + ' ' + SYMBOL;
+    }
+    say('poolLog', 'read from the chain just now');
+    await requote();
+  } catch (e) { say('poolLog', e.message, true); }
+}
+$('refresh').onclick = refresh;
+
+/* -------------------------------------------------------------- quoting */
+
+/**
+ * ⛔⛔ The output comes from the CONTRACT's quote(), by eth_call. The page never
+ * does its own constant-product arithmetic: a page that computed it locally
+ * would eventually disagree with the pool by one rounding step, and the swap
+ * would revert on minOut for a reason nobody could see.
+ */
+async function requote() {
+  const amount = toWei($('amountIn').value);
+  const inTok = moliIn ? 'MOLI' : SYMBOL;
+  const outTok = moliIn ? SYMBOL : 'MOLI';
+  $('inLabel').textContent = `You pay — ${inTok}`;
+  $('outLabel').textContent = `You receive — ${outTok} (quoted by the contract)`;
+
+  if (!amount || reserves.moli === 0n) {
+    $('amountOut').textContent = '—';
+    $('rate').textContent = $('impact').textContent = $('fee').textContent = $('minOut').textContent = '—';
+    $('impactNote').textContent = '';
+    $('swap').disabled = true;
+    lastQuote = 0n;
+    return;
+  }
+
+  const rIn = moliIn ? reserves.moli : reserves.tok;
+  const rOut = moliIn ? reserves.tok : reserves.moli;
+  const out = BigInt(await call(POOL, SEL.quote + word(amount) + word(rIn) + word(rOut)));
+  lastQuote = out;
+
+  $('amountOut').textContent = out === 0n ? '0' : fromWei(out) + ' ' + outTok;
+  $('rate').textContent = `1 ${inTok} = ${fromWei(out * UNIT / amount)} ${outTok}`;
+
+  // Price impact: how far the executed rate sits below the spot rate. Computed
+  // in integers scaled by 10^6 so a big trade cannot overflow a Number.
+  const spotOut = amount * rOut / rIn;
+  const impactBp = spotOut > 0n ? Number((spotOut - out) * 10000n / spotOut) / 100 : 0;
+  $('impact').textContent = impactBp.toFixed(2) + '%';
+  $('fee').textContent = '0.3% (997/1000), already inside the quote';
+
+  const slip = Number($('slippage').value);
+  const ok = Number.isFinite(slip) && slip >= 0 && slip < 100;
+  const minOut = ok ? out * BigInt(Math.round((100 - slip) * 100)) / 10000n : 0n;
+  $('minOut').textContent = ok ? fromWei(minOut) + ' ' + outTok : 'set a tolerance';
+
+  const note = $('impactNote');
+  if (impactBp >= 10) {
+    note.className = 'note bad';
+    note.innerHTML = `⛔⛔ <b>Price impact ${impactBp.toFixed(2)}%.</b> You are trading a large `
+      + 'fraction of this pool and will receive far less than the spot rate suggests. '
+      + 'Consider a smaller amount — the impact falls roughly in proportion.';
+  } else if (impactBp >= 2) {
+    note.className = 'note warn';
+    note.innerHTML = `⚠ <b>Price impact ${impactBp.toFixed(2)}%.</b> This is a thin pool; the rate `
+      + 'you get is meaningfully worse than spot.';
+  } else {
+    note.className = 'note';
+    note.innerHTML = `Price impact ${impactBp.toFixed(2)}%. The quote above is what the contract `
+      + 'itself returns for this amount.';
+  }
+
+  $('swap').disabled = !account || out === 0n || !ok;
+  await refreshAllowance(amount);
+}
+
+$('amountIn').oninput = () => requote().catch((e) => say('swapLog', e.message, true));
+$('slippage').oninput = () => requote().catch((e) => say('swapLog', e.message, true));
+$('flip').onclick = () => { moliIn = !moliIn; requote().catch(() => {}); };
+
+/* ------------------------------------------------------------ approval */
+
+async function refreshAllowance(amount) {
+  const btn = $('approve');
+  if (moliIn || !account) { btn.style.display = 'none'; return; }
+  // Selling the token needs an allowance; selling native MOLI does not.
+  const a = BigInt(await call(TOKEN, SEL.allowance + addr32(account) + addr32(POOL)));
+  if (a >= amount) { btn.style.display = 'none'; return; }
+  btn.style.display = 'inline-block';
+  btn.textContent = `Approve ${SYMBOL}`;
+}
+
+$('approve').onclick = async () => {
+  try {
+    await requireMolibra();
+    const amount = toWei($('amountIn').value);
+    if (!amount) throw new Error('enter an amount first');
+    // ⛔ Approve exactly this trade, not an unlimited allowance. An infinite
+    // approval is convenient once and permanent afterwards: it leaves the pool
+    // able to move that token from this wallet forever.
+    const data = SEL.approve + addr32(POOL) + word(amount);
+    say('swapLog', `approving exactly ${fromWei(amount)} ${SYMBOL} — not unlimited…`);
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: TOKEN, data }] });
+    await waitFor(h, 'approve');
+    say('swapLog', 'approved. You can swap now.');
+    await requote();
+  } catch (e) { say('swapLog', e.message, true); }
+};
+
+/* ---------------------------------------------------------------- swap */
+
+async function waitFor(hash, label) {
+  say('swapLog', `${label}: sent ${hash}\nwaiting to be mined…`);
+  for (let i = 0; i < 60; i++) {
+    const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+    if (r) {
+      if (r.status !== '0x1') throw new Error(`${label} reverted`);
+      return r;
+    }
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+  throw new Error('not mined within three minutes');
+}
+
+$('swap').onclick = async () => {
+  try {
+    await requireMolibra();
+    const amount = toWei($('amountIn').value);
+    if (!amount) throw new Error('enter an amount');
+
+    // ⛔ Re-quote immediately before signing. The reserves may have moved since
+    // the number on screen was fetched, and minOut must be derived from what is
+    // true now — otherwise the tolerance protects against the wrong price.
+    await refresh();
+    const out = lastQuote;
+    if (out === 0n) throw new Error('the pool cannot fill this trade');
+    const slip = Number($('slippage').value);
+    const minOut = out * BigInt(Math.round((100 - slip) * 100)) / 10000n;
+
+    let tx;
+    if (moliIn) {
+      tx = { from: account, to: POOL, value: hex(amount), data: SEL.swapMoliIn + word(minOut) };
+    } else {
+      tx = { from: account, to: POOL, data: SEL.swapTokenIn + word(amount) + word(minOut) };
+    }
+    say('swapLog', `swapping ${fromWei(amount)} ${moliIn ? 'MOLI' : SYMBOL} for at least `
+      + `${fromWei(minOut)} ${moliIn ? SYMBOL : 'MOLI'}…\nawaiting signature.`);
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
+    await waitFor(h, 'swap');
+    say('swapLog', 'swapped. The pool paid at least your minimum, or it would have reverted.');
+    await refresh();
+  } catch (e) {
+    const m = String(e.message || '');
+    say('swapLog', /Insufficient|revert/i.test(m)
+      ? m + '\n\n⛔ A revert here usually means the price moved past your tolerance between '
+        + 'quoting and mining, which is the tolerance doing its job. Re-quote and try again.'
+      : m, true);
+  }
+};
+
+/* Everything specific to one run comes from the URL, never a hand-edit. */
+const params = new URLSearchParams(location.search);
+if (params.get('amount')) $('amountIn').value = params.get('amount');
+if (params.get('slippage')) $('slippage').value = params.get('slippage');
+if (params.get('sell') === 'wsro') moliIn = false;
+
+refresh().catch((e) => say('poolLog', 'could not reach the node: ' + e.message, true));
+</script>
+</body>
+</html>

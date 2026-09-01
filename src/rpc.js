@@ -592,6 +592,17 @@ function handleAudit(node, req, res) {
    * ⛔ One-way, and backed by the bonded anchor rather than verified work -
    * both said on the page itself, where a reader can see them.
    */
+  /**
+   * The public trading page. Anyone may connect a wallet and swap against the
+   * MOLI/WSRO pool. It holds no key and custodies nothing.
+   */
+  if (path === '/molibra/swap') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'swap.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/bridgedmoli') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridgedmoli.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
