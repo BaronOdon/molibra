@@ -61,3 +61,10 @@ start-bridge-node.ps1
 # decides the filing position. Moving a file OUT of this directory is a
 # deliberate decision to disclose it, not a tidy-up.
 patent-private/
+
+# ⛔⛔ UNDECIDED — neither filed nor published, and not to be pushed.
+# Deliberately NOT in patent-private/, because that directory presumes a filing
+# intent. These are ideas the operator has not yet routed to patent or to paper.
+# Publishing bears on novelty, so a push forecloses one of the two options
+# before it has been chosen.
+UNDECIDED-*.md
