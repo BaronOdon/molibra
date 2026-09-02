@@ -48,7 +48,11 @@
 
 <script>
 const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
-const MOLIBRA_RPC = 'http://193.123.191.142:8545';
+// Follow the serving origin - see the note in bridgedmoli.html. A hardcoded
+// host breaks the moment the node answers to a name over TLS.
+const MOLIBRA_RPC = location.protocol.startsWith('http')
+  ? location.origin
+  : 'http://193.123.191.142:8545';
 
 const POOL = '0xfcaee25dd24c129a9069fcd2bedc7cd05798c47e';   // WSRO/WETH SushiSwap V3, fee 100
 const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';

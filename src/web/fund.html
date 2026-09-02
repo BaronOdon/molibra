@@ -226,11 +226,17 @@ button, and nothing is signed anywhere but in your own wallet.</p>
 <pre id="preflight">Nothing staged.</pre>
 
 <script>
+// Follow the serving origin where there is one; fund.html is local-only and is
+// usually opened as a file, which is what the literal fallback is for.
+const NODE_ORIGIN = location.protocol.startsWith('http')
+  ? location.origin
+  : 'http://193.123.191.142:8545';
+
 const MOLIBRA = {
   chainId: '0x4EF2',                       // 20226
   chainName: 'Molibra',
   nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
-  rpcUrls: ['http://193.123.191.142:8545'],
+  rpcUrls: [NODE_ORIGIN],
   blockExplorerUrls: [],
 };
 
@@ -570,7 +576,7 @@ SEL.anchor = '0xdfedea24';      // anchor(uint256,bytes32,uint256)
 /** Read the live tip from the public node so the operator anchors a real head. */
 (async () => {
   try {
-    const r = await fetch('http://193.123.191.142:8545/molibra');
+    const r = await fetch(NODE_ORIGIN + '/molibra');
     const j = await r.json();
     $('aHeight').value = String(j.height);
     $('aWork').value = String(BigInt(j.totalDifficulty));

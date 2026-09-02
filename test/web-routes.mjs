@@ -75,6 +75,28 @@ for (const name of [...served].sort()) {
   check(`the route for ${name} has a file`, onDisk.has(name),
     onDisk.has(name) ? '' : 'rpc.js reads a page that is not in src/web');
 }
+/* ------------------------ a page follows the node that served it */
+
+// A page fetched over https://molibra.org cannot fetch http://<ip>:8545 - the
+// browser blocks it as mixed content and every control on the page dies at
+// once. So the moment this node answers to a name over TLS, any page holding a
+// hardcoded host is broken, and it breaks quietly: the HTML loads fine and only
+// the fetches fail. Each page must follow location.origin, keeping the literal
+// only as the fallback for opening the file directly.
+
+const webDir = join(ROOT, 'src/web');
+for (const name of readdirSync(webDir).filter((f) => f.endsWith('.html'))) {
+  const html = readFileSync(join(webDir, name), 'utf8');
+  if (!/193\.123\.191\.142/.test(html)) continue;   // nothing to say about it
+  check(`${name} follows the serving origin`,
+    html.includes('location.origin'),
+    'a hardcoded host survives only until the node has a name');
+  const uses = [...html.matchAll(/193\.123\.191\.142/g)].length;
+  const fallbacks = [...html.matchAll(/:\s*'http:\/\/193\.123\.191\.142:8545'/g)].length;
+  check(`  and every mention of the IP is that fallback, not a live value`,
+    uses === fallbacks, `${uses} mention(s), ${fallbacks} as a fallback`);
+}
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

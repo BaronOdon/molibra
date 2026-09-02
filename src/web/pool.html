@@ -94,7 +94,16 @@
 </div>
 
 <script>
-const NODE = 'http://193.123.191.142:8545';
+// ⛔⛔ The origin that SERVED this page, not a hardcoded host.
+// A page fetched over https://molibra.org cannot fetch http://<ip>:8545 - the
+// browser blocks it as mixed content, and every button on the page dies at
+// once. Following the serving origin means the same file works over TLS on a
+// domain, over plain HTTP on an IP, and on a laptop on localhost, with nothing
+// to edit. The literal below is only the fallback for opening the file
+// directly, where there is no origin to follow.
+const NODE = location.protocol.startsWith('http')
+  ? location.origin
+  : 'http://193.123.191.142:8545';
 const CHAIN_ID = 20226, CHAIN_HEX = '0x4f02';
 const WSRO_USD = 1.7215e-5;   // WSRO in USD, from its own Ethereum pool
 
