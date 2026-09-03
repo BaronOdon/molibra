@@ -45,7 +45,13 @@ check('there are pages to check', pages.length > 0, `${pages.length} found`);
  * without routes some time earlier; they are recorded here rather than quietly
  * routed so the gap stays visible instead of turning into a silent 404.
  */
-const LOCAL_ONLY = new Set(['chart.html', 'fund.html', 'mint-giz.html']);
+const LOCAL_ONLY = new Set(['fund.html', 'mint-giz.html']);
+// chart.html was removed from this set on 3 Sep 2026, deliberately and for the
+// stated reason. The rationale above is funding and minting: chart.html does
+// neither. It signs nothing, holds no key, touches no wallet at all - it reads
+// pairs and draws them. It was in this list by proximity to two pages that do
+// touch funds, not by the rule the list exists to enforce. fund.html and
+// mint-giz.html stay, because for them the rule applies exactly.
 
 /**
  * The route table, read out of the source: every `'web', 'name.html'` join.
@@ -96,6 +102,29 @@ for (const name of readdirSync(webDir).filter((f) => f.endsWith('.html'))) {
   check(`  and every mention of the IP is that fallback, not a live value`,
     uses === fallbacks, `${uses} mention(s), ${fallbacks} as a fallback`);
 }
+
+/* ----------------------- the front page may not link into nothing */
+
+// The site is the one page a stranger sees first, and a dead link there is
+// worse than a missing feature: it says the project does not check itself.
+// Every internal href in index.html must correspond to a route rpc.js serves.
+
+const index = readFileSync(join(ROOT, 'src/web/index.html'), 'utf8');
+const routes = new Set([...rpc.matchAll(/path === '(\/[^']*)'/g)].map((m) => m[1]));
+const hrefs = [...new Set([...index.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]))];
+
+check('the front page links somewhere at all', hrefs.length > 5, `${hrefs.length} internal links`);
+for (const h of hrefs) {
+  check(`  ${h} is a route rpc.js serves`, routes.has(h),
+    routes.has(h) ? '' : 'the front page links into nothing');
+}
+check('and the site itself is routed at the root', routes.has('/'),
+  "a front page nobody can open is a file, not a site");
+check('while /molibra stays the identity JSON', rpc.includes("path === '/molibra'"),
+  'moving the API to take the root would break every page and syncFrom');
+check('the white paper is served from the repo file, not a copy',
+  rpc.includes("'..', 'WHITEPAPER.md'"),
+  'a second copy of the paper is a copy that drifts');
 
 
 console.log(`\n${pass} passed, ${fail} failed`);

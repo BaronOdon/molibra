@@ -1,0 +1,277 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molibra — a public chain for the libertarian and MQT community</title>
+<meta name="description" content="Molibra is a public blockchain that records acts rather than answers. Native coin MOLI, chain id 20226. Run a node, read the chain, verify it yourself.">
+<style>
+  /* Black and gold - the libertarian flag, read as a terminal. The tokens are
+     lifted verbatim from swap.html and settle.html so the front door and the
+     rooms behind it are one system rather than two that resemble each other. */
+  :root{
+    --void:#07070a; --ink:#f5f3ea; --dim:#8d8a7d; --dimmer:#5a584f;
+    --gold:#FFD100; --gold-dk:#c9a600; --gold-glow:rgba(255,209,0,.35);
+    --glass:rgba(20,20,16,.55); --edge:rgba(255,209,0,.16);
+    --bad:#ff4d4d; --ok:#66ff9e; --warn:#ffa62b;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;color:var(--ink);background:var(--void);
+    font:14px/1.6 var(--mono);padding:34px 18px 90px;position:relative;overflow-x:hidden;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgba(255,209,0,.10), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      var(--void);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px);
+    opacity:.5;
+  }
+  .wrap{max-width:900px;margin:0 auto;position:relative}
+
+  header{margin:0 0 30px}
+  .mark{font:700 clamp(34px,7vw,56px)/1 var(--mono);letter-spacing:.22em;color:var(--gold);
+        text-shadow:0 0 26px var(--gold-glow);margin:0}
+  .tag{color:var(--dim);font-size:11px;letter-spacing:.28em;text-transform:uppercase;margin:12px 0 0}
+  .lede{color:var(--ink);font-size:15px;max-width:60ch;margin:20px 0 0;line-height:1.75}
+  .lede b{color:var(--gold)}
+
+  .panel{
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(14px) saturate(130%);
+    backdrop-filter:blur(14px) saturate(130%);
+    border:1px solid var(--edge);border-radius:4px;
+    padding:20px;margin-bottom:16px;position:relative;
+    box-shadow:0 0 0 1px rgba(0,0,0,.5), 0 18px 50px -30px rgba(0,0,0,.9);
+  }
+  h2{font:500 10px/1 var(--mono);letter-spacing:.3em;text-transform:uppercase;
+     color:var(--gold-dk);margin:0 0 6px}
+  .sub{color:var(--dimmer);font-size:12px;margin:0 0 16px;max-width:62ch;line-height:1.7}
+
+  /* live strip */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+         background:var(--edge);border:1px solid var(--edge);border-radius:4px;overflow:hidden}
+  .stat{background:rgba(10,10,8,.82);padding:14px 16px}
+  .stat .k{color:var(--dimmer);font-size:9px;letter-spacing:.2em;text-transform:uppercase}
+  .stat .v{color:var(--gold);font-size:19px;margin-top:6px;word-break:break-all}
+  .stat .v.small{font-size:13px;color:var(--ink)}
+  .stat .v.off{color:var(--warn)}
+
+  /* resource grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+  a.card{
+    display:block;text-decoration:none;color:inherit;
+    background:rgba(0,0,0,.35);border:1px solid var(--edge);border-radius:3px;
+    padding:15px 16px;transition:border-color .15s, box-shadow .15s, transform .15s;
+  }
+  a.card:hover{border-color:var(--gold);box-shadow:0 0 24px -6px var(--gold-glow);transform:translateY(-1px)}
+  a.card .t{color:var(--gold);font-size:13px;letter-spacing:.1em;text-transform:uppercase}
+  a.card .d{color:var(--dim);font-size:11.5px;margin-top:7px;line-height:1.65}
+  a.card .u{color:var(--dimmer);font-size:10px;margin-top:9px;letter-spacing:.06em}
+  a.card.ext .t::after{content:" \2197";color:var(--gold-dk)}
+
+  .note{border-left:2px solid var(--gold-dk);background:rgba(255,209,0,.05);
+        padding:12px 14px;margin:16px 0 0;font-size:12px;color:var(--dim);line-height:1.7}
+  .note b{color:var(--ink)}
+  code{background:rgba(0,0,0,.5);border:1px solid var(--edge);border-radius:2px;
+       padding:2px 6px;color:var(--gold);font-size:12px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px;margin-top:12px}
+  .kv dt{color:var(--dimmer);letter-spacing:.12em;text-transform:uppercase;font-size:10px;padding-top:2px}
+  .kv dd{margin:0;color:var(--ink);word-break:break-all}
+  footer{color:var(--dimmer);font-size:11px;margin-top:34px;line-height:1.9}
+  footer a{color:var(--gold-dk)}
+</style>
+
+<div class="wrap">
+<header>
+  <h1 class="mark">MOLIBRA</h1>
+  <p class="tag">public chain &middot; native coin MOLI &middot; chain id 20226</p>
+  <p class="lede">
+    A chain that records <b>what people chose to do</b>, not what they said when asked.
+    Preference revealed by action is the datum; the record is a record of acts.
+    No privileged verifier, open entry, and equal weight enforced by the protocol
+    rather than promised in a document.
+  </p>
+</header>
+
+<div class="panel">
+  <h2>Live</h2>
+  <p class="sub">Read from this node as you loaded the page. Every figure below is
+    re-derivable by anyone running their own node against the same blocks.</p>
+  <div class="stats">
+    <div class="stat"><div class="k">height</div><div class="v" id="height">—</div></div>
+    <div class="stat"><div class="k">difficulty</div><div class="v small" id="diff">—</div></div>
+    <div class="stat"><div class="k">MOLI destroyed</div><div class="v small" id="burned">—</div></div>
+    <div class="stat"><div class="k">burn gate</div><div class="v small" id="gate">—</div></div>
+    <div class="stat"><div class="k">readers /15m</div><div class="v small" id="readers">—</div></div>
+  </div>
+  <div class="note" id="headnote">head <span id="head">—</span></div>
+</div>
+
+<div class="panel">
+  <h2>Start here</h2>
+  <p class="sub">You need no money to begin. Chalk is earned by solving a puzzle bound to
+    your own address, so a wallet holding nothing can still speak.</p>
+  <div class="grid">
+    <a class="card" href="/molibra/connect">
+      <div class="t">Connect a wallet</div>
+      <div class="d">Add Molibra to MetaMask, or make a key in the page. No seed phrase, no faucet, no exchange.</div>
+      <div class="u">/molibra/connect</div></a>
+    <a class="card" href="/molibra/chalk">
+      <div class="t">Earn chalk</div>
+      <div class="d">Solve a puzzle bound to your address and receive the units expression costs. Hands over no MOLI.</div>
+      <div class="u">/molibra/chalk</div></a>
+    <a class="card" href="/molibra/create">
+      <div class="t">Create a token</div>
+      <div class="d">A question or an asset. The id is derived, never chosen, so nobody squats a name.</div>
+      <div class="u">/molibra/create</div></a>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Markets</h2>
+  <p class="sub">Any pair in two hops, one pool per token, and expression tokens
+    structurally excluded &mdash; a question has no market because it has no price.</p>
+  <div class="grid">
+    <a class="card" href="/molibra/swap">
+      <div class="t">DEX</div>
+      <div class="d">Swap any listed pair, route through two hops, deploy the factory and open a market from the page.</div>
+      <div class="u">/molibra/swap</div></a>
+    <a class="card" href="/molibra/pool">
+      <div class="t">Liquidity</div>
+      <div class="d">Add and read depth. A deposit adds depth; it never sets a price.</div>
+      <div class="u">/molibra/pool</div></a>
+    <a class="card" href="/molibra/chart">
+      <div class="t">Chart</div>
+      <div class="d">Price and depth over time, drawn from the chain's own blocks.</div>
+      <div class="u">/molibra/chart</div></a>
+    <a class="card" href="/molibra/broker">
+      <div class="t">Broker</div>
+      <div class="d">The Ethereum side: WSRO, WETH and the live position that holds the only real liquidity.</div>
+      <div class="u">/molibra/broker</div></a>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Bridge to Ethereum</h2>
+  <p class="sub">One way, and honest about it. Burning MOLI destroys it; there is no
+    instruction that brings it back. Backing is a bonded attestation, not proof of work.</p>
+  <div class="grid">
+    <a class="card" href="/molibra/bridgedmoli">
+      <div class="t">bMOLI</div>
+      <div class="d">Destroy MOLI here, mint the same amount on Ethereum against a proved burn.</div>
+      <div class="u">/molibra/bridgedmoli</div></a>
+    <a class="card" href="/molibra/settle">
+      <div class="t">Settlement</div>
+      <div class="d">Anchor a block on Ethereum and release a bridge-out against the proof.</div>
+      <div class="u">/molibra/settle</div></a>
+    <a class="card" href="/molibra/inbound">
+      <div class="t">Inbound</div>
+      <div class="d">Assets arriving from another chain. Expression never crosses, in any wrapping.</div>
+      <div class="u">/molibra/inbound</div></a>
+    <a class="card" href="/molibra/bridge">
+      <div class="t">Bridge out</div>
+      <div class="d">Sign the statement that a holding is leaving. It destroys nothing on its own.</div>
+      <div class="u">/molibra/bridge</div></a>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Read and verify</h2>
+  <p class="sub">Nothing here asks to be believed. The block format, the verification rules
+    and the replication endpoint are public, and divergence between nodes is publicly detectable.</p>
+  <div class="grid">
+    <a class="card" href="/molibra/whitepaper">
+      <div class="t">White paper</div>
+      <div class="d">What the chain does, and a section that lists only what is unsolved.</div>
+      <div class="u">/molibra/whitepaper</div></a>
+    <a class="card" href="/molibra/theories">
+      <div class="t">Theories</div>
+      <div class="d">Libertarian theory and the Macrobiotic Quantum Theory, named in the genesis block.</div>
+      <div class="u">/molibra/theories</div></a>
+    <a class="card ext" href="https://github.com/BaronOdon/molibra">
+      <div class="t">Source</div>
+      <div class="d">Apache-2.0. Clone it, run the README, and check this node against your own.</div>
+      <div class="u">github.com/BaronOdon/molibra</div></a>
+    <a class="card" href="/molibra">
+      <div class="t">Node API</div>
+      <div class="d">Chain identity, height, head, activations and the audit routes, as JSON.</div>
+      <div class="u">/molibra</div></a>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Add this chain to a wallet</h2>
+  <p class="sub">Molibra answers the JSON-RPC method set a standard wallet calls, so it is
+    added as a custom network with no bespoke client.</p>
+  <dl class="kv">
+    <dt>Network</dt><dd>Molibra</dd>
+    <dt>RPC URL</dt><dd id="rpcurl">—</dd>
+    <dt>Chain ID</dt><dd>20226 <span style="color:var(--dimmer)">(0x4f02)</span></dd>
+    <dt>Symbol</dt><dd>MOLI</dd>
+    <dt>Decimals</dt><dd>18</dd>
+  </dl>
+  <div class="note">
+    <b>A public endpoint is a convenience, not the design.</b> The point of the chain is that
+    you do not have to trust this node: run your own, replay every block, and compare heads.
+    The <a href="https://github.com/BaronOdon/molibra" style="color:var(--gold-dk)">README</a> is the whole of it.
+  </div>
+</div>
+
+<footer>
+  <div id="attrib"></div>
+  <div style="margin-top:10px">
+    Apache-2.0 &middot; chain id 20226 &middot;
+    <a href="/molibra">node identity</a> &middot;
+    <a href="/molibra/theories">theories</a> &middot;
+    <a href="https://github.com/BaronOdon/molibra">source</a>
+  </div>
+</footer>
+</div>
+
+<script>
+// ⛔ Follow the origin that served this page - see the note in bridgedmoli.html.
+// The site must work over TLS on a domain, over plain HTTP on an IP, and on a
+// laptop, without editing a literal.
+const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
+const $ = (id) => document.getElementById(id);
+const num = (n) => Number(n).toLocaleString();
+
+$('rpcurl').textContent = NODE;
+
+(async () => {
+  try {
+    const j = await (await fetch(NODE + '/molibra')).json();
+    $('height').textContent = num(j.height);
+    $('diff').textContent = j.totalDifficulty ? num(j.totalDifficulty) : '—';
+    $('head').textContent = j.head;
+    $('burned').textContent = (Number(j.outbound?.burned ?? 0) / 1e18).toLocaleString() + ' MOLI';
+    $('readers').textContent = j.readers ? num(j.readers.distinct) : '—';
+
+    const g = j.activations?.moliBurn;
+    if (!g) $('gate').textContent = '—';
+    else if (g.active) $('gate').textContent = 'open';
+    else {
+      $('gate').classList.add('off');
+      $('gate').textContent = num(g.blocksAway) + ' blocks';
+      $('gate').title = 'burning activates at height ' + g.height;
+    }
+
+    const a = j.attribution;
+    if (a) {
+      $('attrib').innerHTML = 'Origin credit: ' + (a.originAttributedTo || []).join(' &middot; ')
+        + (a.coAuthors?.length ? ' &middot; co-authored with ' + a.coAuthors.map((c) => c.name).join(', ') : '');
+    }
+  } catch (e) {
+    // A front page that cannot read its own node should say so rather than
+    // render zeros, which look like facts.
+    for (const id of ['height','diff','burned','gate','readers']) $(id).textContent = 'no node';
+    $('headnote').textContent = 'this node did not answer: ' + e.message;
+  }
+})();
+</script>

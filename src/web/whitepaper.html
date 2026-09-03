@@ -1,0 +1,169 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molibra — white paper</title>
+<style>
+  /* Same tokens as index.html and the operator pages: one system, not three. */
+  :root{
+    --void:#07070a; --ink:#f5f3ea; --dim:#8d8a7d; --dimmer:#5a584f;
+    --gold:#FFD100; --gold-dk:#c9a600; --gold-glow:rgba(255,209,0,.35);
+    --glass:rgba(20,20,16,.55); --edge:rgba(255,209,0,.16);
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;color:var(--ink);background:var(--void);
+       font:14px/1.85 var(--mono);padding:34px 18px 90px;overflow-x:hidden}
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgba(255,209,0,.10), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      var(--void);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px);
+    opacity:.5;
+  }
+  .wrap{max-width:780px;margin:0 auto}
+  .back{color:var(--gold-dk);text-decoration:none;font-size:11px;letter-spacing:.22em;
+        text-transform:uppercase}
+  .back:hover{color:var(--gold)}
+  .doc{
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(14px) saturate(130%);
+    backdrop-filter:blur(14px) saturate(130%);
+    border:1px solid var(--edge);border-radius:4px;padding:34px 30px;margin-top:18px;
+    box-shadow:0 0 0 1px rgba(0,0,0,.5), 0 18px 50px -30px rgba(0,0,0,.9);
+  }
+  .doc h1{font:700 clamp(26px,5vw,38px)/1.2 var(--mono);letter-spacing:.14em;color:var(--gold);
+          text-shadow:0 0 22px var(--gold-glow);margin:0 0 28px}
+  .doc h2{font:600 17px/1.4 var(--mono);letter-spacing:.06em;color:var(--gold);
+          margin:40px 0 12px;padding-top:20px;border-top:1px solid var(--edge)}
+  .doc h3{font:600 14px/1.5 var(--mono);letter-spacing:.05em;color:var(--gold-dk);margin:26px 0 10px}
+  .doc h4{font:600 13px/1.5 var(--mono);color:var(--dim);margin:20px 0 8px}
+  .doc p{margin:0 0 15px;color:var(--ink)}
+  .doc strong{color:var(--gold)}
+  .doc em{color:var(--dim);font-style:italic}
+  .doc a{color:var(--gold-dk)}
+  .doc ul,.doc ol{margin:0 0 15px;padding-left:22px}
+  .doc li{margin:0 0 7px}
+  .doc code{background:rgba(0,0,0,.5);border:1px solid var(--edge);border-radius:2px;
+            padding:1px 5px;color:var(--gold);font-size:12.5px}
+  .doc pre{background:rgba(0,0,0,.55);border:1px solid var(--edge);border-radius:3px;
+           padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.6;margin:0 0 16px}
+  .doc pre code{background:none;border:0;padding:0;color:var(--ink)}
+  .doc blockquote{border-left:2px solid var(--gold-dk);background:rgba(255,209,0,.05);
+                  margin:0 0 16px;padding:10px 16px;color:var(--dim)}
+  .doc hr{border:0;border-top:1px solid var(--edge);margin:30px 0}
+  .tw{overflow-x:auto;margin:0 0 18px}
+  .doc table{border-collapse:collapse;width:100%;font-size:12.5px}
+  .doc th{text-align:left;color:var(--gold-dk);font-weight:600;padding:8px 12px;
+          border-bottom:1px solid var(--edge);letter-spacing:.06em}
+  .doc td{padding:8px 12px;border-bottom:1px solid rgba(255,209,0,.07);color:var(--ink);vertical-align:top}
+  .loading{color:var(--dimmer)}
+</style>
+
+<div class="wrap">
+  <a class="back" href="/">&larr; molibra</a>
+  <div class="doc" id="doc"><p class="loading">reading the paper from this node…</p></div>
+  <p style="margin-top:20px"><a class="back" href="/molibra/whitepaper.md">source markdown</a></p>
+</div>
+
+<script>
+const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
+
+/**
+ * A small markdown renderer for THIS document.
+ *
+ * ⛔ Deliberately not a library from a CDN. Everything else this node serves is
+ * served by this node - pulling the paper's renderer off someone else's host
+ * would make the one document that explains why you need not trust anybody
+ * depend on trusting somebody. It handles what WHITEPAPER.md actually uses:
+ * headings, tables, fenced code, lists, quotes, rules, and inline emphasis.
+ */
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+}
+
+function render(md) {
+  const out = [];
+  const lines = md.split(/\r?\n/);
+  let i = 0;
+  const isTableRule = (l) => /^\|[\s:|-]+\|$/.test(l.trim());
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (/^```/.test(line)) {                      // fenced code
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
+      continue;
+    }
+    if (/^\s*$/.test(line)) { i++; continue; }
+    if (/^-{3,}\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { const n = h[1].length; out.push(`<h${n}>${inline(h[2])}</h${n}>`); i++; continue; }
+
+    if (/^\|/.test(line) && isTableRule(lines[i + 1] ?? '')) {   // table
+      const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const body = [];
+      while (i < lines.length && /^\|/.test(lines[i])) body.push(cells(lines[i++]));
+      out.push('<div class="tw"><table><thead><tr>'
+        + head.map((c) => `<th>${inline(c)}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + body.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('')
+        + '</tbody></table></div>');
+      continue;
+    }
+
+    if (/^\s*>/.test(line)) {                     // blockquote
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
+      out.push(`<blockquote>${inline(buf.join(' '))}</blockquote>`);
+      continue;
+    }
+
+    const ol = /^\s*\d+\.\s+/.test(line), ul = /^\s*[-*]\s+/.test(line);
+    if (ol || ul) {                               // list
+      const tag = ol ? 'ol' : 'ul';
+      const items = [];
+      const re = ol ? /^\s*\d+\.\s+/ : /^\s*[-*]\s+/;
+      while (i < lines.length && re.test(lines[i])) items.push(inline(lines[i++].replace(re, '')));
+      out.push(`<${tag}>` + items.map((t) => `<li>${t}</li>`).join('') + `</${tag}>`);
+      continue;
+    }
+
+    const para = [];                              // paragraph
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,4}\s|```|\||\s*>|-{3,}\s*$)/.test(lines[i])
+           && !/^\s*\d+\.\s+/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i])) para.push(lines[i++]);
+    if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`);
+  }
+  return out.join('\n');
+}
+
+(async () => {
+  try {
+    const r = await fetch(NODE + '/molibra/whitepaper.md');
+    if (!r.ok) throw new Error('this node returned ' + r.status);
+    document.getElementById('doc').innerHTML = render(await r.text());
+  } catch (e) {
+    document.getElementById('doc').innerHTML =
+      `<p class="loading">the paper could not be read from this node: ${esc(e.message)}</p>`
+      + '<p class="loading">It is also in the repository, as WHITEPAPER.md.</p>';
+  }
+})();
+</script>

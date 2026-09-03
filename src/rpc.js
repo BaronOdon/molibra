@@ -462,7 +462,23 @@ function handleAudit(node, req, res) {
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
 
-  if (path === '/' || path === '/molibra') {
+  /**
+   * The front door.
+   *
+   * ⛔ '/' is the SITE; '/molibra' stays the identity JSON. Nothing fetches the
+   * bare root expecting JSON - every page and syncFrom names '/molibra' or a
+   * route beneath it - so this takes the root without moving anybody's API.
+   * A chain whose whole claim is that you need not trust it should be able to
+   * say so at its own address, rather than answering a browser with a struct.
+   */
+  if (path === '/') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'index.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path === '/molibra') {
     return json(res, 200, {
       client: CLIENT_VERSION,
       chain: chain.genesis.name,
@@ -664,6 +680,34 @@ function handleAudit(node, req, res) {
   if (path === '/molibra/swap') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'swap.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path === '/molibra/chart') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'chart.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path === '/molibra/whitepaper') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'whitepaper.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * The paper itself, as it is written.
+   *
+   * The rendered page reads THIS, so the document a visitor sees is the file in
+   * the repository rather than a copy of it that drifted. Served as markdown so
+   * it can be diffed against the repo by anyone who wants to check that.
+   */
+  if (path === '/molibra/whitepaper.md') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'WHITEPAPER.md');
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
   }
