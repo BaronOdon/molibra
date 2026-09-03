@@ -684,6 +684,21 @@ function handleAudit(node, req, res) {
     return;
   }
 
+  /**
+   * Moliscan - the explorer.
+   *
+   * It adds no index and no cache: every view is assembled in the browser from
+   * routes this node already answers exactly. An explorer that built its own
+   * index would be asking to be trusted about what it had indexed, which is
+   * the one thing this chain declines to ask for.
+   */
+  if (path === '/molibra/moliscan') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'moliscan.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/chart') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'chart.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
