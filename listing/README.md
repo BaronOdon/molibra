@@ -63,6 +63,20 @@ id. So EIP-155 is not merely supported, it is mandatory. ⛔ **EIP-1559 is NOT d
 `baseFeePerGas` is a hardcoded `0n` stub for RPC compatibility (`src/evm.js:95`), and the chain
 signs legacy type-0 transactions only.
 
+## The two gates their README names, both already passed
+
+1. **Prettier.** `_data/*/*.json` must match their `.prettierrc.json`
+   (`trailingComma: es5`, `tabWidth: 2`, `semi: false`, `singleQuote: false`).
+   `eip155-20226.json` here passes `prettier --check` against that exact config — verified, so
+   the file can be copied in as-is with no reformatting.
+2. **`./gradlew run` before submitting.** Not run here (no JDK/Gradle on this box), but every rule
+   that build applies was read out of `Main.kt` and checked by hand — see the two sections above.
+   Run it if you have a JDK; it is 7 seconds.
+
+Their README also states the constraint already verified above: **`shortName` and `name` MUST be
+unique** (EIP-3770). And ⛔ **the first PR gets the chainId** — a later PR claiming 20226 will be
+closed, so submitting is also what reserves it.
+
 ## How to submit — ⛔ the operator must push (the disclosure guard blocks GitHub pushes from this box)
 
 1. Fork `https://github.com/ethereum-lists/chains`.
