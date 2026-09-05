@@ -1,14 +1,10 @@
-{
+export const data = {
   "name": "Molibra",
   "chain": "MOLI",
   "rpc": [
     "https://molibra.org"
   ],
-  "features": [
-    {
-      "name": "EIP155"
-    }
-  ],
+  "features": [{ "name": "EIP155" }],
   "faucets": [],
   "nativeCurrency": {
     "name": "Molibra",

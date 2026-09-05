@@ -39,6 +39,30 @@ The icon is cosmetic; the warning is about the chainId/name pair. **Ship the lis
 Add the logo as a follow-up PR once the SVG (or a PNG) is pinned and a CID exists — `svg`, `png`
 and `jpg` are all accepted formats.
 
+## ⛔ There are TWO registries, not one
+
+They are separate repos with separate formats, and only the first is what the wallet reads:
+
+| | repo | path | format |
+|---|---|---|---|
+| **Wallets** (MetaMask, chainid.network) | `ethereum-lists/chains` | `_data/chains/eip155-20226.json` | JSON |
+| **chainlist.org** | `DefiLlama/chainlist` | `constants/additionalChainRegistry/chainid-20226.js` | `export const data = {…}` |
+
+chainlist.org is DefiLlama's site and keeps **its own** additional registry — its README says so
+in as many words. Submitting to one does not list you on the other. Both files are in this folder:
+`eip155-20226.json` and `chainid-20226.js`.
+
+Verified 5 Sep: `chainlist.org/chain/20226` answers **"nope"**, and
+`additionalChainRegistry/chainid-20226.js` is a **404** — neither listing exists yet.
+
+## `features: [{ "name": "EIP155" }]` is verified, not decorative
+
+`src/tx.js:69` **rejects** any transaction without replay protection
+(`'unprotected transaction: EIP-155 required'`) and line 71 rejects one carrying another chain's
+id. So EIP-155 is not merely supported, it is mandatory. ⛔ **EIP-1559 is NOT declared**, correctly:
+`baseFeePerGas` is a hardcoded `0n` stub for RPC compatibility (`src/evm.js:95`), and the chain
+signs legacy type-0 transactions only.
+
 ## How to submit — ⛔ the operator must push (the disclosure guard blocks GitHub pushes from this box)
 
 1. Fork `https://github.com/ethereum-lists/chains`.
