@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
 <title>Molibra — connect a wallet</title>
 <style>
   :root { color-scheme: light dark; --fg:#111; --bg:#fafafa; --card:#fff; --line:#e3e3e3; --accent:#1f6feb; --mut:#666; }
@@ -113,7 +116,32 @@ async function loadConfig() {
 }
 
 function wallet() {
-  if (!window.ethereum) throw new Error('No wallet detected in this browser.');
+  if (!window.ethereum) {
+    // ⛔ On a phone this is the NORMAL case, not an error. Mobile Safari and
+    // mobile Chrome have no window.ethereum at all: MetaMask on iOS/Android is
+    // a separate app with its own browser, and a dapp is reached by opening it
+    // INSIDE that app. Telling a phone user "no wallet detected" when the
+    // wallet is installed and one tap away is the whole bug - the page looked
+    // broken to every mobile visitor while working on every desktop.
+    const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (mobile) {
+      const deep = 'https://metamask.app.link/dapp/' + location.host + location.pathname + location.search;
+      const a = document.createElement('a');
+      a.href = deep;
+      a.textContent = 'Open this page in MetaMask';
+      a.style.cssText = 'display:inline-block;background:#FFD100;color:#0a0a0a;padding:13px 20px;'
+        + 'border-radius:3px;text-decoration:none;font-weight:650;letter-spacing:.14em;'
+        + 'text-transform:uppercase;font-size:12px;margin-top:12px';
+      const host = document.querySelector('.log, .panel, body');
+      host.appendChild(document.createElement('br'));
+      host.appendChild(a);
+      throw new Error('On a phone, a wallet lives in its own app. Tap "Open this page in MetaMask" '
+        + 'above - it reopens this exact page inside the wallet, where the connection can happen. '
+        + 'If you use another wallet, open its in-app browser and go to ' + location.host + '.');
+    }
+    throw new Error('No wallet detected in this browser. Install MetaMask, or open this page in a '
+      + 'browser that has a wallet extension.');
+  }
   return window.ethereum;
 }
 

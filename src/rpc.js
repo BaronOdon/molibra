@@ -692,6 +692,23 @@ function handleAudit(node, req, res) {
    * index would be asking to be trusted about what it had indexed, which is
    * the one thing this chain declines to ask for.
    */
+  /**
+   * The mark. Served as SVG from this node - no CDN, no binary asset in the
+   * repo, and it scales from a 16px tab to an iOS home screen from one file.
+   * /favicon.ico is answered with the same bytes because browsers request it
+   * blind whether or not a page declares one, and a 404 there is the blank
+   * square that makes a live network look unfinished.
+   */
+  if (path === '/icon.svg' || path === '/favicon.ico') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'icon.svg');
+    res.writeHead(200, {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+    });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/moliscan') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'moliscan.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
