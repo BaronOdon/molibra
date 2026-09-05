@@ -1,0 +1,26 @@
+{
+  "name": "Molibra",
+  "chain": "MOLI",
+  "icon": "molibra",
+  "rpc": [
+    "https://molibra.org"
+  ],
+  "features": [],
+  "faucets": [],
+  "nativeCurrency": {
+    "name": "Molibra",
+    "symbol": "MOLI",
+    "decimals": 18
+  },
+  "infoURL": "https://molibra.org",
+  "shortName": "moli",
+  "chainId": 20226,
+  "networkId": 20226,
+  "explorers": [
+    {
+      "name": "Moliscan",
+      "url": "https://molibra.org/molibra/moliscan",
+      "standard": "none"
+    }
+  ]
+}
