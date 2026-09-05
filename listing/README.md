@@ -77,16 +77,23 @@ Their README also states the constraint already verified above: **`shortName` an
 unique** (EIP-3770). And ⛔ **the first PR gets the chainId** — a later PR claiming 20226 will be
 closed, so submitting is also what reserves it.
 
-## How to submit — ⛔ the operator must push (the disclosure guard blocks GitHub pushes from this box)
+## How to submit
 
-1. Fork `https://github.com/ethereum-lists/chains`.
-2. Copy this file to `_data/chains/eip155-20226.json` in the fork — **the filename must be
-   exactly that**.
-3. Commit on a branch, push, open a PR against `master`.
-4. CI runs the validator above. If it is green, a maintainer merges; `chainid.network` and
-   `chainlist.org` pick it up on their next build.
+`list-the-chain.sh` next door does both registries in one pass — fork, branch, copy, PR:
 
-Then add the network on **chainlist.org** so it is searchable there too.
+```
+bash listing/list-the-chain.sh
+```
+
+By hand it is the same four steps per registry: fork, copy the file to the path in the table
+above under **exactly** that filename, commit on a branch, open a PR against the default branch.
+
+Once a PR is open, CI runs the validator. If it is green a maintainer merges, and
+`chainid.network` and `chainlist.org` pick the chain up on their next build.
+
+⚠ On a **first** contribution to a repo, GitHub holds the workflows at `action_required` until a
+maintainer approves the run. That is not a failed check and there is nothing to fix — more commits
+will not release it. Watch with `gh pr checks <number> --repo <owner>/<repo>`.
 
 ## ⛔ What will NOT go away, and should not
 
