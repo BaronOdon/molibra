@@ -1,7 +1,6 @@
 {
   "name": "Molibra",
   "chain": "MOLI",
-  "icon": "molibra",
   "rpc": [
     "https://molibra.org"
   ],
