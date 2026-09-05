@@ -102,6 +102,8 @@
   <div class="log" id="deployLog"></div>
   <label>Deployed BridgedMoli address — filled in automatically after a deploy</label>
   <input id="token" placeholder="0x…" spellcheck="false">
+  <button id="watch" class="ghost">Add bMOLI to my wallet</button>
+  <div class="log" id="watchLog"></div>
 </div>
 
 <div class="card">
@@ -393,6 +395,29 @@ function showBurn() {
 }
 $('burnTo').oninput = showBurn;
 $('burnAmount').oninput = showBurn;
+
+/**
+ * Put bMOLI in the wallet's token list.
+ *
+ * A balance of 0 is CORRECT until the first burn crosses - the token exists,
+ * nothing has been minted into it. Saying so here stops "I added it and it
+ * shows nothing" from reading as a broken contract.
+ */
+$('watch').onclick = async () => {
+  try {
+    const address = $('token').value.trim();
+    if (!isAddress(address)) throw new Error('deploy first, or paste the bMOLI address above');
+    await requireMainnet();
+    const added = await window.ethereum.request({
+      method: 'wallet_watchAsset',
+      params: { type: 'ERC20', options: { address, symbol: 'bMOLI', decimals: 18 } },
+    });
+    say('watchLog', added
+      ? 'bMOLI added. It reads 0 until a burn is claimed against it - the token exists, nothing '
+        + 'has been minted yet.'
+      : 'the wallet declined to add it.');
+  } catch (e) { say('watchLog', e.message, true); }
+};
 
 $('burn').onclick = async () => {
   try {
