@@ -104,6 +104,7 @@ valor que você aceita perder inteiro.</div>
   liquidez em alcance e um roteador informado.</p>
 </div>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script type="module">
 /* ---------------------------------------------------------------- constants
    Every address here was READ FROM CHAIN in this session, not copied from a
@@ -222,7 +223,11 @@ async function send(tx, label, outId) {
 
 /* ----------------------------------------------------------------- connect */
 $('connect').onclick = async () => {
-  if (!window.ethereum) return say('who', T.noWallet, 'err');
+  if (!window.ethereum) {
+    // The deep link goes ON the page; the message goes in the status line.
+    window.molibraWallet.mount();
+    return say('who', window.molibraWallet.message(), 'err');
+  }
   try {
     [account] = await eth('eth_requestAccounts');
     const chainId = BigInt(await eth('eth_chainId'));

@@ -113,6 +113,7 @@ compliance file requires.</div>
   <p id="withdrawOut" class="small muted">&nbsp;</p>
 </div>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script type="module">
 /* ------------------------------------------------------------ ABI encoding
    Hand-rolled for the four signatures this page sends, rather than pulling a
@@ -194,7 +195,10 @@ function whole(id, label) {
 }
 
 $('connect').onclick = async () => {
-  if (!window.ethereum) return say('who', 'No wallet in this browser.', 'err');
+  if (!window.ethereum) {
+    window.molibraWallet.mount();
+    return say('who', window.molibraWallet.message(), 'err');
+  }
   try {
     [account] = await eth('eth_requestAccounts');
     const chainId = BigInt(await eth('eth_chainId'));

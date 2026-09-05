@@ -111,6 +111,7 @@
 }
 </script>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script type="module">
 /* The wallet module is the same file test/wallet.mjs checks against the node's
    own signer, byte for byte. Its maths is served from this node, not a CDN:
@@ -484,7 +485,15 @@ function setAddress(next, how) {
 
 /* -------------------------------------------------------- the wallet path */
 $('useWallet').onclick = async () => {
-  if (!window.ethereum) return keyOut('noWalletHere', {}, 'err');
+  if (!window.ethereum) {
+    // Written straight to the element: the guard's message is already in the
+    // reader's language and has no key in the t() table.
+    window.molibraWallet.mount();
+    const el = $('keyOut');
+    el.className = 'small err';
+    el.textContent = window.molibraWallet.message();
+    return;
+  }
   try {
     const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' });
     setAddress(account, 'wallet');
@@ -685,7 +694,10 @@ let issuerFacts = null;
 function render() {
   applyLanguage();
   reshow();
-  if (!window.ethereum) $('walletRow').hidden = true;
+  if (!window.ethereum) {
+    if (window.molibraWallet.isMobile()) window.molibraWallet.mount($('walletRow'));
+    else $('walletRow').hidden = true;
+  }
   else $('noWalletNote').innerHTML = t('walletFound');
   if (!returnTo) $('backNote').innerHTML = t('backNote') + t('backDirect');
   if (!address && !shown.out) out('chooseFirst');

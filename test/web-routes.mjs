@@ -127,5 +127,81 @@ check('the white paper is served from the repo file, not a copy',
   'a second copy of the paper is a copy that drifts');
 
 
+/* --------------------- a script a page loads must be a route too */
+
+// The same trap as an unrouted page, one level down and quieter: the HTML
+// loads, the browser asks for /molibra/<name>.js, gets a 404, and every
+// handler that needed it dies with "molibraWallet is undefined" - on the live
+// node only, because opening the file from disk resolves nothing either way
+// and looks identical. So every script a page pulls from this origin must be
+// named by a branch in rpc.js.
+
+const scriptSrcs = new Set();
+for (const name of pages) {
+  const html = readFileSync(join(webDir, name), 'utf8');
+  for (const m of html.matchAll(/<script[^>]+src="(\/[^"]+)"/g)) scriptSrcs.add(m[1]);
+  for (const m of html.matchAll(/from\s+'(\/molibra\/[^']+)'/g)) scriptSrcs.add(m[1]);
+}
+check('the pages load scripts from this origin at all', scriptSrcs.size > 0,
+  `${scriptSrcs.size} distinct`);
+for (const src of [...scriptSrcs].sort()) {
+  check(`the script ${src} is a route rpc.js serves`, routes.has(src),
+    routes.has(src) ? '' : 'the page would load it and get a 404');
+}
+
+/* ------------------- a page that touches a wallet must carry the guard */
+
+// On a phone, `window.ethereum` being absent is NORMAL: MetaMask is a separate
+// app with its own browser. A page that answers "no wallet detected" tells a
+// user who HAS the wallet that the site is broken - and it does that to every
+// mobile visitor while working on every desktop, which is exactly why it
+// survived on nine pages at once until 5 Sep 2026. mobilewallet.js is the one
+// answer; a page that reaches for a provider must load it.
+
+const GUARD = '/molibra/mobilewallet.js';
+for (const name of pages) {
+  if (LOCAL_ONLY.has(name)) continue;          // never reached from a phone
+  const html = readFileSync(join(webDir, name), 'utf8');
+  // Either spelling counts: a page still reaching for the raw provider, and a
+  // page already on the guard that could quietly lose the <script> that
+  // defines it. The second failure is the silent one.
+  if (!html.includes('window.ethereum') && !html.includes('molibraWallet')) continue;
+  check(`${name} loads the mobile wallet guard`, html.includes(GUARD),
+    html.includes(GUARD) ? '' : 'it will dead-end on every phone');
+}
+
+
+/* ------------------------ no route may shadow another */
+
+// ⛔ rpc.js is a chain of `if (path === '...')` branches and the FIRST match
+// wins. Two branches claiming one string is not a conflict the language will
+// mention: the second is simply dead, and dead in the worst way - the path
+// still answers 200, so every "is it routed?" check above passes while the
+// page behind it is unreachable.
+//
+// That is not hypothetical. bridge.html shipped at /molibra/bridge on 30 Aug
+// 2026 (1578de1); on 31 Aug (a52817e) the inbound-registrar JSON took the same
+// path 200 lines earlier. From that commit the front page's "Bridge out" card
+// served a wall of JSON to anyone who clicked it, on the live site, for five
+// days, with a green suite the whole time.
+
+// Only branches at the SAME depth in the same chain can shadow each other.
+// A deeper `if (path === ...)` is a discriminator INSIDE an outer branch that
+// already matched - `/molibra/tokens` inside the `startsWith('/molibra/token/')`
+// block, `/molibra/earn` inside the POST section - and those are correct. A
+// gate that flags them is a gate someone turns off, so match the indentation
+// exactly: two spaces is the top-level chain.
+const claimed = [...rpc.matchAll(/^  if \(path === '(\/[^']*)'/gm)].map((m) => m[1]);
+const seen = new Map();
+const shadowed = [];
+for (const path of claimed) {
+  if (seen.has(path)) shadowed.push(path);
+  else seen.set(path, true);
+}
+check('no path is claimed by two branches', shadowed.length === 0,
+  shadowed.length ? `shadowed: ${[...new Set(shadowed)].join(' ')} - the later branch is dead`
+                  : `${seen.size} distinct paths, each claimed once`);
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -121,6 +121,7 @@
   <div class="log" id="status">—</div>
 </div>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script>
 // ⛔⛔ The origin that SERVED this page, not a hardcoded host.
 // A page fetched over https://molibra.org cannot fetch http://<ip>:8545 - the
@@ -136,7 +137,7 @@ const CHAIN_ID = 20226;
 const CHAIN_HEX = '0x4f02';
 const $ = (id) => document.getElementById(id);
 const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
-const eth = () => { if (!window.ethereum) throw new Error('no wallet in this browser'); return window.ethereum; };
+const eth = () => window.molibraWallet.require();
 let account = null;
 
 // Run-specific payloads arrive in the URL — never hand-edited into this file.

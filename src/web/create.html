@@ -156,6 +156,7 @@
 }
 </script>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script type="module">
 import * as wallet from '/molibra/wallet.js';
 
@@ -667,7 +668,10 @@ function setSigner(next, addr) {
 }
 
 $('useWallet').onclick = async () => {
-  if (!window.ethereum) return ($('who').innerHTML = t('noWallet'));
+  if (!window.ethereum) {
+    window.molibraWallet.mount();
+    return ($('who').textContent = window.molibraWallet.message());
+  }
   try {
     const [a] = await window.ethereum.request({ method: 'eth_requestAccounts' });
     setSigner({ kind: 'wallet' }, a);

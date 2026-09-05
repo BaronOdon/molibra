@@ -188,6 +188,7 @@
 </div>
 </div>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script>
 // ⛔⛔ The origin that SERVED this page, not a hardcoded host.
 // A page fetched over https://molibra.org cannot fetch http://<ip>:8545 - the
@@ -244,8 +245,7 @@ const isAddress = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a).trim());
 const hex = (v) => '0x' + BigInt(v).toString(16);
 
 const eth = () => {
-  if (!window.ethereum) throw new Error('no wallet in this browser');
-  return window.ethereum;
+  return window.molibraWallet.require();
 };
 
 let account = null;

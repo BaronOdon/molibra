@@ -764,6 +764,15 @@ function handleAudit(node, req, res) {
     return;
   }
 
+  // The one wallet guard every page shares. Same reason as above: served from
+  // this node, never a CDN.
+  if (path === '/molibra/mobilewallet.js') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'mobilewallet.js');
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path.startsWith('/molibra/vendor/')) {
     const rest = path.slice('/molibra/vendor/'.length);
     const slash = rest.indexOf('/');
@@ -805,7 +814,15 @@ function handleAudit(node, req, res) {
   }
 
   // --- the bridge test rig ------------------------------------------------
-  if (path === '/molibra/bridge') {
+  //
+  // ⛔ Served at /molibra/bridgeout, NOT /molibra/bridge. It shipped on that
+  // path on 30 Aug (1578de1); on 31 Aug (a52817e) the inbound-registrar JSON
+  // took the same path EARLIER in this file and shadowed it. Two branches, one
+  // string, first one wins - and the page went dead on the public site while
+  // the front page kept linking to it and the test suite kept passing, because
+  // "is there a route for this path" was true the whole time. inbound.html
+  // fetches the JSON at /molibra/bridge, so the JSON is the one that stays.
+  if (path === '/molibra/bridgeout') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridge.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));

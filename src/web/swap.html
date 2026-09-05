@@ -199,6 +199,7 @@
 
 </div>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script>
 // ⛔⛔ The origin that SERVED this page, not a hardcoded host.
 // A page fetched over https://molibra.org cannot fetch http://<ip>:8545 - the
@@ -286,7 +287,7 @@ let account = null;
 let markets = [];
 let lastPlan = null;
 
-const eth = () => { if (!window.ethereum) throw new Error('no wallet in this browser'); return window.ethereum; };
+const eth = () => window.molibraWallet.require();
 
 async function rpc(method, params) {
   const r = await fetch(NODE + '/molibra', {

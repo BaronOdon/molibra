@@ -93,6 +93,7 @@
   <p id="status"></p>
 </main>
 
+<script src="/molibra/mobilewallet.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const say = (m) => { $('status').textContent = m; };
@@ -116,33 +117,10 @@ async function loadConfig() {
 }
 
 function wallet() {
-  if (!window.ethereum) {
-    // ⛔ On a phone this is the NORMAL case, not an error. Mobile Safari and
-    // mobile Chrome have no window.ethereum at all: MetaMask on iOS/Android is
-    // a separate app with its own browser, and a dapp is reached by opening it
-    // INSIDE that app. Telling a phone user "no wallet detected" when the
-    // wallet is installed and one tap away is the whole bug - the page looked
-    // broken to every mobile visitor while working on every desktop.
-    const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (mobile) {
-      const deep = 'https://metamask.app.link/dapp/' + location.host + location.pathname + location.search;
-      const a = document.createElement('a');
-      a.href = deep;
-      a.textContent = 'Open this page in MetaMask';
-      a.style.cssText = 'display:inline-block;background:#FFD100;color:#0a0a0a;padding:13px 20px;'
-        + 'border-radius:3px;text-decoration:none;font-weight:650;letter-spacing:.14em;'
-        + 'text-transform:uppercase;font-size:12px;margin-top:12px';
-      const host = document.querySelector('.log, .panel, body');
-      host.appendChild(document.createElement('br'));
-      host.appendChild(a);
-      throw new Error('On a phone, a wallet lives in its own app. Tap "Open this page in MetaMask" '
-        + 'above - it reopens this exact page inside the wallet, where the connection can happen. '
-        + 'If you use another wallet, open its in-app browser and go to ' + location.host + '.');
-    }
-    throw new Error('No wallet detected in this browser. Install MetaMask, or open this page in a '
-      + 'browser that has a wallet extension.');
-  }
-  return window.ethereum;
+  // The whole explanation, and the deep link, now live in one place -
+  // /molibra/mobilewallet.js - because five other pages needed exactly this
+  // and copying it six times is six things to drift.
+  return window.molibraWallet.require(document.querySelector('.log, .panel, body'));
 }
 
 $('add').onclick = async () => {
