@@ -26,7 +26,12 @@ git checkout master
 git pull upstream master 2>/dev/null || git pull origin master
 git checkout -B add-molibra-20226
 cp "$SRC/eip155-20226.json" _data/chains/eip155-20226.json
-git add _data/chains/eip155-20226.json
+# ⛔ Both files or neither. processIcon() in their validator errors with
+# "The Icon molibra does not exist" if the chain names an icon that has no
+# entry in _data/icons/ - the build goes red and, per their own bot, no human
+# then looks at the PR at all.
+cp "$SRC/icons/molibra.json" _data/icons/molibra.json
+git add _data/chains/eip155-20226.json _data/icons/molibra.json
 git commit -m "Add Molibra chain (EIP-155:20226)"
 git push -u origin add-molibra-20226 --force-with-lease
 
@@ -38,8 +43,9 @@ gh pr create --repo ethereum-lists/chains --base master \
 - Explorer: Moliscan — https://molibra.org/molibra/moliscan (standard: \`none\`).
 - \`chainId\` 20226, \`shortName\` \`moli\` and \`name\` \`Molibra\` were each checked against the published list and are unused.
 - EIP-155 is mandatory on this chain — transactions without replay protection are rejected — so it is declared. EIP-1559 is not supported, so it is not.
-- No \`icon\` field: the icon is not pinned to IPFS yet. Happy to follow up with a separate PR adding it once it is.
-- The file passes \`prettier --check\` against this repo's \`.prettierrc.json\`.
+- Explorer follows **EIP-3091**: \`/tx/<hash>\`, \`/address/<addr>\` and \`/block/<number|hash>\` all resolve.
+- Icon pinned on our own IPFS node, reachable and reprovided: \`QmQsqJ2omWZX8TYtft1euNVB8qcQvU8sZUYKRV9SgPuiRc\` (935-byte SVG). Independently retrievable — fetched by ipfs.io and other gateways that had never seen it.
+- The files pass \`prettier --check\` against this repo's \`.prettierrc.json\`.
 
 Source: https://github.com/BaronOdon/molibra"
 
