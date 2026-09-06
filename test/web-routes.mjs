@@ -14,7 +14,7 @@
  * so a page added tomorrow is covered without editing the test.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -201,6 +201,56 @@ for (const path of claimed) {
 check('no path is claimed by two branches', shadowed.length === 0,
   shadowed.length ? `shadowed: ${[...new Set(shadowed)].join(' ')} - the later branch is dead`
                   : `${seen.size} distinct paths, each claimed once`);
+
+
+/* ------------------- a static asset a page hands out must exist and be routed */
+
+// The icon is the one file this site gives to software that is not a browser -
+// a wallet drawing a network, a platform building a share card. Those fetch it
+// once, cache the failure, and never say anything went wrong. So both the route
+// and the file have to be real, and the PNG has to actually be a PNG: an SVG
+// renamed .png satisfies every string check here and renders nowhere.
+
+const ASSETS = ['/icon.svg', '/icon.png'];
+for (const asset of ASSETS) {
+  check(`${asset} is a route rpc.js serves`, routes.has(asset),
+    routes.has(asset) ? '' : 'nothing serves it');
+  const name = asset.slice(1);
+  const file = join(webDir, name);
+  const exists = existsSync(file);
+  check(`  and src/web/${name} exists`, exists,
+    exists ? '' : 'the route reads a file that is not there - a 500, not a 404');
+  if (!exists) continue;
+  const head = readFileSync(file).subarray(0, 8);
+  if (asset.endsWith('.png')) {
+    const png = head.equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    check(`  and it really is a PNG`, png,
+      png ? '' : 'wrong magic bytes - a renamed SVG renders nowhere outside a browser');
+  } else {
+    const svg = readFileSync(file, 'utf8').trimStart().startsWith('<svg');
+    check(`  and it really is an SVG`, svg, svg ? '' : 'does not start with <svg');
+  }
+}
+
+// ⛔ blockExplorerUrls must NOT be handed to a wallet while Moliscan answers 404
+// on /tx/ and /address/. MetaMask builds those paths from it, so sending it
+// gives every user a dead "view on explorer" link. The chain listing says
+// "standard": "none" for the same reason. Both change together or neither does.
+const connect = readFileSync(join(webDir, 'connect.html'), 'utf8');
+const listing = existsSync(join(ROOT, 'listing/eip155-20226.json'))
+  ? readFileSync(join(ROOT, 'listing/eip155-20226.json'), 'utf8') : '';
+// ⛔ Mentioning it is not sending it. The comment in connect.html that explains
+// why the field is withheld contains the word, so a plain `includes` reports the
+// opposite of the truth. Strip comment lines, then look for it as an object key.
+const connectCode = connect.split('\n')
+  .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+  .join('\n');
+const sendsExplorer = /blockExplorerUrls\s*:/.test(connectCode);
+const claimsEip3091 = listing.includes('EIP3091');
+check('the wallet is not handed an explorer URL that 404s',
+  sendsExplorer === claimsEip3091,
+  sendsExplorer === claimsEip3091 ? (sendsExplorer ? 'both on' : 'both off')
+    : 'connect.html and the chain listing disagree about whether Moliscan speaks EIP-3091');
 
 
 console.log(`\n${pass} passed, ${fail} failed`);

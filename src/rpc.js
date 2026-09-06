@@ -709,6 +709,19 @@ function handleAudit(node, req, res) {
     return;
   }
 
+  // The same mark as a raster, 512x512. Wallets and share-card scrapers render
+  // PNG reliably and SVG unevenly, so anything handed to something outside this
+  // site gets this one; the SVG stays for the tab and the pages.
+  if (path === '/icon.png') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'icon.png');
+    res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400',
+    });
+    res.end(readFileSync(file));           // ⛔ bytes, not utf8 - a string mangles it
+    return;
+  }
+
   if (path === '/molibra/moliscan') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'moliscan.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

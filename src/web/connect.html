@@ -133,6 +133,17 @@ $('add').onclick = async () => {
         chainName: CFG.name,
         nativeCurrency: { name: CFG.name, symbol: CFG.symbol, decimals: 18 },
         rpcUrls: [CFG.rpc],
+        // EIP-3085 also carries an icon. Some wallets use it, MetaMask has
+        // historically ignored it - it costs nothing to send and the ones that
+        // honour it stop drawing a grey initial. PNG, because SVG support is
+        // uneven outside a browser tab.
+        iconUrls: [location.origin + '/icon.png'],
+        // ⛔ blockExplorerUrls is deliberately NOT sent. MetaMask builds
+        // <url>/tx/<hash> and <url>/address/<addr> from it, and Moliscan
+        // answers 404 on both - it takes ?tx= instead. Handing the wallet a
+        // link that dead-ends is worse than giving it none. The chain listing
+        // says `"standard": "none"` for the same reason. Send it the day
+        // moliscan speaks EIP-3091, not before.
       }],
     });
     say('Network added. If the wallet did not switch to it, switch manually.');
