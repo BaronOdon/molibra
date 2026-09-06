@@ -138,12 +138,12 @@ $('add').onclick = async () => {
         // honour it stop drawing a grey initial. PNG, because SVG support is
         // uneven outside a browser tab.
         iconUrls: [location.origin + '/icon.png'],
-        // ⛔ blockExplorerUrls is deliberately NOT sent. MetaMask builds
-        // <url>/tx/<hash> and <url>/address/<addr> from it, and Moliscan
-        // answers 404 on both - it takes ?tx= instead. Handing the wallet a
-        // link that dead-ends is worse than giving it none. The chain listing
-        // says `"standard": "none"` for the same reason. Send it the day
-        // moliscan speaks EIP-3091, not before.
+        // Safe to send now: Moliscan answers /tx/<hash>, /address/<addr> and
+        // /block/<n> per EIP-3091, which is exactly the shape MetaMask builds
+        // from this field. It was withheld until that was true, because a
+        // wallet link that dead-ends is worse than no link at all. The chain
+        // listing says `"standard": "EIP3091"`; a test keeps the two together.
+        blockExplorerUrls: [location.origin + '/molibra/moliscan'],
       }],
     });
     say('Network added. If the wallet did not switch to it, switch manually.');

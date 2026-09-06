@@ -722,7 +722,17 @@ function handleAudit(node, req, res) {
     return;
   }
 
-  if (path === '/molibra/moliscan') {
+  // EIP-3091 gives block explorers one URL shape every wallet can build without
+  // being told: <explorer>/tx/<hash>, /address/<addr>, /block/<number-or-hash>.
+  // Moliscan took ?q= and answered 404 on all three, which is why the chain
+  // listing said `"standard": "none"` and why connect.html withheld
+  // blockExplorerUrls - MetaMask would have built links that dead-end.
+  //
+  // ⛔ These live UNDER /molibra/moliscan/ on purpose. /molibra/block/<n> and
+  // /molibra/tx/<hash> are the JSON API and must keep answering JSON; a wallet
+  // sending a human to a raw RLP dump is its own kind of broken. The page is
+  // served for every sub-path and reads its own URL.
+  if (path === '/molibra/moliscan' || path.startsWith('/molibra/moliscan/')) {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'moliscan.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
