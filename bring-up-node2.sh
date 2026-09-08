@@ -15,11 +15,11 @@ N1=193.123.191.142
 N2=141.147.99.86
 AIRDROP=0x5851cc5884313f7a66697dE3Bb772466dD5895c7
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=20"
-# ⛔ `python3` on Windows resolves to a Store stub that exits with "Permission
-#    denied", so the local half of this script needs a real interpreter found at
-#    run time. The remote halves run on the Oracle boxes, where python3 is real.
-PY=python3
-command -v python3 >/dev/null 2>&1 && python3 -c "" 2>/dev/null ||   PY="/c/Users/Administrator/AppData/Local/Python/pythoncore-3.14-64/python.exe"
+# ⛔ Do NOT probe for python3: on Windows it is the Store alias and it is
+#    INTERMITTENT - a probe passes and a later call still dies "Permission
+#    denied". Prefer the real interpreter by path.
+WINPY="/c/Users/Administrator/AppData/Local/Python/pythoncore-3.14-64/python.exe"
+if [ -x "$WINPY" ]; then PY="$WINPY"; else PY=python3; fi
 
 head_of() { curl -s --max-time 15 "http://$1:8545/molibra" | $PY -c 'import sys,json;d=json.load(sys.stdin);print(d["height"], d["head"])'; }
 
