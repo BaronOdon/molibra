@@ -302,9 +302,35 @@ export class Node {
     let accepted = 0;
     let cursor = 0;
     for (let page = 0; cursor <= peerHeight && page < 10000; page++) {
-      const payload = await (await fetch(`${base}/molibra/blocks?from=${cursor}&to=${peerHeight}`, {
-        signal: AbortSignal.timeout(30000),
-      })).json();
+      // ⛔⛔ A peer's rate limiter will 429 a sync long before the sync is done,
+      // and it gets worse the longer the chain: a full catch-up is ~80 pages
+      // fetched back to back, which is exactly the shape a token bucket exists
+      // to refuse. Node 2 sat 16,457 blocks behind for two days because of it,
+      // and looked healthy the whole time - the 429 body has no `blocks`, the
+      // old code read that as an empty page, broke the loop, and reported
+      // "adopted 0 block(s)" as though it had caught up. A sync that cannot
+      // continue must say so, not return success.
+      //
+      // So: honour retryAfter and wait it out. The limiter is right to throttle;
+      // the client was wrong to treat throttling as completion.
+      let payload = null;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const res = await fetch(`${base}/molibra/blocks?from=${cursor}&to=${peerHeight}`, {
+          signal: AbortSignal.timeout(30000),
+        });
+        const body = await res.json();
+        if (res.ok) { payload = body; break; }
+        if (res.status !== 429) {
+          throw new Error(`${base} answered ${res.status} at block ${cursor}:`
+            + ` ${JSON.stringify(body).slice(0, 120)}`);
+        }
+        const wait = Math.min(30, Number(body.retryAfter) || 1) * 1000 * (attempt + 1);
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+      if (!payload) {
+        throw new Error(`${base} rate-limited this sync at block ${cursor} and did not`
+          + ' recover within 12 attempts. The chain is NOT caught up.');
+      }
       if (!payload.blocks?.length) break;
       let sinceYield = 0;
       for (const serialized of payload.blocks) {
