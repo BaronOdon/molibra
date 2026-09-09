@@ -76,21 +76,36 @@ export const MAX_ORPHAN_RESOLUTION_DEPTH = 128;
  * number**, which means changing it is a flag day: pull, then restart all of
  * them, or accept that they may diverge.
  *
- * Lowered 128 -> 32 on 9 Sep 2026. At ~20s blocks, 128 left ~43 minutes of
- * history rewritable by anyone who could out-work the chain; 32 leaves ~11. On
- * a network this small - two miners, both the operator's - the depth bound is
- * most of the defence that is actually switched on, so its size is the size of
- * the exposure. The cost of a smaller number is that a genuine partition longer
- * than 32 blocks needs manual intervention to heal, which on a two-node network
- * is a person restarting something, not an outage.
+ * ⛔⛔ Lowered 128 -> 32 on 9 Sep 2026 and RESTORED to 128 the same day, after
+ * 32 partitioned the network within the hour. Do not lower it again without
+ * reading this paragraph.
  *
- * ⭐ This is a floor of last resort, not the intended defence. The anchored
- * floor in src/anchor.js is stronger - it refuses reorgs below a height
- * Ethereum has attested to, at ANY depth and against ANY amount of work - but
- * it only binds on a node configured to follow anchors, and none currently are.
- * See the `finality` block on /molibra for which kind of node you are asking.
+ * The argument for 32 was that at ~20s blocks it leaves ~11 minutes of
+ * rewritable history against ~43 for 128, and that the cost - a partition
+ * deeper than N needing manual intervention - was "a person restarting
+ * something, not an outage". That was the error: **a restart is exactly what
+ * creates the gap.** A node that is down for a few minutes comes back, mines
+ * its own branch immediately, and must now reorg to rejoin. Node 2 came back
+ * 115 blocks behind, refused, mined an orphan branch, and needed a manual
+ * resync. Under 128 it would have healed itself; under 32 every restart of
+ * either node became a manual operation. Note the size of that number when
+ * choosing: 64 would not have healed it either.
+ *
+ * ⭐ This is a floor of last resort, and it is no longer the main defence. The
+ * anchored floor in src/anchor.js refuses reorgs below a height Ethereum has
+ * attested to, at ANY depth and against ANY amount of work, and BOTH production
+ * nodes now follow anchors. That is what carries the long-range case, so buying
+ * ~11 minutes here instead of ~43 buys very little and costs a manual resync on
+ * every restart. See the `finality` block on /molibra for which kind of node
+ * you are asking.
+ *
+ * ⛔ It also sets the shallowest height that is safe to ANCHOR: a block cannot
+ * be reorged away once it is more than this many blocks below the tip, so
+ * anchor-publisher.mjs publishes at a depth comfortably greater than this.
+ * Raising this number raises that depth, and so raises the steady-state
+ * `exposed` window on /molibra.
  */
-export const MAX_REORG_DEPTH = 32;
+export const MAX_REORG_DEPTH = 128;
 
 /** secp256k1 group order, and the low-s bound (EIP-2). */
 export const SECP256K1_N =
