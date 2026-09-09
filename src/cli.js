@@ -37,14 +37,39 @@ function parseArgs(argv) {
 }
 
 async function makeNode(args) {
+  // ⛔⛔ The anchored reorg floor is OFF unless asked for. A node that silently
+  //    started following someone's anchors would be a rule change under an
+  //    operator who did not ask for one - and the anchor publisher is a trusted
+  //    party, so this is a real trust decision, not a tuning knob. Opt in with
+  //    --anchor-rpc; /molibra then reports finality.anchored true.
+  let anchors = null;
+  let feed = null;
+  if (args['anchor-rpc']) {
+    const { AnchorStore } = await import('./anchor.js');
+    const { AnchorFeed } = await import('./anchorfeed.js');
+    anchors = new AnchorStore({});
+    feed = new AnchorFeed({
+      rpcUrl: String(args['anchor-rpc']),
+      contract: String(args['anchor-contract'] ?? '0x2beba454d810eac41c6778e351f81d37a07ae03b'),
+      store: anchors,
+    });
+  }
+
   const node = new Node({
     genesisPath: args.genesis ? resolve(args.genesis) : join(ROOT, 'genesis.json'),
     dataDir: args.datadir ? resolve(args.datadir) : join(ROOT, 'data'),
     miner: args.miner ?? null,
     peers: args.peers ? String(args.peers).split(',').map((p) => p.trim()) : [],
     minGasPrice: args.gasprice ? BigInt(args.gasprice) : 1000000000n,
+    limits: anchors ? { anchors } : {},
   });
   await node.ready;
+  // ⛔ Started AFTER the chain is ready. The first poll can bind a floor, and a
+  //    floor arriving mid-replay would judge blocks the node has not read yet.
+  if (feed) {
+    node.anchorFeed = feed.start();
+    console.log(`  anchors   : following ${feed.contract} via ${feed.rpcUrl}`);
+  }
   return node;
 }
 
