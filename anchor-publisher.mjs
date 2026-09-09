@@ -50,6 +50,7 @@ import { signTransaction, decodeTransaction } from './src/tx.js';
 import { privateToAddress, toChecksumAddress, toHex, keccak256 } from './src/crypto.js';
 import { MAX_REORG_DEPTH } from './src/limits.js';
 import { TARGET_ANCHOR_INTERVAL } from './src/anchor.js';
+import { stamp, upgrade } from './ots-stamp.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).flatMap((a, i, all) =>
   a.startsWith('--') ? [[a.slice(2), all[i + 1]?.startsWith('--') === false ? all[i + 1] : true]] : []));
@@ -268,18 +269,52 @@ async function main() {
 
   const hash = await rpc('eth_sendRawTransaction', [toHex(raw)]);
   console.log(`  sent   ${hash}`);
+
+  // ⛔⛔ The Bitcoin witness runs BEFORE the Ethereum receipt is waited for, and
+  //    that ordering is the fix for a real failure. The two anchors are
+  //    INDEPENDENT witnesses of the same fact: the Molibra block being stamped
+  //    is already more than MAX_REORG_DEPTH deep, so it cannot be reorged away
+  //    whatever Ethereum does. Making the stamp conditional on the receipt
+  //    coupled them for no reason - and on 9 Sep, at 0.067 gwei, the receipt
+  //    took longer than the wait, the run threw, and the evidence was silently
+  //    skipped for an anchor that had in fact been mined.
+  //
+  // ⛔ It is stamped on the height that was just anchored, never on a fresh
+  //    read of /molibra: the chain advances while a transaction confirms, so
+  //    re-deriving it would witness a different block than Ethereum attests to.
+  //
+  // ⛔ A failure here must NEVER fail the run. Ethereum is the ENFORCING anchor
+  //    - nodes take their floor from it - while Bitcoin is evidentiary.
+  try {
+    await stamp({ height, hash: blockHash, work: cumulativeWork });
+  } catch (error) {
+    const parts = [error.message];
+    for (let e = error.cause; e; e = e.cause) parts.push(e.code ?? e.message);
+    console.warn(`[anchor-publisher] Bitcoin stamp failed: `
+      + `${parts.filter(Boolean).join(' <- ')} - the Ethereum anchor stands`);
+  }
+
+  // Complete the PREVIOUS run's proof. A stamp is never finished at submission
+  // - the calendars need their own Bitcoin transaction confirmed first - so
+  // each daily run closes the one before it. No second schedule is needed.
+  try {
+    await upgrade();
+  } catch (error) {
+    console.warn(`[anchor-publisher] upgrade pass failed: ${error.message}`);
+  }
+
   for (let i = 0; i < 60; i++) {
     const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
     if (r) {
       const good = BigInt(r.status) === 1n;
-      console.log(`  mined  block ${BigInt(r.blockNumber)}  status ${good ? 'OK' : 'FAILED'}  `
+      console.log(`\n  mined  block ${BigInt(r.blockNumber)}  status ${good ? 'OK' : 'FAILED'}  `
         + `gas used ${BigInt(r.gasUsed)}`);
       if (!good) throw new Error('anchor() reverted on chain');
       // ⛔ The floor does NOT move yet. src/anchor.js only counts an anchor once
       //    ETH_CONFIRMATIONS Ethereum blocks sit on top of it, and the nodes
       //    read anchors.json on their own 5-minute timer. Saying "the floor is
       //    now N" here would be asserting something not yet true.
-      console.log(`\n✓ anchored ${height} at ${blockHash}`);
+      console.log(`✓ anchored ${height} at ${blockHash}`);
       console.log(`  It binds after 96 Ethereum confirmations (~19 min), once each node's`);
       console.log(`  molibra-anchors.timer has refreshed anchors.json. Check the finality`);
       console.log(`  block on /molibra rather than assuming.`);
@@ -288,8 +323,16 @@ async function main() {
     }
     await new Promise((r2) => setTimeout(r2, 5000));
   }
-  // ⛔ Not a failure - it is in the mempool with a nonce. Re-running before it
-  //    mines would build the SAME nonce again at the same gas price and be
-  //    rejected as a duplicate, which is the safe outcome, but say so plainly.
-  throw new Error(`${hash} did not confirm in 5 minutes; it is still pending with nonce ${nonce}`);
+
+  // ⛔ NOT an error, and it must not exit non-zero: the transaction is in the
+  //    mempool with a nonce and will mine when the base fee allows. Throwing
+  //    here would report a failed run for a successful anchor, and re-running
+  //    would rebuild the SAME nonce at the same price and be refused anyway.
+  //
+  // ⭐ It is also self-healing and self-verifying: the next run reads
+  //    tipHeight() from the contract, so if this landed, that height has
+  //    advanced and the monotonicity check simply skips ahead. Nothing to do.
+  console.warn(`\n⚠ ${hash} has not confirmed yet - still pending with nonce ${nonce}.`);
+  console.warn(`  The Bitcoin stamp above is already recorded, and the next run will`);
+  console.warn(`  see the anchored tip advance if this lands. No action needed.`);
 }

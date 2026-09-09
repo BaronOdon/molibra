@@ -50,7 +50,7 @@
  */
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { anchorDigest } from './src/anchor.js';
@@ -263,10 +263,14 @@ async function submit(calendar, digest) {
 
 // --- commands ----------------------------------------------------------------
 
-async function stamp() {
-  const height = args.height;
-  const blockHash = args.hash;
-  const cumulativeWork = args.work;
+/**
+ * Stamp one anchor. Exported so the daily anchoring run can call it directly
+ * rather than shelling out and re-deriving which block was just anchored - the
+ * chain moves while a transaction confirms, so re-reading `/molibra` afterwards
+ * would stamp a DIFFERENT block than the one Ethereum now attests to, and the
+ * two witnesses would disagree about what was witnessed.
+ */
+export async function stamp({ height, hash: blockHash, work: cumulativeWork } = args) {
   if (!height || !blockHash || !cumulativeWork) {
     throw new Error('need --height, --hash and --work (all three from ONE read of /molibra)');
   }
@@ -310,7 +314,7 @@ async function stamp() {
   console.log('   their commitment within an hour or two; run --upgrade after that.');
 }
 
-async function upgrade() {
+export async function upgrade() {
   if (!existsSync(OUT_DIR)) { console.log('nothing stamped yet'); return; }
   const pending = readdirSync(OUT_DIR).filter((f) => f.endsWith('.ots'))
     .filter((f) => !isComplete(readFileSync(join(OUT_DIR, f))));
@@ -385,13 +389,21 @@ function list() {
   }
 }
 
-try {
-  if (args.upgrade) await upgrade();
-  else if (args.list) list();
-  else await stamp();
-} catch (error) {
-  const parts = [error.message];
-  for (let e = error.cause; e; e = e.cause) parts.push(e.code ?? e.message);
-  console.error(`[ots-stamp] ${parts.filter(Boolean).join(' <- ')}`);
-  process.exitCode = 1;
+// ⛔ Only run the CLI when this file IS the program. Without the guard, the
+//    daily anchoring run - which imports `stamp` from here - would also execute
+//    a second, argument-less stamp on import and fail on the missing --height.
+const invokedDirectly = process.argv[1]
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (invokedDirectly) {
+  try {
+    if (args.upgrade) await upgrade();
+    else if (args.list) list();
+    else await stamp();
+  } catch (error) {
+    const parts = [error.message];
+    for (let e = error.cause; e; e = e.cause) parts.push(e.code ?? e.message);
+    console.error(`[ots-stamp] ${parts.filter(Boolean).join(' <- ')}`);
+    process.exitCode = 1;
+  }
 }
