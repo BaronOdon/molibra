@@ -44,13 +44,17 @@ async function makeNode(args) {
   //    --anchor-rpc; /molibra then reports finality.anchored true.
   let anchors = null;
   let feed = null;
-  if (args['anchor-rpc']) {
+  if (args.anchors || args['anchor-rpc']) {
     const { AnchorStore } = await import('./anchor.js');
     const { AnchorFeed } = await import('./anchorfeed.js');
+    const { join: joinPath } = await import('node:path');
     anchors = new AnchorStore({});
+    // ⛔ --anchor-rpc is accepted so an existing unit file keeps working, but it
+    //    no longer means "poll from in here" - that could not work in a mining
+    //    process. Anchors come from the file anchor-poller.mjs writes.
+    const dir = args.datadir ? resolve(args.datadir) : join(ROOT, 'data');
     feed = new AnchorFeed({
-      rpcUrl: String(args['anchor-rpc']),
-      contract: String(args['anchor-contract'] ?? '0x2beba454d810eac41c6778e351f81d37a07ae03b'),
+      file: args['anchor-file'] ? resolve(args['anchor-file']) : joinPath(dir, 'anchors.json'),
       store: anchors,
     });
   }
@@ -68,7 +72,7 @@ async function makeNode(args) {
   //    floor arriving mid-replay would judge blocks the node has not read yet.
   if (feed) {
     node.anchorFeed = feed.start();
-    console.log(`  anchors   : following ${feed.contract} via ${feed.rpcUrl}`);
+    console.log(`  anchors   : reading ${feed.file}`);
   }
   return node;
 }

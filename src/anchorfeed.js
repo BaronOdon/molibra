@@ -24,136 +24,80 @@
  * because it would be believed.
  */
 
-import { keccak256, toHex } from './crypto.js';
+import { readFileSync } from 'node:fs';
 
-const sel = (sig) => toHex(keccak256(new TextEncoder().encode(sig))).slice(0, 10);
-const word = (v) => BigInt(v).toString(16).padStart(64, '0');
-
-/** The three public getters this needs. All plain eth_call - no archive node. */
-const SEL = {
-  anchorCount: sel('anchorCount()'),
-  heights: sel('heights(uint256)'),
-  anchors: sel('anchors(uint256)'),
-};
-
+/**
+ * Reads the file `anchor-poller.mjs` writes. NO NETWORK.
+ *
+ * ⛔⛔ It used to poll Ethereum itself and could not: the node mines, mining
+ * blocks the event loop past undici's internal connect timeout (10s, and not
+ * reachable through the fetch API), so every poll died `fetch failed <-
+ * ETIMEDOUT` while curl on the same host answered in 60ms. Raising
+ * AbortSignal.timeout could not help - that signal never fired, undici's own
+ * timer did. A node that mines cannot reliably make outbound HTTP, so it no
+ * longer tries.
+ */
 export class AnchorFeed {
   /**
    * @param {object} o
-   * @param {string} o.rpcUrl        an Ethereum JSON-RPC endpoint
-   * @param {string} o.contract      MolibraAnchor's address
+   * @param {string} o.file    the anchors.json anchor-poller.mjs writes
    * @param {import('./anchor.js').AnchorStore} o.store
-   * @param {number} [o.intervalMs]  how often to poll
+   * @param {number} [o.intervalMs]
    */
-  constructor({ rpcUrl, contract, store, intervalMs = 60000 }) {
-    this.rpcUrl = rpcUrl.replace(/\/$/, '');
-    this.contract = contract.toLowerCase();
+  constructor({ file, store, intervalMs = 30000 }) {
+    this.file = file;
     this.store = store;
     this.intervalMs = intervalMs;
-    this.ingested = 0n;        // how many of the contract's anchors are held
     this.timer = null;
     this.lastError = null;
     this.anchorsSeen = 0;
-  }
-
-  async rpc(method, params) {
-    const r = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      // ⛔ AbortSignal.timeout is WALL-CLOCK, not CPU time. This process mines,
-      // and a saturated event loop can burn the whole budget before the socket
-      // is even read - the request never had a chance to fail on its own merits.
-      // 15s was not enough while replaying 46,000 blocks.
-      signal: AbortSignal.timeout(45000),
-    });
-    const j = await r.json();
-    if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
-    return j.result;
+    this.readAt = null;
   }
 
   /**
-   * One pass: read the Ethereum head, then the contract's anchor list.
-   *
-   * ⛔⛔ Reads STATE, not events. eth_getLogs over any useful history is an
-   * archive request, and public RPCs refuse it - "Archive requests require a
-   * personal token". Anchoring would then only work for an operator paying for
-   * an archive node, which is precisely the operator least in need of a floor.
-   * MolibraAnchor keeps `heights[]` and `anchors[height]` as public state, so
-   * the same facts are readable with plain eth_call from any endpoint.
-   *
-   * ⛔ The head is set only AFTER the anchors are in. Setting it first would let
-   * a read fail while the store believed Ethereum had moved on - which is how
-   * an anchor becomes "confirmed" without ever having been read.
+   * ⛔ A missing or unreadable file is NOT an error worth shouting about on
+   * every tick - a node whose poller has not run yet is simply a node with no
+   * floor, which is the honest state and the one /molibra already reports. But
+   * it must never be read as "no anchors" in a way that RETRACTS a floor: the
+   * store only ever accepts anchors, so a bad read leaves what is already held.
    */
-  async poll() {
-    const head = BigInt(await this.rpc('eth_blockNumber', []));
-    const count = BigInt(await this.callUint(SEL.anchorCount));
-
-    // Anchors only ever append, so anything already held can be skipped.
-    for (let i = this.ingested; i < count; i++) {
-      const height = BigInt(await this.callUint(SEL.heights + word(i)));
-      const raw = await this.call(SEL.anchors + word(height));
-      const w = String(raw).replace(/^0x/, '').match(/.{64}/g) ?? [];
-      if (w.length < 4) continue;
+  poll() {
+    let doc;
+    try {
+      doc = JSON.parse(readFileSync(this.file, 'utf8'));
+    } catch (error) {
+      this.lastError = error.code === 'ENOENT'
+        ? 'no anchors.json yet - is anchor-poller.mjs running?'
+        : error.message;
+      return { read: false };
+    }
+    for (const raw of doc.anchors ?? []) {
       try {
-        const added = this.store.add({
-          height,
-          blockHash: '0x' + w[0],
-          cumulativeWork: BigInt('0x' + w[1]),
-          ethBlock: BigInt('0x' + w[2]),
-          publisher: '0x' + w[3].slice(24),
-        });
+        const added = this.store.add(raw);
         if (added?.added) this.anchorsSeen++;
-        // ⛔ An equivocation is not a parse error and must not be swallowed: a
-        //    bonded publisher attested two different things at one height.
         if (added?.fault) {
-          console.warn(`[molibra] ANCHOR EQUIVOCATION at height ${height}:`,
+          console.warn(`[molibra] ANCHOR EQUIVOCATION at height ${raw.height}:`,
             JSON.stringify(added.fault).slice(0, 200));
         }
       } catch (error) {
-        console.warn(`[molibra] unreadable anchor at index ${i}: ${error.message}`);
+        console.warn(`[molibra] unreadable anchor at height ${raw.height}: ${error.message}`);
       }
-      this.ingested = i + 1n;
     }
-
-    this.store.setEthereumHead(head);
+    // ⛔ Only after the anchors are in, and only from what was actually read.
+    if (doc.ethHead) this.store.setEthereumHead(BigInt(doc.ethHead));
+    this.readAt = doc.readAt ?? null;
     this.lastError = null;
-    return { head, anchors: Number(count), anchorsSeen: this.anchorsSeen };
-  }
-
-  async call(data) {
-    return this.rpc('eth_call', [{ to: this.contract, data }, 'latest']);
-  }
-
-  async callUint(data) {
-    const v = await this.call(data);
-    return v && v !== '0x' ? BigInt(v) : 0n;
-  }
-
-  /**
-   * ⛔ undici reports every transport failure as the single word "fetch failed"
-   * and hides the reason in `error.cause`, sometimes nested. Logging only the
-   * message costs the next person the whole diagnosis: a DNS failure, a refused
-   * connection and an abort all look identical. Unwrap the chain.
-   */
-  static describe(error) {
-    const parts = [error.message];
-    for (let c = error.cause; c; c = c.cause) parts.push(c.code ?? c.message);
-    return parts.filter(Boolean).join(' <- ');
+    return { read: true, anchors: (doc.anchors ?? []).length };
   }
 
   start() {
-    const tick = () => this.poll().catch((error) => {
-      // ⛔ Loud, and then carry on. The floor stays where it was; it never
-      //    advances on a guess.
-      this.lastError = AnchorFeed.describe(error);
-      console.warn(`[molibra] anchor feed: ${this.lastError}`);
-    });
-    // ⛔ NOT immediately. The node has just finished replaying its history and
-    //    is mining flat out; a fetch started into that contention aborts on a
-    //    wall-clock timeout and looks like a network fault. Let the process
-    //    settle first - the floor is worth having a few seconds later.
-    setTimeout(tick, 10000).unref?.();
+    const tick = () => {
+      try { this.poll(); } catch (error) {
+        this.lastError = error.message;
+        console.warn(`[molibra] anchor feed: ${error.message}`);
+      }
+    };
+    tick();
     this.timer = setInterval(tick, this.intervalMs);
     if (this.timer.unref) this.timer.unref();
     return this;
