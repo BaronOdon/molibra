@@ -200,5 +200,24 @@ await applyTransaction(onTime, ot, intrinsicGas(ot), MINER, MOLI_BURN_ACTIVATION
 check('⭐ and AT the activation height it burns', onTime.outbound.burned === BURN,
   `activation height ${MOLI_BURN_ACTIVATION}`);
 
+// ⛔⛔ A TRIPWIRE, not a fact about the number.
+//
+// The gate was raised 60,000 -> 120,000 on 9 Sep 2026 because opening it would
+// have destroyed MOLI that could never be redeemed: `BridgedMoli.claim()` proves
+// a burn against `anchors(height)` for the burn's OWN block, and only 8 heights
+// out of 46,859 were anchored - about one block in six thousand. Anchors must
+// also strictly increase, so a missed height can never be rescued afterwards.
+//
+// Lowering this again is safe ONLY once one of these exists:
+//   1. the publisher anchors the height of any block containing a burn, oldest
+//      unanchored burn first; or
+//   2. BridgedMoli is redeployed to accept an ancestry proof.
+//
+// If you are here because this check failed, the question to answer is not
+// "what should the number be" but "can a burn actually be claimed yet".
+check('⛔ the burn gate has not been lowered below the safe floor',
+  MOLI_BURN_ACTIVATION >= 120_000n,
+  'a burn is only claimable if its exact block is anchored - see src/moliburn.js');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

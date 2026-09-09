@@ -86,8 +86,39 @@ export const MOLI_BURN_TAG = toHex(keccak256(utf8('moliBurn(address,uint256)')))
  * costs nothing.
  *
  * Set to 60,000 on 1 Sep 2026, when the tip was 12,432: about eight days.
+ *
+ * ⛔⛔ **RAISED 60,000 -> 120,000 on 9 Sep 2026, and NOT because anyone needed
+ * more time to upgrade.** Opening the gate would have destroyed MOLI that could
+ * never be redeemed. The reason is worth reading before anybody lowers it back.
+ *
+ * `BridgedMoli.claim()` on Ethereum proves a burn by calling
+ * `anchorContract.anchors(height)` for the burn's OWN block height, and reverts
+ * `NotAnchored` when that exact height was never anchored. It is not "an anchor
+ * at or above this height" - there is no ancestry proof in the deployed
+ * contract. And `MolibraAnchor.anchor()` requires `height > tipHeight`, so an
+ * older height can never be anchored afterwards to rescue a burn.
+ *
+ * At the time of writing, **8 heights were anchored across 46,859 blocks** -
+ * about one block in six thousand. A user burning MOLI would therefore have
+ * destroyed it, with roughly a 0.02% chance of the block ever being provable.
+ * Irreversibly, and with the operator's own coin first in line.
+ *
+ * ⛔ What must be true before this gate opens:
+ *
+ *   1. The publisher anchors the height of any block CONTAINING a burn, in
+ *      preference to its usual tip-200 - and always the OLDEST unanchored burn
+ *      first, because anchoring past one strands it permanently. This needs no
+ *      consensus change: burns are found by scanning blocks for the tag above.
+ *   2. Or `BridgedMoli` is redeployed to accept an ancestry proof, removing the
+ *      constraint at the root. It is immutable and holds no supply, so
+ *      replacing it costs nothing but the work.
+ *
+ * Neither is built yet. 120,000 is about nineteen days from the tip of 47,118
+ * at the measured 22.37 s interval - margin to build one of them properly
+ * rather than against a deadline. It is still free to change until the first
+ * burn is mined, and that is exactly what this margin protects.
  */
-export const MOLI_BURN_ACTIVATION = 60_000n;
+export const MOLI_BURN_ACTIVATION = 120_000n;
 
 /** Build the `data` for a burn-to-bridge instruction. */
 export function encodeMoliBurn(recipient, amount) {
