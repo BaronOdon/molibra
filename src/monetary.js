@@ -58,53 +58,87 @@
  */
 
 /**
- * ⛔⛔ ISSUANCE - the lever that actually bites, decided 9 Sep 2026.
+ * ⛔⛔ ISSUANCE - decided 9 Sep 2026. **Bitcoin is the reference.**
  *
- * Genesis issues 2 MOLI per block, halving once per 2,102,400 blocks to a 0.25
- * floor. At the measured 22.37 s block interval that mints **9.4 million MOLI**
- * over ten years and runs at 96.8% inflation through year one. From the
- * activation height below the schedule is replaced with:
+ * Genesis halves once per 2,102,400 blocks, which is **1.49 years** at the
+ * measured 22.37 s interval (it was written as one year against the 15 s target
+ * the chain does not actually achieve). Bitcoin halves every four years. This
+ * lengthens the epoch to match:
  *
- *     0.5 MOLI, halving every 262,800 blocks (~68 days), floor 0.05 MOLI
+ *     2 MOLI, halving every 5,640,000 blocks (4.00 years), floor 0.05 MOLI
  *
- * which holds supply under a million for a decade and settles at about 193 MOLI
- * a day.
+ * ⭐ The reward is UNCHANGED at 2 MOLI. Only the epoch and the floor move, and
+ * that is the whole correction: the emission curve was never the wrong height,
+ * it was the wrong width.
  *
- * ⛔ The floor is reached at era FOUR, not three: 0.5 halves to 0.25, 0.125,
- * then 0.0625 - which is still above 0.05 - and only the next halving clamps.
- * That is 1,051,200 blocks, about **272 days** after activation. A floor that
- * is not a power of two below the initial reward never lands on a halving
- * boundary, and publishing the era-3 date would put the wrong figure in the
- * whitepaper.
+ * ⭐ Scaled to Molibra's block time this reproduces Bitcoin's curve almost
+ * exactly, because the proportions are scale-invariant:
  *
- * ⭐ Why the FLOOR had to move too, which is the part that is easy to get
- * wrong. Cutting only the reward and keeping the 0.25 floor makes the long run
- * WORSE, not better: you arrive at the same fixed tail with far less supply
- * underneath it, so the tail is a larger fraction of the total. Jumping
- * straight to the old floor gives 9.7% inflation in year ten against 3.7% for
- * doing nothing at all. The level and the floor are one decision.
+ *      year    Molibra    Bitcoin
+ *         2      96.8%      100.0%
+ *         5      12.4%       12.5%
+ *        10       4.0%        4.0%
+ *        20       0.8%        0.8%
  *
- * ⭐ Why issuance does not go to zero. Mining is the ONLY compliant way to
- * distribute MOLI: handing it to participants is the art. 29 §8º silhouette, so
- * there is no airdrop, no faucet and no reward for taking part. If issuance
- * stopped, the operator's ~83% of supply would be locked in permanently and the
- * chain could never become anybody else's. 193 MOLI/day is chosen to be worth a
- * stranger's electricity once MOLI has any price at all.
+ * with about 21.9M MOLI in circulation at year twenty against Bitcoin's 20.4M.
  *
- * ⛔ The window for this change is NOW and it is short. The chain is 46 days
- * old, has no market, no external holders and no third-party miners, so the
- * schedule is a promise to nobody. Once the burn gate opens and bMOLI has a
- * supply, changing it breaks a commitment to real holders.
+ * ## ⛔⛔ Why a FAST schedule was proposed first, and why it was wrong
+ *
+ * The first draft cut the reward to 0.5 and halved every 68 days, reaching the
+ * floor inside a year. It optimised for scarcity and would have been a serious
+ * mistake, because on this chain scarcity and DISTRIBUTION pull in opposite
+ * directions. Nobody else mines yet. An emission curve that completes in 272
+ * days is one the operator mines almost entirely himself, ending with ~95% of
+ * every MOLI that will exist for years - so a fast schedule does not dissolve
+ * the concentration, it sets it in concrete.
+ *
+ * Bitcoin's slow curve is exactly what let its coins reach many hands: most of
+ * the emission was still ahead when other people arrived. Mining is the ONLY
+ * compliant way to distribute MOLI - handing it to participants is the art. 29
+ * §8º silhouette, so there is no airdrop, no faucet, and no reward for taking
+ * part - which makes "how much emission is still ahead when a stranger shows
+ * up" the single most important property of this schedule.
+ *
+ * ⛔ The corollary, stated plainly: this chain is NOT deflationary for years,
+ * and neither was Bitcoin. Deflation is what a mature schedule produces, not
+ * what a young one is designed for. The publishing charge below is a real cost
+ * and a real long-term sink; it is not a near-term deflation mechanism and must
+ * not be sold as one.
+ *
+ * ## ⭐ The property that makes this flag day nearly risk-free
+ *
+ * Because the reward stays 2 MOLI, the new schedule and the genesis schedule
+ * **agree on every block until 2,102,400** - genesis's first halving, roughly
+ * 1.5 years away. A node still running the old code computes an identical
+ * reward until then. Unlike a change to the reward level, this one has no
+ * urgent divergence deadline at all. (The publishing charge below is different:
+ * it changes state from its own activation height, and that is what sets the
+ * real upgrade deadline.)
+ *
+ * ⚠ The four-year figure holds only while the retarget law is unchanged. Epoch
+ * length is measured in BLOCKS; its duration in years depends on the 22.37 s
+ * mean, which is itself a consequence of a median-targeting controller. Fix
+ * that bias and epochs shorten by a third. Bitcoin does not have this problem
+ * because its retarget averages over 2,016 blocks.
  */
 export const ISSUANCE_ACTIVATION = 80_000n;
 
-/** The block reward from the activation height. Was 2 MOLI. */
-export const REWARD_AFTER = 5n * 10n ** 17n;          // 0.5 MOLI
+/** Unchanged from genesis. Only the epoch and the floor move. */
+export const REWARD_AFTER = 2n * 10n ** 18n;          // 2 MOLI
 
-/** Halving cadence after activation: ~68 days at 22.37 s blocks. */
-export const HALVING_INTERVAL_AFTER = 262_800n;
+/** Bitcoin's four-year epoch, in Molibra blocks at 22.37 s. */
+export const HALVING_INTERVAL_AFTER = 5_640_000n;
 
-/** The permanent tail after activation. Was 0.25 MOLI. */
+/**
+ * The permanent tail. Was 0.25 MOLI, which would settle at 1.9% inflation
+ * forever - well above Bitcoin's asymptote. At 0.05 the tail is 0.32%.
+ *
+ * ⛔ Reached at era SIX, not five: 2 halves to 1, 0.5, 0.25, 0.125, 0.0625 -
+ * still above 0.05 - and only the next halving clamps. That is about **24
+ * years**. A floor that is not a power of two below the initial reward never
+ * lands on a halving boundary, and publishing the era-5 date would put the
+ * wrong figure in the whitepaper.
+ */
 export const REWARD_FLOOR_AFTER = 5n * 10n ** 16n;    // 0.05 MOLI
 
 /**

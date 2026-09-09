@@ -371,31 +371,50 @@ async function main() {
   const era2 = HALVING_INTERVAL_AFTER;
   const A = ISSUANCE_ACTIVATION;
 
-  check('the flag day is above the current tip, so nothing already mined moves',
-    A === 80_000n && blockRewardAt(46_500n, G) === 2n * MOLI);
-  check('the activation block itself pays the new 0.5 MOLI',
-    blockRewardAt(A, G) === MOLI / 2n);
-  check('the last block of the new era 0 still pays 0.5 MOLI',
-    blockRewardAt(A + era2 - 1n, G) === MOLI / 2n);
-  check('the first block of the new era 1 halves to 0.25 MOLI',
-    blockRewardAt(A + era2, G) === MOLI / 4n);
-  check('the new era 2 halves again to 0.125 MOLI',
-    blockRewardAt(A + era2 * 2n, G) === MOLI / 8n);
-  // ⛔ Era 3 is 0.0625, which is still ABOVE the 0.05 floor - so the floor is
-  // reached at era 4, not 3. Halvings do not land on a floor that is not a
+  check('the epoch is Bitcoin-shaped: four years at the measured block time',
+    era2 === 5_640_000n
+    && Math.abs(Number(era2) / (86400 / 22.37 * 365) - 4) < 0.01,
+    `${(Number(era2) / (86400 / 22.37 * 365)).toFixed(2)} years per halving`);
+  check('the reward level is UNCHANGED - only the epoch and floor moved',
+    blockRewardAt(A, G) === 2n * MOLI && blockRewardAt(46_500n, G) === 2n * MOLI);
+
+  // ⭐⭐ The property that makes this flag day nearly risk-free: because the
+  // reward did not change, a node on the OLD code computes the identical reward
+  // until genesis's own first halving, ~1.5 years out. There is no urgent
+  // divergence deadline for the issuance half of this change.
+  const genesisEra = BigInt(era);
+  let agreeThrough = true;
+  for (const h of [A, A + 1n, 100_000n, 500_000n, 1_000_000n, genesisEra - 1n]) {
+    if (blockRewardAt(h, G) !== 2n * MOLI) agreeThrough = false;
+  }
+  check('old and new schedules agree on every block until genesis era 1',
+    agreeThrough && blockRewardAt(genesisEra - 1n, G) === 2n * MOLI,
+    `identical through block ${genesisEra - 1n}`);
+  check('and they diverge only from genesis era 1, ~1.5 years out',
+    blockRewardAt(genesisEra, G) === 2n * MOLI);   // new pays 2; genesis would pay 1
+
+  check('the last block of the new era 0 still pays 2 MOLI',
+    blockRewardAt(A + era2 - 1n, G) === 2n * MOLI);
+  check('the first block of the new era 1 halves to 1 MOLI',
+    blockRewardAt(A + era2, G) === MOLI);
+  check('the new era 2 halves again to 0.5 MOLI',
+    blockRewardAt(A + era2 * 2n, G) === MOLI / 2n);
+  // ⛔ Era 5 is 0.0625, which is still ABOVE the 0.05 floor - so the floor is
+  // reached at era 6, not 5. Halvings do not land on a floor that is not a
   // power of two below the initial reward, and asserting otherwise is how a
   // schedule gets published with the wrong date on it.
-  check('the new era 3 pays 0.0625 MOLI - still above the floor',
-    blockRewardAt(A + era2 * 3n, G) === MOLI / 16n);
-  check('the new era 4 reaches the 0.05 MOLI floor',
-    blockRewardAt(A + era2 * 4n, G) === REWARD_FLOOR_AFTER);
+  check('the new era 5 pays 0.0625 MOLI - still above the floor',
+    blockRewardAt(A + era2 * 5n, G) === MOLI / 16n);
+  check('the new era 6 reaches the 0.05 MOLI floor, about 24 years out',
+    blockRewardAt(A + era2 * 6n, G) === REWARD_FLOOR_AFTER);
 
   // ⭐ Eras are counted from the ACTIVATION height, not from genesis. Counting
   // from zero would drop the chain into the middle of a schedule it was never
   // on, and the first halving would land at an arbitrary offset.
   check('eras count from the activation height, not from genesis',
-    blockRewardAt(A + era2 - 1n, G) !== blockRewardAt(A + era2, G)
-    && blockRewardAt(A + 1n, G) === MOLI / 2n);
+    blockRewardAt(A + era2 - 1n, G) === 2n * MOLI
+    && blockRewardAt(A + era2, G) === MOLI
+    && blockRewardAt(A + era2, G) !== blockRewardAt(A + era2 + era2, G));
 
   // Issuance must never reach zero: mining is the only compliant way to
   // distribute MOLI, so a chain that stops paying miners can never stop being
@@ -421,15 +440,21 @@ async function main() {
   check('and does not decay or halve afterwards',
     tokenCreationBurn(ISSUANCE_ACTIVATION * 1000n) === TOKEN_CREATION_BURN);
 
-  // ⭐ The number that makes the schedule mean something: at the 0.05 floor the
-  // chain issues ~193 MOLI/day, so ~4 publications a day burns more than is
-  // minted. That is the product target the whole monetary plan reduces to.
-  const perDay = REWARD_FLOOR_AFTER * 86400n / 22n;   // ~3,927 blocks/day
-  check('~4 publications a day outpaces issuance at the floor',
-    4n * TOKEN_CREATION_BURN > perDay,
-    `issues ~${perDay / MOLI} MOLI/day, 4 creations burn ${4n * TOKEN_CREATION_BURN / MOLI}`);
-  check('one publication a day does NOT - the target is a real target',
-    TOKEN_CREATION_BURN < perDay);
+  // ⛔ Honest sizing, asserted so nobody oversells it. On a Bitcoin-shaped
+  // curve the chain is INFLATIONARY for years, exactly as Bitcoin was, and the
+  // publishing charge is a real cost and a long-term sink - not a near-term
+  // deflation mechanism.
+  const blocksPerDay = 86400n * 100n / 2237n;                    // ~3,862
+  const nowPerDay = 2n * MOLI * blocksPerDay;                    // today's issuance
+  const floorPerDay = REWARD_FLOOR_AFTER * blocksPerDay;         // at the 24-year tail
+
+  check('at TODAY\'s issuance the charge is nowhere near deflationary',
+    TOKEN_CREATION_BURN * 100n < nowPerDay,
+    `needs ~${nowPerDay / TOKEN_CREATION_BURN} publications/day to offset 2 MOLI blocks`);
+  check('at the eventual floor ~4 publications a day outpaces issuance',
+    4n * TOKEN_CREATION_BURN > floorPerDay
+    && TOKEN_CREATION_BURN < floorPerDay,
+    `floor issues ~${floorPerDay / MOLI} MOLI/day`);
 
   // Backward compatibility: every block mined before this rule existed sits in
   // era 0, so the chain already on disk stays valid and needs no reset.
