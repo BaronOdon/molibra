@@ -11,6 +11,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { randomBytes } from 'node:crypto';
 import { toQuantity, normalizeAddress, keccak256, recoverAddress, fromHex, toHex, bytesToBig } from './crypto.js';
 import { intrinsicGas } from './tx.js';
@@ -22,6 +23,15 @@ import { simulate } from './evm.js';
 import { MOLI_BURN_ACTIVATION } from './moliburn.js';
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
+
+// Sibling node state for /molibra/nodes, refreshed at most every 5s. A status
+// page polling every few seconds must not turn into a fetch storm against the
+// other node, and stale-by-5s is honest for a chain with ~20s blocks.
+let siblingCache = null;
+
+// How far below the tips two nodes must agree before we call it the same
+// chain. Ten blocks is ~3 minutes here - long past any honest tip race.
+const AGREEMENT_DEPTH = 10;
 
 const CLIENT_VERSION = 'Molibra/v0.1.0';
 
@@ -368,7 +378,11 @@ export function startRpcServer(node, { host, port }) {
       const path = (req.url ?? '/').split('?')[0];
       const verdict = limiter.take(clientKey(req), costOfPath(path));
       if (!verdict.ok) return refuse(res, verdict.retryAfter);
-      return handleAudit(node, req, res);
+      // ⛔ awaited, and its failure answered. An unhandled rejection here would
+      // leave the socket open until the client timed out, with nothing logged.
+      return handleAudit(node, req, res).catch((error) => {
+        json(res, 500, { error: error.message });
+      });
     }
 
     // Bounded, and bounded WHILE reading rather than after. A body is
@@ -457,7 +471,7 @@ function json(res, status, body) {
   res.end(JSON.stringify(body, null, 2));
 }
 
-function handleAudit(node, req, res) {
+async function handleAudit(node, req, res) {
   const { chain } = node;
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
@@ -521,6 +535,38 @@ function handleAudit(node, req, res) {
       // evicted under pressure and a reader who never asks is invisible, so a
       // low number is "no evidence of others", never "there are none".
       readers: { distinct: node.rateLimiter?.activeClients() ?? 0, windowSeconds: 900 },
+
+      /**
+       * ⛔⛔ Whether this node enforces the Ethereum-anchored reorg floor, and
+       * where that floor is.
+       *
+       * `src/anchor.js` can refuse ANY reorg below a height Ethereum has
+       * attested to, however much work the branch carries - which is the one
+       * defence that matters on a chain this small, because it stops the
+       * argument being "who has more hash power". But `chain.anchors` is null
+       * unless a node is configured to follow anchors, and until this field
+       * existed there was NO WAY TO TELL FROM OUTSIDE which node you were
+       * talking to. A security guarantee nobody can check is not a guarantee;
+       * it is a claim. So the honest state is published either way, including
+       * the unflattering one.
+       *
+       * `maxReorgDepth` always binds, anchors or not.
+       */
+      finality: chain.anchors
+        ? {
+          anchored: true,
+          finalizedHeight: (() => {
+            const h = chain.anchors.finalizedHeight();
+            return h < 0n ? null : Number(h);
+          })(),
+          maxReorgDepth: chain.maxReorgDepth,
+        }
+        : {
+          anchored: false,
+          finalizedHeight: null,
+          maxReorgDepth: chain.maxReorgDepth,
+          note: 'this node does not follow Ethereum anchors; only the depth bound applies',
+        },
       attribution: chain.genesis.attribution,
       theories: chain.genesis.theories,
       peers: [...node.peers],
@@ -583,6 +629,103 @@ function handleAudit(node, req, res) {
 
   if (path === '/molibra/peers') {
     return json(res, 200, { peers: [...node.peers] });
+  }
+
+  /**
+   * Every node the operator runs, as one answer, for the status page.
+   *
+   * ⛔ The page cannot ask a sibling itself. It is served over HTTPS and the
+   * siblings answer plain http on their own addresses; a browser blocks that as
+   * mixed content and shows nothing, with no error a reader would understand.
+   * So this node asks on the page's behalf.
+   *
+   * ⛔⛔ The list comes from `<dataDir>/siblings.json` and NOWHERE ELSE. It is
+   * never taken from the query string: an endpoint that fetches a URL a stranger
+   * supplies is a server-side request forgery primitive, and this one runs on a
+   * host with a metadata service at 169.254.169.254. A fixed file on disk cannot
+   * be steered from outside. Absent file means no siblings, which is correct for
+   * a single-node deployment and for anyone who clones this repo.
+   */
+  if (path === '/molibra/nodes') {
+    const now = Date.now();
+    if (!siblingCache || now - siblingCache.at > 5000) {
+      let siblings = [];
+      try {
+        const file = join(chain.dataDir, 'siblings.json');
+        const parsed = JSON.parse(readFileSync(file, 'utf8'));
+        // http/https origins only, and at most a handful.
+        siblings = (Array.isArray(parsed) ? parsed : [])
+          .filter((u) => typeof u === 'string' && /^https?:\/\/[\w.\-:]+$/.test(u))
+          .slice(0, 8);
+      } catch { /* no file, or unreadable: this node simply has no siblings */ }
+
+      const reached = await Promise.all(siblings.map(async (origin, i) => {
+        try {
+          const r = await fetch(`${origin}/molibra`, { signal: AbortSignal.timeout(4000) });
+          const d = await r.json();
+          return {
+            name: `node ${i + 2}`, origin, reachable: true,
+            height: d.height, head: d.head, totalDifficulty: d.totalDifficulty,
+            lastReorg: d.lastReorg ? d.lastReorg.depth : null,
+          };
+        } catch (error) {
+          // Say it is unreachable rather than omitting it. A node that vanishes
+          // from a status page reads as "we have one node", not "one is down".
+          return { name: `node ${i + 2}`, origin, reachable: false, error: error.message };
+        }
+      }));
+
+      siblingCache = { at: now, value: reached };
+    }
+
+    const self = {
+      name: 'node 1', reachable: true, self: true,
+      height: Number(chain.height), head: chain.head.hash,
+      totalDifficulty: chain.head.totalDifficulty?.toString?.() ?? null,
+      lastReorg: chain.lastReorg ? chain.lastReorg.depth : null,
+    };
+    const nodes = [self, ...siblingCache.value];
+
+    /**
+     * Do the nodes agree about SETTLED history?
+     *
+     * ⛔ Computed here, not in the page. The page is served over HTTPS and a
+     * sibling answers plain http, so a browser cannot fetch the sibling's block
+     * to compare - it would have to assume agreement, print a tick, and prove
+     * nothing. A tick that tested nothing is worse than no tick.
+     *
+     * ⛔ Compared at a DEPTH below both tips, never at the tips. With more than
+     * one miner the tips differ constantly and legitimately; only disagreement
+     * about settled history is a fork.
+     */
+    let agreement = { compared: false, reason: 'only one node reporting' };
+    const up = nodes.filter((n) => n.reachable);
+    if (up.length >= 2) {
+      const at = Math.min(...up.map((n) => Number(n.height))) - AGREEMENT_DEPTH;
+      if (at < 1) {
+        agreement = { compared: false, reason: 'chain too short to compare at depth' };
+      } else {
+        const mine = chain.blockByNumber(BigInt(at))?.hash ?? null;
+        const theirs = await Promise.all(siblingCache.value.map(async (n) => {
+          if (!n.reachable) return null;
+          try {
+            const r = await fetch(`${n.origin}/molibra/block/${at}?decoded=1`,
+              { signal: AbortSignal.timeout(4000) });
+            return (await r.json())?.hash ?? null;
+          } catch { return null; }
+        }));
+        const seen = theirs.filter(Boolean);
+        agreement = {
+          compared: seen.length > 0,
+          atHeight: at,
+          agree: seen.length > 0 && mine !== null && seen.every((h) => h === mine),
+          spread: Math.max(...up.map((n) => Number(n.height)))
+            - Math.min(...up.map((n) => Number(n.height))),
+          reason: seen.length ? undefined : 'no sibling returned that block',
+        };
+      }
+    }
+    return json(res, 200, { nodes, agreement });
   }
 
   /**
@@ -734,6 +877,13 @@ function handleAudit(node, req, res) {
   // served for every sub-path and reads its own URL.
   if (path === '/molibra/moliscan' || path.startsWith('/molibra/moliscan/')) {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'moliscan.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  if (path === '/molibra/status') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'status.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;

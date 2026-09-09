@@ -1,0 +1,148 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Status — Molibra</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<style>
+  :root { --bg:#0a0a0a; --fg:#e8e8e8; --mut:#8a8a8a; --gold:#FFD100; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --line:#242424; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .wrap { max-width:880px; margin:0 auto; padding:28px 18px 60px }
+  a { color:var(--gold) }
+  h1 { font-size:15px; letter-spacing:.18em; text-transform:uppercase; margin:0 0 4px }
+  .sub { color:var(--mut); margin:0 0 26px; font-size:12px }
+  .card { border:1px solid var(--line); border-radius:4px; padding:14px 16px; margin:0 0 14px }
+  .card h2 { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--mut); margin:0 0 10px; font-weight:600 }
+  table { width:100%; border-collapse:collapse }
+  td { padding:4px 8px 4px 0; vertical-align:top }
+  td:first-child { color:var(--mut); white-space:nowrap; width:1%; padding-right:18px }
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)} .mut{color:var(--mut)}
+  .hash { word-break:break-all; font-size:12px }
+  .pill { display:inline-block; padding:1px 7px; border-radius:3px; font-size:11px; border:1px solid var(--line) }
+  .tw { overflow-x:auto }
+  footer { color:var(--mut); font-size:12px; margin-top:22px }
+</style>
+
+<div class="wrap">
+  <a href="/" style="font-size:12px">&larr; molibra</a>
+  <h1>Status</h1>
+  <p class="sub" id="stamp">reading…</p>
+
+  <div class="card"><h2>Nodes</h2><div class="tw"><table id="nodes"><tr><td>…</td></tr></table></div>
+    <p class="sub" id="agree" style="margin:10px 0 0"></p></div>
+
+  <div class="card"><h2>Chain</h2><table id="chain"><tr><td>…</td></tr></table></div>
+
+  <div class="card"><h2>Anchor on Ethereum</h2><table id="anchor"><tr><td>…</td></tr></table></div>
+
+  <footer>Refreshes every 15s. Everything here is read live from this node;
+    nothing is cached longer than 5 seconds.</footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
+const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+const num = (n) => Number(n).toLocaleString();
+const rows = (el, pairs) => { el.innerHTML = pairs.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join(''); };
+const get = (p) => fetch(NODE + p).then((r) => r.json());
+
+// ⛔ A public Ethereum RPC, read from the browser. If it is down or blocks CORS
+//    the anchor card says so rather than the page half-rendering - a status page
+//    that fails silently is worse than no status page.
+const ETH = 'https://ethereum-rpc.publicnode.com';
+const ANCHOR = '0x2beba454d810eac41c6778e351f81d37a07ae03b';
+const call = async (data) => {
+  const r = await fetch(ETH, { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'eth_call', params:[{ to:ANCHOR, data }, 'latest'] }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return BigInt(j.result);
+};
+
+async function paint() {
+  // --- nodes ---------------------------------------------------------------
+  try {
+    const { nodes, agreement } = await get('/molibra/nodes');
+    $('nodes').innerHTML =
+      '<tr><td>&nbsp;</td><td class="mut">height</td><td class="mut">last reorg</td><td class="mut">head</td></tr>'
+      + nodes.map((n) => `<tr>
+          <td>${esc(n.name)}${n.self ? ' <span class="pill">this</span>' : ''}</td>
+          <td>${n.reachable ? num(n.height) : '<span class="bad">unreachable</span>'}</td>
+          <td>${n.reachable ? (n.lastReorg === null ? '<span class="mut">none</span>' : 'depth ' + n.lastReorg) : ''}</td>
+          <td class="hash mut">${n.reachable ? esc(String(n.head).slice(0, 26)) + '…' : esc(n.error ?? '')}</td>
+        </tr>`).join('');
+
+    // ⛔ The verdict is the NODE's, computed by actually fetching the sibling's
+    //    block. The page only renders it. It cannot do the comparison itself -
+    //    HTTPS page, http sibling - and a tick this page invented would be a
+    //    tick that tested nothing.
+    if (!agreement?.compared) {
+      $('agree').innerHTML = `<span class="mut">not compared — ${esc(agreement?.reason ?? 'unknown')}</span>`;
+    } else if (agreement.agree) {
+      $('agree').innerHTML = `<span class="ok">✓</span> same chain at block ${num(agreement.atHeight)}`
+        + ` <span class="mut">— tips differ by ${num(agreement.spread)}, expected while more than one node mines</span>`;
+    } else {
+      $('agree').innerHTML = `<span class="bad">⛔ FORK</span> — the nodes disagree at block ${num(agreement.atHeight)},`
+        + ' which is settled history, not a tip race';
+    }
+  } catch (e) {
+    $('nodes').innerHTML = `<tr><td class="bad">could not read this node</td><td>${esc(e.message)}</td></tr>`;
+  }
+
+  // --- chain ---------------------------------------------------------------
+  try {
+    const d = await get('/molibra');
+    const burn = d.activations?.moliBurn;
+    const days = burn && !burn.active ? (burn.blocksAway * 20.2 / 86400) : 0;
+    rows($('chain'), [
+      ['height', num(d.height)],
+      ['head', `<span class="hash">${esc(d.head)}</span>`],
+      ['total work', num(d.totalDifficulty)],
+      ['last reorg', d.lastReorg ? `depth ${d.lastReorg.depth}` : '<span class="mut">none</span>'],
+      ['readers', `${d.readers?.distinct ?? '?'} <span class="mut">in the last ${(d.readers?.windowSeconds ?? 0) / 60} min</span>`],
+      ['burn gate', burn
+        ? (burn.active ? '<span class="ok">active</span>'
+          : `${num(burn.height)} — <span class="warn">${num(burn.blocksAway)} blocks away</span> <span class="mut">(~${days.toFixed(1)} days)</span>`)
+        : '<span class="mut">n/a</span>'],
+      ['crossed the bridge', `${d.outbound?.burned ?? '0'} <span class="mut">MOLI burned</span>`],
+      // ⛔ The reorg guarantee, stated plainly including when it is weak. A
+      //    status page that only shows good news is decoration.
+      ['reorg floor', d.finality?.anchored
+        ? `<span class="ok">Ethereum-anchored</span> — finalised to ${d.finality.finalizedHeight === null ? '<span class="mut">no anchor yet</span>' : num(d.finality.finalizedHeight)}`
+        : `<span class="warn">depth bound only</span> <span class="mut">— not following Ethereum anchors</span>`],
+      ['max reorg depth', d.finality
+        ? `${num(d.finality.maxReorgDepth)} blocks <span class="mut">(~${((d.finality.maxReorgDepth * 20.2) / 60).toFixed(0)} min of rewritable history)</span>`
+        : '<span class="mut">?</span>'],
+    ]);
+  } catch (e) {
+    rows($('chain'), [['error', `<span class="bad">${esc(e.message)}</span>`]]);
+  }
+
+  // --- anchor --------------------------------------------------------------
+  try {
+    const [count, tip] = await Promise.all([call('0x34f96c8c'), call('0x1fd4827a')]);
+    const here = Number((await get('/molibra')).height);
+    const behind = here - Number(tip);
+    rows($('anchor'), [
+      ['contract', `<a href="https://etherscan.io/address/${ANCHOR}">${ANCHOR.slice(0, 20)}…</a>`],
+      ['anchors published', num(count)],
+      ['committed to height', num(tip)],
+      // ⛔ Negative means the anchor is AHEAD of this node - impossible on a
+      //    healthy deployment, and a sign the page is pointed at the wrong
+      //    chain. It must not render as a reassuring green number.
+      ['behind the chain by', behind < 0
+        ? `<span class="bad">${num(behind)} blocks</span> <span class="mut">— the anchor is ahead of this node; wrong chain?</span>`
+        : behind > 5000
+          ? `<span class="warn">${num(behind)} blocks</span> <span class="mut">— worth anchoring</span>`
+          : `<span class="ok">${num(behind)} blocks</span>`],
+    ]);
+  } catch (e) {
+    rows($('anchor'), [['unavailable', `<span class="mut">the public Ethereum RPC did not answer: ${esc(e.message)}</span>`]]);
+  }
+
+  $('stamp').textContent = 'as of ' + new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+paint();
+setInterval(paint, 15000);
+</script>
