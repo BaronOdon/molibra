@@ -38,7 +38,12 @@ if ($Remove) {
   exit 0
 }
 
-$node = (Get-Command node).Source
+# ⛔ NOT $node. PowerShell variable names are case-insensitive, so `$node` IS the
+#    `-Node` parameter: assigning the interpreter path here silently overwrote
+#    the RPC URL, and the task installed with `--node C:\Program Files\...`.
+#    It was caught only because the command is printed back below - which is the
+#    argument for printing it back.
+$nodeExe = (Get-Command node).Source
 $log  = Join-Path $Repo 'anchor-publisher.log'
 
 # ⛔ The whole command as one string, quoted for cmd, appending to a log. A
@@ -46,9 +51,14 @@ $log  = Join-Path $Repo 'anchor-publisher.log'
 #    and this one fails by DESIGN most runs ("the chain has not advanced past
 #    the last anchor yet"), so the log is the only way to tell that apart from
 #    a broken key or an empty wallet.
-$cmd = "`"$node`" anchor-publisher.mjs --send --node $Node --depth $Depth"
+#    ⛔ The whole thing gets ONE outer pair of quotes on top of the inner ones.
+#    `cmd /c` strips the first and last quote of its argument when the argument
+#    starts with one, so `/c "C:\Program Files\nodejs\node.exe" ...` loses the
+#    quotes that make the space in the path survive, and the task fails with
+#    "'C:\Program' is not recognized" - in a log nobody reads.
+$cmd = "`"$nodeExe`" anchor-publisher.mjs --send --node $Node --depth $Depth"
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
-  -Argument "/c $cmd >> `"$log`" 2>&1" -WorkingDirectory $Repo
+  -Argument "/c `"$cmd >> `"$log`" 2>&1`"" -WorkingDirectory $Repo
 
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
   -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)

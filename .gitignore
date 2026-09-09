@@ -68,3 +68,7 @@ patent-private/
 # Publishing bears on novelty, so a push forecloses one of the two options
 # before it has been chosen.
 UNDECIDED-*.md
+
+# OpenTimestamps proofs are generated daily and upgraded in place.
+# They are evidence to SERVE, not source to version - see ots-stamp.mjs.
+timestamps/

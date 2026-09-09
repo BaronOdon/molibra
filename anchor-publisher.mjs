@@ -72,6 +72,18 @@ const MIN_DEPTH = MAX_REORG_DEPTH + 1;
 const DEPTH = BigInt(args.depth ?? MAX_REORG_DEPTH + 72);
 
 const sel = (s) => toHex(keccak256(new TextEncoder().encode(s))).slice(0, 10);
+
+/**
+ * Every custom error MolibraAnchor declares, keyed by selector and DERIVED
+ * rather than pasted. A raw revert is four bytes and a shrug; named, it says
+ * which precondition failed - and an unrecognised one says something quite
+ * different, that the calldata or the address is wrong.
+ */
+const ANCHOR_ERRORS = Object.fromEntries([
+  'NotBonded()', 'AlreadySlashed()', 'HeightNotIncreasing(uint256,uint256)',
+  'WorkNotIncreasing(uint256,uint256)', 'EmptyAnchor()', 'NothingToProve()',
+  'NotEquivocation()', 'TransferFailed()', 'StillActive()',
+].map((s) => [sel(s), s]));
 const pad = (h) => h.replace(/^0x/, '').toLowerCase().padStart(64, '0');
 const n32 = (v) => pad(BigInt(v).toString(16));
 const eth = (w) => (Number(w) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 8 });
@@ -209,15 +221,26 @@ async function main() {
 
   // --- build, sign, and READ BACK what was signed ---------------------------
   const data = sel('anchor(uint256,bytes32,uint256)') + n32(height) + pad(blockHash) + n32(cumulativeWork);
-  const nonce = BigInt(await rpc('eth_getTransactionCount', [PUBLISHER, 'pending']));
-  let gasLimit;
+
+  // ⛔ eth_call the EXACT bytes that will be sent, before signing anything. It
+  //    executes the real function against real state, costs nothing and signs
+  //    nothing, so there is no reason to discover a revert by paying for it.
+  //    A revert with no matching name means the calldata is wrong or this is
+  //    the wrong contract - a different problem from a failed precondition.
   try {
-    gasLimit = BigInt(await rpc('eth_estimateGas', [{ from: PUBLISHER, to: ANCHOR, data }])) * 12n / 10n;
+    await rpc('eth_call', [{ from: PUBLISHER, to: ANCHOR, data }, 'latest']);
+    console.log('pre-flight     : eth_call returns cleanly - every precondition passes');
   } catch (error) {
-    // An estimate that reverts means the call itself would revert. Say which,
-    // rather than sending a guessed limit into a transaction that cannot work.
-    throw new Error(`eth_estimateGas reverted, so anchor() would too: ${error.message}`);
+    const m = /0x[0-9a-fA-F]{8,}/.exec(error.message);
+    const which = m ? ANCHOR_ERRORS[m[0].slice(0, 10).toLowerCase()] : null;
+    throw new Error(which
+      ? `anchor() reverts ${which} - nothing signed`
+      : `anchor() reverts with no error this ABI declares, so the calldata or the `
+        + `contract address is wrong, not a precondition: ${error.message}`);
   }
+
+  const nonce = BigInt(await rpc('eth_getTransactionCount', [PUBLISHER, 'pending']));
+  const gasLimit = BigInt(await rpc('eth_estimateGas', [{ from: PUBLISHER, to: ANCHOR, data }])) * 12n / 10n;
   const cost = gasPrice * gasLimit;
 
   const raw = signTransaction({ nonce, gasPrice, gasLimit, to: ANCHOR, value: 0n, data }, KEY, CHAIN_ID);
