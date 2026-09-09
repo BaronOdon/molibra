@@ -154,6 +154,97 @@ function isComplete(ots) {
   return toHex(ots).slice(2).includes(BITCOIN_TAG);
 }
 
+/**
+ * ⛔⛔ Walk the proof and find every pending attestation, with the COMMITMENT
+ * that sits at it and the byte span it occupies.
+ *
+ * Both facts are needed and neither is the obvious one:
+ *
+ *   - **The calendar does not know the original digest.** It keys its timestamp
+ *     by the commitment produced after the ops it appended - `6aa1a90f…` here,
+ *     not the `a8dc5c2a…` that was submitted. Asking for the digest returns a
+ *     bare 404 forever, so an upgrade written that way reports "still pending"
+ *     for eternity and never fails loudly. It was written that way, and only a
+ *     deliberate check caught it.
+ *   - **The reply is a CONTINUATION, not a proof.** It runs from that
+ *     commitment to a Bitcoin attestation. Writing it out as though it started
+ *     at the original digest produces a well-formed file that attests to
+ *     something else entirely - far worse than staying pending. It has to be
+ *     spliced in place of the pending attestation's bytes.
+ *
+ * Structure, per the OTS serialisation: a node is zero or more items separated
+ * by 0xff, where an item is either an attestation (a leaf) or an operation
+ * followed by the node it produces.
+ */
+function findPending(buf) {
+  const found = [];
+  let i = MAGIC.length;
+  i += 1;                                    // version varuint (1 byte in practice)
+  i += 1;                                    // the file-hash op
+  const digest = buf.subarray(i, i + 32);
+  i += 32;
+
+  const varuintAt = (at) => {
+    let x = 0, shift = 0, j = at;
+    for (;;) {
+      const b = buf[j++];
+      x |= (b & 0x7f) << shift;
+      if (!(b & 0x80)) break;
+      shift += 7;
+    }
+    return [x, j];
+  };
+
+  function parseItem(at, msg) {
+    const op = buf[at];
+    if (op === 0x00) {
+      const start = at;
+      let j = at + 1;
+      const tag = toHex(buf.subarray(j, j + 8)).slice(2);
+      j += 8;
+      const [len, after] = varuintAt(j);
+      const payload = buf.subarray(after, after + len);
+      j = after + len;
+      if (tag === PENDING_TAG) {
+        // The payload is itself a varbytes URI.
+        const [ulen, uat] = (() => {
+          let x = 0, shift = 0, k = 0;
+          for (;;) { const b = payload[k++]; x |= (b & 0x7f) << shift; if (!(b & 0x80)) break; shift += 7; }
+          return [x, k];
+        })();
+        found.push({
+          start, end: j, commitment: Uint8Array.from(msg),
+          uri: Buffer.from(payload.subarray(uat, uat + ulen)).toString('utf8'),
+        });
+      }
+      return j;
+    }
+    let j = at + 1;
+    let next;
+    if (op === 0x08) next = sha256(msg);
+    else if (op === 0xf0 || op === 0xf1) {
+      const [len, after] = varuintAt(j);
+      const operand = buf.subarray(after, after + len);
+      j = after + len;
+      next = op === 0xf0 ? concat(msg, operand) : concat(operand, msg);
+    } else {
+      // ⛔ An op this parser does not know means the file is not what we think
+      // it is. Guessing past it would silently mis-locate every commitment.
+      throw new Error(`unsupported OTS opcode 0x${op.toString(16)} at byte ${at}`);
+    }
+    return parseNode(j, next);
+  }
+
+  function parseNode(at, msg) {
+    let j = at;
+    while (buf[j] === 0xff) j = parseItem(j + 1, msg);
+    return parseItem(j, msg);
+  }
+
+  parseNode(i, digest);
+  return { digest, pending: found };
+}
+
 async function submit(calendar, digest) {
   const r = await fetch(`${calendar}/digest`, {
     method: 'POST',
@@ -226,28 +317,60 @@ async function upgrade() {
   if (pending.length === 0) { console.log('no pending proofs'); return; }
 
   for (const f of pending) {
-    const meta = JSON.parse(readFileSync(join(OUT_DIR, f.replace('.ots', '.json')), 'utf8'));
+    const path = join(OUT_DIR, f);
+    let buf = readFileSync(path);
+    const { pending: spots } = findPending(buf);
     let upgraded = false;
-    for (const c of CALENDARS) {
+
+    // ⛔ Splice from the LAST pending attestation backwards. Every replacement
+    //    shifts the offsets after it, so going forwards would corrupt the next
+    //    span - and a corrupted proof still looks like a file.
+    for (const spot of [...spots].reverse()) {
+      const host = new URL(spot.uri).host;
       try {
-        const r = await fetch(`${c}/timestamp/${meta.digest.replace(/^0x/, '')}`, {
+        const r = await fetch(`${spot.uri}/timestamp/${toHex(spot.commitment).slice(2)}`, {
           headers: { Accept: 'application/vnd.opentimestamps.v1' },
           signal: AbortSignal.timeout(30000),
         });
-        // 404 is the ordinary "not published yet" answer, not an error.
-        if (r.status === 404) continue;
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) {
+          // ⭐ A 404 here carries a readable status line rather than nothing -
+          //    "waiting for 6 confirmations", or the transaction it landed in.
+          //    Print it: it is the difference between "not yet" and "broken".
+          const why = (await r.text()).trim().slice(0, 120);
+          console.log(`  · ${host}: ${why || `HTTP ${r.status}`}`);
+          continue;
+        }
         const body = new Uint8Array(await r.arrayBuffer());
-        if (!toHex(body).slice(2).includes(BITCOIN_TAG)) continue;
-        writeFileSync(join(OUT_DIR, f), assembleOts(fromHex(meta.digest), [body]));
-        writeFileSync(join(OUT_DIR, f.replace('.ots', '.json')),
-          JSON.stringify({ ...meta, complete: true, upgradedAt: new Date().toISOString() }, null, 2));
-        console.log(`✓ ${f} upgraded from ${new URL(c).host} - now attests to a Bitcoin block`);
+        if (!toHex(body).slice(2).includes(BITCOIN_TAG)) {
+          console.log(`  · ${host}: replied without a Bitcoin attestation - not upgrading`);
+          continue;
+        }
+        // Replace the pending attestation with the path the calendar returned.
+        buf = Buffer.from(concat(
+          new Uint8Array(buf.subarray(0, spot.start)),
+          body,
+          new Uint8Array(buf.subarray(spot.end)),
+        ));
+        console.log(`  ✓ ${host}: spliced ${body.length} bytes - reaches a Bitcoin block`);
         upgraded = true;
-        break;
-      } catch { /* try the next calendar */ }
+      } catch (error) {
+        console.log(`  · ${host}: ${error.message}`);
+      }
     }
-    if (!upgraded) console.log(`· ${f} still pending`);
+
+    if (upgraded) {
+      // ⛔ Re-parse what was written rather than trusting the splice. A proof
+      //    that cannot be walked is a proof nobody can verify.
+      findPending(buf);
+      writeFileSync(path, buf);
+      const metaPath = join(OUT_DIR, f.replace('.ots', '.json'));
+      const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
+      writeFileSync(metaPath, JSON.stringify(
+        { ...meta, complete: true, upgradedAt: new Date().toISOString() }, null, 2));
+      console.log(`✓ ${f} now attests to Bitcoin (${buf.length} bytes)`);
+    } else {
+      console.log(`· ${f} still pending`);
+    }
   }
 }
 
