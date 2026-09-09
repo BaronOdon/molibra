@@ -55,8 +55,27 @@ if (!existsSync(CRED)) {
   process.exit(1);
 }
 
-const key = generatePrivateKey();
+// ⛔⛔ generatePrivateKey() returns a Uint8Array. Interpolating one into a
+//    template literal gives "197,215,86,…" - comma-separated DECIMAL bytes -
+//    and the write succeeds, so the key looks recorded and is useless to every
+//    wallet and script that will ever read it. Caught on the first run only
+//    because the address was re-derived from the file afterwards. Convert to
+//    hex explicitly, then PROVE the stored form derives the same address before
+//    trusting it.
+const raw = generatePrivateKey();
+const key = typeof raw === 'string'
+  ? raw.replace(/^0x/, '')
+  : Buffer.from(raw).toString('hex');
 const address = toChecksumAddress(privateToAddress(key));
+
+if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+  console.error('ABORT: the key is not 64 hex characters - refusing to record it');
+  process.exit(1);
+}
+if (toChecksumAddress(privateToAddress(key)) !== address) {
+  console.error('ABORT: the hex form does not derive the same address');
+  process.exit(1);
+}
 
 // ⛔ Recorded before anything else happens with it. A generated key that is not
 //    written down is a key that is lost, and this one will hold a bond.
