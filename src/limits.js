@@ -66,8 +66,31 @@ export const MAX_MEMPOOL_PER_SENDER = 64;
 export const MAX_ORPHANS = 256;
 export const MAX_ORPHAN_RESOLUTION_DEPTH = 128;
 
-/** Local policy. See the header note - this one has a cost. */
-export const MAX_REORG_DEPTH = 128;
+/**
+ * Local policy. See the header note - this one has a cost.
+ *
+ * ⛔⛔ CONSENSUS-AFFECTING IN PRACTICE. It is local policy, not a validity rule,
+ * so two nodes with different values do not reject each other's blocks - they
+ * can instead end up on different chains after a deep reorg, one having
+ * followed it and the other having refused. **Every node must carry the same
+ * number**, which means changing it is a flag day: pull, then restart all of
+ * them, or accept that they may diverge.
+ *
+ * Lowered 128 -> 32 on 9 Sep 2026. At ~20s blocks, 128 left ~43 minutes of
+ * history rewritable by anyone who could out-work the chain; 32 leaves ~11. On
+ * a network this small - two miners, both the operator's - the depth bound is
+ * most of the defence that is actually switched on, so its size is the size of
+ * the exposure. The cost of a smaller number is that a genuine partition longer
+ * than 32 blocks needs manual intervention to heal, which on a two-node network
+ * is a person restarting something, not an outage.
+ *
+ * ⭐ This is a floor of last resort, not the intended defence. The anchored
+ * floor in src/anchor.js is stronger - it refuses reorgs below a height
+ * Ethereum has attested to, at ANY depth and against ANY amount of work - but
+ * it only binds on a node configured to follow anchors, and none currently are.
+ * See the `finality` block on /molibra for which kind of node you are asking.
+ */
+export const MAX_REORG_DEPTH = 32;
 
 /** secp256k1 group order, and the low-s bound (EIP-2). */
 export const SECP256K1_N =
