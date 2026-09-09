@@ -60,7 +60,11 @@ export class AnchorFeed {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      signal: AbortSignal.timeout(15000),
+      // ⛔ AbortSignal.timeout is WALL-CLOCK, not CPU time. This process mines,
+      // and a saturated event loop can burn the whole budget before the socket
+      // is even read - the request never had a chance to fail on its own merits.
+      // 15s was not enough while replaying 46,000 blocks.
+      signal: AbortSignal.timeout(45000),
     });
     const j = await r.json();
     if (j.error) throw new Error(`${method}: ${JSON.stringify(j.error).slice(0, 160)}`);
@@ -126,14 +130,30 @@ export class AnchorFeed {
     return v && v !== '0x' ? BigInt(v) : 0n;
   }
 
+  /**
+   * ⛔ undici reports every transport failure as the single word "fetch failed"
+   * and hides the reason in `error.cause`, sometimes nested. Logging only the
+   * message costs the next person the whole diagnosis: a DNS failure, a refused
+   * connection and an abort all look identical. Unwrap the chain.
+   */
+  static describe(error) {
+    const parts = [error.message];
+    for (let c = error.cause; c; c = c.cause) parts.push(c.code ?? c.message);
+    return parts.filter(Boolean).join(' <- ');
+  }
+
   start() {
     const tick = () => this.poll().catch((error) => {
       // ⛔ Loud, and then carry on. The floor stays where it was; it never
       //    advances on a guess.
-      this.lastError = error.message;
-      console.warn(`[molibra] anchor feed: ${error.message}`);
+      this.lastError = AnchorFeed.describe(error);
+      console.warn(`[molibra] anchor feed: ${this.lastError}`);
     });
-    tick();
+    // ⛔ NOT immediately. The node has just finished replaying its history and
+    //    is mining flat out; a fetch started into that contention aborts on a
+    //    wall-clock timeout and looks like a network fault. Let the process
+    //    settle first - the floor is worth having a few seconds later.
+    setTimeout(tick, 10000).unref?.();
     this.timer = setInterval(tick, this.intervalMs);
     if (this.timer.unref) this.timer.unref();
     return this;
