@@ -17,6 +17,10 @@ import { Node } from '../src/node.js';
 import { signTransaction } from '../src/tx.js';
 import { encodeVoteData, toPollId, voteKey, VOTE_TAG } from '../src/vote.js';
 import {
+  ISSUANCE_ACTIVATION, HALVING_INTERVAL_AFTER, REWARD_FLOOR_AFTER,
+  TOKEN_CREATION_BURN, tokenCreationBurn,
+} from '../src/monetary.js';
+import {
   encodeTokenCreate, encodeExpress, encodeIssue, encodeTransfer, tokenId, expressionKey,
 } from '../src/token.js';
 import { applyTransaction, State } from '../src/state.js';
@@ -353,22 +357,79 @@ async function main() {
   check('fee burn is declared and OFF, not left silent', G.feeBurnBasisPoints === 0);
 
   check('era 0 pays the full 2 MOLI', blockRewardAt(1n, G) === 2n * MOLI);
-  check('the last block of era 0 still pays 2 MOLI',
-    blockRewardAt(BigInt(era) - 1n, G) === 2n * MOLI);
-  check('the first block of era 1 halves to 1 MOLI',
-    blockRewardAt(BigInt(era), G) === MOLI);
-  check('era 2 halves again to 0.5 MOLI',
-    blockRewardAt(BigInt(era) * 2n, G) === MOLI / 2n);
-  check('era 3 reaches the 0.25 MOLI floor',
-    blockRewardAt(BigInt(era) * 3n, G) === MOLI / 4n);
+  check('the genesis schedule still governs every height below activation',
+    blockRewardAt(ISSUANCE_ACTIVATION - 1n, G) === 2n * MOLI);
 
-  // The floor is the whole point: a chain with deliberately negligible fees
-  // cannot pay for security from fees, so issuance must never reach zero.
-  check('the reward never falls below the floor, however far out',
-    blockRewardAt(BigInt(era) * 40n, G) === MOLI / 4n
-    && blockRewardAt(BigInt(era) * 10000n, G) === MOLI / 4n);
+  // ⛔ The genesis eras at 2,102,400 are now unreachable: the replacement
+  // schedule takes over at 80,000, long before the first of them. They are not
+  // tested here any more because asserting them would assert a code path no
+  // block will ever take.
+
+  // -------------------------------------- the replacement schedule (9 Sep 2026)
+  console.log('\n6c. issuance - the replacement schedule, decided 9 Sep 2026');
+
+  const era2 = HALVING_INTERVAL_AFTER;
+  const A = ISSUANCE_ACTIVATION;
+
+  check('the flag day is above the current tip, so nothing already mined moves',
+    A === 80_000n && blockRewardAt(46_500n, G) === 2n * MOLI);
+  check('the activation block itself pays the new 0.5 MOLI',
+    blockRewardAt(A, G) === MOLI / 2n);
+  check('the last block of the new era 0 still pays 0.5 MOLI',
+    blockRewardAt(A + era2 - 1n, G) === MOLI / 2n);
+  check('the first block of the new era 1 halves to 0.25 MOLI',
+    blockRewardAt(A + era2, G) === MOLI / 4n);
+  check('the new era 2 halves again to 0.125 MOLI',
+    blockRewardAt(A + era2 * 2n, G) === MOLI / 8n);
+  // ⛔ Era 3 is 0.0625, which is still ABOVE the 0.05 floor - so the floor is
+  // reached at era 4, not 3. Halvings do not land on a floor that is not a
+  // power of two below the initial reward, and asserting otherwise is how a
+  // schedule gets published with the wrong date on it.
+  check('the new era 3 pays 0.0625 MOLI - still above the floor',
+    blockRewardAt(A + era2 * 3n, G) === MOLI / 16n);
+  check('the new era 4 reaches the 0.05 MOLI floor',
+    blockRewardAt(A + era2 * 4n, G) === REWARD_FLOOR_AFTER);
+
+  // ⭐ Eras are counted from the ACTIVATION height, not from genesis. Counting
+  // from zero would drop the chain into the middle of a schedule it was never
+  // on, and the first halving would land at an arbitrary offset.
+  check('eras count from the activation height, not from genesis',
+    blockRewardAt(A + era2 - 1n, G) !== blockRewardAt(A + era2, G)
+    && blockRewardAt(A + 1n, G) === MOLI / 2n);
+
+  // Issuance must never reach zero: mining is the only compliant way to
+  // distribute MOLI, so a chain that stops paying miners can never stop being
+  // the operator's. The floor moved with the level - keeping the old 0.25 over
+  // a much smaller supply would have made the long run worse, not better.
+  check('the reward never falls below the new floor, however far out',
+    blockRewardAt(A + era2 * 40n, G) === REWARD_FLOOR_AFTER
+    && blockRewardAt(A + era2 * 10000n, G) === REWARD_FLOOR_AFTER);
   check('an absurd height does not hang or overflow the shift',
-    blockRewardAt(10n ** 30n, G) === MOLI / 4n);
+    blockRewardAt(10n ** 30n, G) === REWARD_FLOOR_AFTER);
+  check('the new floor is a fifth of the old one',
+    REWARD_FLOOR_AFTER === MOLI / 20n && G.rewardFloor === MOLI / 4n);
+
+  // ------------------------------------------- the publishing charge (sinks)
+  console.log('\n6d. publishing charge - the sink that scales with real use');
+
+  check('creating a token costs nothing below the flag day',
+    tokenCreationBurn(0n) === 0n
+    && tokenCreationBurn(ISSUANCE_ACTIVATION - 1n) === 0n);
+  check('the charge begins exactly at the activation block',
+    tokenCreationBurn(ISSUANCE_ACTIVATION) === TOKEN_CREATION_BURN
+    && TOKEN_CREATION_BURN === 50n * MOLI);
+  check('and does not decay or halve afterwards',
+    tokenCreationBurn(ISSUANCE_ACTIVATION * 1000n) === TOKEN_CREATION_BURN);
+
+  // ⭐ The number that makes the schedule mean something: at the 0.05 floor the
+  // chain issues ~193 MOLI/day, so ~4 publications a day burns more than is
+  // minted. That is the product target the whole monetary plan reduces to.
+  const perDay = REWARD_FLOOR_AFTER * 86400n / 22n;   // ~3,927 blocks/day
+  check('~4 publications a day outpaces issuance at the floor',
+    4n * TOKEN_CREATION_BURN > perDay,
+    `issues ~${perDay / MOLI} MOLI/day, 4 creations burn ${4n * TOKEN_CREATION_BURN / MOLI}`);
+  check('one publication a day does NOT - the target is a real target',
+    TOKEN_CREATION_BURN < perDay);
 
   // Backward compatibility: every block mined before this rule existed sits in
   // era 0, so the chain already on disk stays valid and needs no reset.

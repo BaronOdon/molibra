@@ -33,6 +33,7 @@ import {
 } from './bridgemint.js';
 import { InboundLedger } from './inbound.js';
 import { decodeMoliBurn, OutboundLedger, MOLI_BURN_ACTIVATION } from './moliburn.js';
+import { tokenCreationBurn, tokenIssueBurn } from './monetary.js';
 import {
   stateRoot as merkleStateRoot, proofFor, STATE_MERKLE_ACTIVATION,
 } from './stateproof.js';
@@ -812,6 +813,25 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     }
   }
 
+  // ---------------------------------------------------- the publishing charge
+  //
+  // ⛔⛔ Destroyed, not paid to anyone: no treasury, no vault, no holding
+  // account - the same discipline as the MOLI bridge burn above, and for the
+  // same reason. Charged to the PUBLISHER only. Creating a question and issuing
+  // its units both cost MOLI; expressing will never does, and never may. See
+  // src/monetary.js for why that line is the compliance argument rather than a
+  // preference.
+  //
+  // ⛔ Checked here, before any mutation, rather than letting `debit` throw
+  // halfway through applying the transaction.
+  const publishBurn = (record ? tokenCreationBurn(blockNumber ?? 0n) : 0n)
+    + (issued ? tokenIssueBurn(blockNumber ?? 0n) : 0n);
+  if (publishBurn > 0n && state.balanceOf(tx.from) < total + publishBurn) {
+    throw new Error(
+      `insufficient funds to publish: ${tx.from} needs ${total + publishBurn} `
+      + `(${publishBurn} is destroyed, and is not a fee anyone receives)`);
+  }
+
   // ------------------------------------------------------------------ EVM
   //
   // A transaction reaches the EVM only when it is NOT one of Molibra's own
@@ -969,6 +989,17 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     // the far side's totalSupply is checked against.
     state.debit(tx.from, burningMoli.amount);
     state.outbound.burn(burningMoli.recipient, burningMoli.amount);
+  }
+
+  if (publishBurn > 0n) {
+    // ⛔ Debited and credited to NOBODY, and deliberately not counted in
+    // `outbound` - that ledger is the figure bMOLI's totalSupply is checked
+    // against, and folding an unrelated burn into it would make the bridge
+    // appear to owe MOLI that never crossed. The supply of MOLI simply falls;
+    // total supply stays derivable as the sum of account balances, which needs
+    // no new consensus field and so cannot fall out of step with `clone()` or
+    // `State.root()` the way a half-folded ledger would.
+    state.debit(tx.from, publishBurn);
   }
 
   if (issued) {

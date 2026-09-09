@@ -5,6 +5,7 @@
 import { RLP } from '@ethereumjs/rlp';
 import { keccak256, toHex, fromHex, bigToBytes, bytesToBig, concatBytes } from './crypto.js';
 import { MAX_EXTRA_DATA_BYTES, MAX_HEADER_NONCE_BYTES } from './limits.js';
+import { issuanceOverride } from './monetary.js';
 
 export const ZERO_HASH = '0x' + '00'.repeat(32);
 
@@ -156,6 +157,15 @@ export function nextDifficulty(parentHeader, timestamp, targetSeconds, minimum) 
  * a node's own validator rejected.
  */
 export function blockRewardAt(number, genesis) {
+  // ⛔⛔ The replacement schedule, applied HERE rather than at the call sites.
+  // The reward is derived in two places - once when mining a block and once
+  // when verifying one - and this function is what keeps them identical. An
+  // override applied anywhere else would let a node mine blocks its own
+  // validator rejects, which is the exact failure the header timestamp already
+  // caused once. See src/monetary.js for why the schedule changed.
+  const replaced = issuanceOverride(number);
+  if (replaced !== null) return replaced;
+
   const initial = BigInt(genesis.blockReward);
   const interval = BigInt(genesis.rewardHalvingInterval ?? 0);
   const floor = BigInt(genesis.rewardFloor ?? 0);
