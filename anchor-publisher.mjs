@@ -46,11 +46,16 @@
 import { readFileSync, unlinkSync, openSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { signTransaction, decodeTransaction } from './src/tx.js';
 import { privateToAddress, toChecksumAddress, toHex, keccak256 } from './src/crypto.js';
-import { MAX_REORG_DEPTH } from './src/limits.js';
+import { MAX_REORG_DEPTH, MAX_BLOCK_RANGE } from './src/limits.js';
 import { TARGET_ANCHOR_INTERVAL } from './src/anchor.js';
+import { decodeMoliBurn, MOLI_BURN_ACTIVATION } from './src/moliburn.js';
 import { stamp, upgrade } from './ots-stamp.mjs';
+
+/** Molibra's chain id, for decoding ITS transactions - not Ethereum's. */
+const CHAIN_ID_MOLIBRA = 20226n;
 
 const args = Object.fromEntries(process.argv.slice(2).flatMap((a, i, all) =>
   a.startsWith('--') ? [[a.slice(2), all[i + 1]?.startsWith('--') === false ? all[i + 1] : true]] : []));
@@ -113,30 +118,95 @@ async function audit(path) {
   return r.json();
 }
 
+/**
+ * The lowest height in `[from, to]` whose block contains a MOLI burn, or null.
+ *
+ * ⛔ Only blocks at or above `MOLI_BURN_ACTIVATION` count. Below the flag day a
+ * `moliBurn`-tagged payload is deliberately NOT a burn - consensus treats it as
+ * ordinary data - so anchoring such a block for its sake would be anchoring for
+ * a burn that never happened.
+ *
+ * ⛔ Burns are detected by DECODING each transaction, not by looking for the
+ * tag in the raw RLP. The tag is four bytes; a substring search over encoded
+ * transactions would match those bytes wherever they happened to fall - inside
+ * a signature, an amount, an address - and a false positive here wastes an
+ * anchor on the wrong height while the real burn is jumped over.
+ *
+ * Blocks carrying no gas carry no transactions, and on this chain almost none
+ * do, so the header check skips nearly every block before anything is decoded.
+ */
+export async function oldestUnanchoredBurn(from, to, {
+  activation = MOLI_BURN_ACTIVATION,
+  // Injected so the selection logic - the part that can strand a burn - is
+  // testable without a network or a chain 120,000 blocks long.
+  fetchPage = (f, t) => audit(`/molibra/blocks?from=${f}&to=${t}`),
+} = {}) {
+  let start = from > activation ? from : activation;
+  if (start > to) return null;                       // nothing to scan yet
+
+  let scanned = 0;
+  while (start <= to) {
+    const last = start + BigInt(MAX_BLOCK_RANGE) - 1n;
+    const page = await fetchPage(start, last > to ? to : last);
+    for (const b of page.blocks ?? []) {
+      scanned += 1;
+      const header = b.header ?? b;
+      if (BigInt(header.gasUsed ?? 0) === 0n) continue;
+      for (const raw of b.transactions ?? []) {
+        try {
+          const tx = decodeTransaction(raw, Number(CHAIN_ID_MOLIBRA));
+          if (decodeMoliBurn(tx.data)) {
+            console.log(`  scan         : ${scanned} block(s), burn found at ${header.number}`);
+            return BigInt(header.number);
+          }
+        } catch {
+          // A transaction this build cannot decode is not evidence of a burn.
+          // Skipping it is right; failing the run over it would stop anchoring
+          // altogether, which is strictly worse than anchoring the routine height.
+        }
+      }
+    }
+    if (page.blocks?.length === 0) break;
+    start = BigInt(page.to) + 1n;
+  }
+  if (scanned > 0) console.log(`  scan         : ${scanned} block(s), no unanchored burns`);
+  return null;
+}
+
 // ⛔ One run at a time on this host. `wx` fails if the file exists rather than
 //    truncating it, which is the only atomic "create if absent" node offers.
-let held = false;
-try {
-  closeSync(openSync(LOCK, 'wx'));
-  held = true;
-} catch {
-  console.error(`[anchor-publisher] ${LOCK} exists - a run is already in progress. Exiting.`);
-  process.exit(0);
-}
-const release = () => { if (held) { try { unlinkSync(LOCK); } catch { /* gone */ } held = false; } };
-process.on('exit', release);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { release(); process.exit(1); });
+// ⛔ Only take the lock and run when this file IS the program. `oldestUnanchoredBurn`
+//    is exported for tests, and without this guard merely importing it would
+//    grab the lock file, send a live transaction, and - because the lock is
+//    per-host - make the real scheduled run exit reporting "already in progress".
+const invokedDirectly = process.argv[1]
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
 
-try {
-  await main();
-} catch (error) {
-  // Unwrap undici's "fetch failed", which hides the reason in error.cause.
-  const parts = [error.message];
-  for (let c = error.cause; c; c = c.cause) parts.push(c.code ?? c.message);
-  console.error(`[anchor-publisher] ${parts.filter(Boolean).join(' <- ')}`);
-  process.exitCode = 1;
-} finally {
-  release();
+let held = false;
+const release = () => { if (held) { try { unlinkSync(LOCK); } catch { /* gone */ } held = false; } };
+
+if (invokedDirectly) {
+  try {
+    closeSync(openSync(LOCK, 'wx'));
+    held = true;
+  } catch {
+    console.error(`[anchor-publisher] ${LOCK} exists - a run is already in progress. Exiting.`);
+    process.exit(0);
+  }
+  process.on('exit', release);
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { release(); process.exit(1); });
+
+  try {
+    await main();
+  } catch (error) {
+    // Unwrap undici's "fetch failed", which hides the reason in error.cause.
+    const parts = [error.message];
+    for (let c = error.cause; c; c = c.cause) parts.push(c.code ?? c.message);
+    console.error(`[anchor-publisher] ${parts.filter(Boolean).join(' <- ')}`);
+    process.exitCode = 1;
+  } finally {
+    release();
+  }
 }
 
 async function main() {
@@ -160,8 +230,27 @@ async function main() {
   }
   const status = await audit('/molibra');
   const tip = BigInt(status.height);
-  const height = tip - DEPTH;
-  if (height <= 0n) throw new Error(`chain is only ${tip} blocks; nothing is ${DEPTH} deep yet`);
+  const routine = tip - DEPTH;
+  if (routine <= 0n) throw new Error(`chain is only ${tip} blocks; nothing is ${DEPTH} deep yet`);
+
+  // ⛔⛔ A BURN'S OWN BLOCK MUST BE ANCHORED, so burns choose the height.
+  //
+  // `BridgedMoli.claim()` proves a burn against `anchors(height)` for the
+  // burn's own block and reverts NotAnchored otherwise - there is no ancestry
+  // proof in the deployed contract. And `anchor()` requires height > tipHeight,
+  // so anchoring PAST a burn strands it forever: the MOLI is destroyed and the
+  // bMOLI can never be minted. On 9 Sep 2026 only 8 heights out of 46,859 were
+  // anchored, so a routine tip-200 schedule would have stranded essentially
+  // every burn there was.
+  //
+  // ⭐ The rule is one line: anchor the LOWEST of (oldest unanchored burn,
+  //    tip-DEPTH). Taking the minimum is what makes it safe in both directions.
+  //    A burn deeper than tip-DEPTH must be taken first or the routine anchor
+  //    would jump over it; a burn shallower than tip-DEPTH is left for a later
+  //    run, and anchoring below it keeps it claimable.
+  const anchoredTip = await callUint(sel('tipHeight()'));
+  const burn = await oldestUnanchoredBurn(anchoredTip + 1n, tip - BigInt(MIN_DEPTH));
+  const height = burn !== null && burn < routine ? burn : routine;
 
   const block = await audit(`/molibra/block/${height}?decoded=1`);
   const blockHash = block.hash;
@@ -175,7 +264,9 @@ async function main() {
 
   console.log(`node           : ${NODE}`);
   console.log(`  tip          : ${tip}`);
-  console.log(`  anchoring    : ${height}  (depth ${DEPTH}, min ${MIN_DEPTH})`);
+  console.log(`  anchoring    : ${height}  ${burn !== null && burn < routine
+    ? `⭐ BURN at this height - taken ahead of the routine ${routine}`
+    : `(routine tip-${DEPTH}${burn !== null ? `; a burn waits at ${burn}, still shallow` : ''})`}`);
   console.log(`  hash         : ${blockHash}`);
   console.log(`  work         : ${cumulativeWork}`);
 

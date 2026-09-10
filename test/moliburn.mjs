@@ -219,5 +219,68 @@ check('⛔ the burn gate has not been lowered below the safe floor',
   MOLI_BURN_ACTIVATION >= 120_000n,
   'a burn is only claimable if its exact block is anchored - see src/moliburn.js');
 
+
+// ---------------------------------------------------------------------------
+// The publisher must anchor the block a burn is IN, or the burn is unclaimable.
+// ---------------------------------------------------------------------------
+//
+// `BridgedMoli.claim()` proves a burn against `anchors(height)` for its own
+// block, and `anchor()` requires height > tipHeight - so anchoring PAST a burn
+// destroys the MOLI with no bMOLI ever mintable. These check the selection
+// rule that prevents it, with the page fetch injected so no network or
+// 120,000-block chain is needed.
+
+const { oldestUnanchoredBurn } = await import('../anchor-publisher.mjs');
+const { signTransaction } = await import('../src/tx.js');
+const { encodeBridgeOut: encBO } = await import('../src/bridge.js');
+
+// ⛔ Generated, never written down. A 64-hex literal here is key material in
+//    source whatever it unlocks, and the leak scanner is right to refuse it -
+//    the fix is to not have one, not to allowlist it. These transactions only
+//    need to be validly signed so the decoder can read them back.
+const { generatePrivateKey } = await import('../src/crypto.js');
+const KEY = toHexRaw(generatePrivateKey()).slice(2);
+const CID = 20226;
+const rawTx = (nonce, data) => toHexRaw(signTransaction(
+  { nonce: BigInt(nonce), gasPrice: 1000000000n, gasLimit: 60000n,
+    to: ALICE, value: 0n, data }, KEY, BigInt(CID)));
+function toHexRaw(bytes) {
+  return '0x' + Buffer.from(bytes).toString('hex');
+}
+
+const blk = (number, txs) => ({
+  header: { number: String(number), gasUsed: txs.length ? '21000' : '0' },
+  transactions: txs,
+});
+
+// 300 plain, 301 a bridgeOut (moves NOTHING), 302 a real burn.
+const PAGE = [
+  blk(300, [rawTx(0, '0x')]),
+  blk(301, [rawTx(1, encBO(OVER_THERE, BURN))]),
+  blk(302, [rawTx(2, encodeMoliBurn(OVER_THERE, BURN))]),
+  blk(303, []),
+];
+const pager = async (f, t) => ({
+  from: Number(f), to: Number(t),
+  blocks: PAGE.filter((b) => Number(b.header.number) >= Number(f)
+    && Number(b.header.number) <= Number(t)),
+});
+
+check('⭐ the scan finds the block a burn is in',
+  (await oldestUnanchoredBurn(300n, 303n, { activation: 0n, fetchPage: pager })) === 302n);
+
+// ⛔⛔ The distinction this whole file exists to protect: bridgeOut is the same
+// 56-byte shape and moves nothing. Anchoring for it would waste the anchor and
+// let the real burn be jumped over on the next run.
+check('⛔ a bridgeOut payload is NOT mistaken for a burn',
+  (await oldestUnanchoredBurn(300n, 301n, { activation: 0n, fetchPage: pager })) === null);
+
+check('⛔ blocks below the activation height carry no burns',
+  (await oldestUnanchoredBurn(300n, 303n, { activation: 303n, fetchPage: pager })) === null,
+  'below the flag day the payload is ordinary data, not a burn');
+
+check('  and an empty range scans nothing',
+  (await oldestUnanchoredBurn(400n, 300n, { activation: 0n, fetchPage: pager })) === null);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
