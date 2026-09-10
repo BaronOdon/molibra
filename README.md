@@ -19,9 +19,10 @@ and sign for it with no bespoke client.
 | Coin | MOLI (18 decimals) |
 | Chain ID | **20226** |
 | Consensus | Proof of work (Keccak-256), retargeting toward a 15-second interval |
-| Fork choice | Heaviest chain by cumulative difficulty, with reorg |
+| Fork choice | Heaviest chain by cumulative difficulty, capped at 128 blocks and floored by an Ethereum anchor |
 | Transactions | Legacy type 0, EIP-155 replay-protected |
-| Block reward | 2 MOLI, halving to a 0.25 MOLI floor (§8.3) |
+| Contracts | EVM at the shanghai hardfork (`@ethereumjs/evm`) |
+| Block reward | 2 MOLI, halving every 5,640,000 blocks (~4 years) to a 0.05 MOLI floor (§8.3) |
 
 ## Origin and authorship
 
@@ -191,29 +192,53 @@ revalidation.
 
 Honest about what is and is not here:
 
-- **No EVM.** Value transfers only. `eth_call` returns `0x` and `eth_getCode` is empty for
-  every address, because every account is externally owned.
-- **`stateRoot` is not an Ethereum MPT root.** It is a deterministic Keccak-256 over the
-  sorted account set. It gives every node the same fingerprint for the same state, which is
-  what consensus needs, but it does not support trie proofs and is not comparable with an
-  Ethereum state root. Wallets do not check it.
+- **Contracts run.** `src/evm.js` wraps `@ethereumjs/evm` at the **shanghai** hardfork rather
+  than hand-rolling a virtual machine, because a consensus bug in a home-made EVM is
+  unrecoverable. `eth_call`, `eth_estimateGas` and `eth_getCode` execute against it, contracts
+  deploy, and the DEX factory behind `/molibra/swap` is one running on this chain. The EVM
+  reaches state only through `MolibraStateManager`, so bytecode cannot touch the token registry
+  or the vote keys — read the note at the top of `evmstate.js` before widening that.
+- **`stateRoot` is not an Ethereum MPT root, and is not meant to be.** It is a deterministic
+  Keccak-256 over the sorted account set: every node gets the same fingerprint for the same
+  state, which is what consensus needs. `/molibra/state-proof/{address}` serves an inclusion
+  proof today, but ⛔ until **`STATE_MERKLE_ACTIVATION` (block 60,000)** the Merkle root is not
+  the root any header commits to, so such a proof verifies against this node and against
+  nothing on the chain. The route says which of the two roots the current height commits to;
+  do not mistake a preview for a guarantee. Wallets do not check it either way.
 - **Peering is HTTP push and pull**, not a gossip network. Fine for a known set of nodes;
   it is not yet a hostile-network protocol.
 - **Every block keeps its post-state in memory.** That is what makes validating a side branch
   against its own parent cheap, and it is fine at this scale, but it is not how a chain with
   years of history would do it.
-- **No difficulty ceiling on a reorg.** A node will follow the heaviest branch it is offered,
-  which is correct under proof of work and is exactly why the peer set matters while the
-  network is small.
+- **Reorgs are bounded twice over.** `MAX_REORG_DEPTH` (**128**) refuses any reorganisation
+  deeper than that, and the anchored floor refuses one below a height Ethereum has attested
+  to — at **any** depth and against **any** amount of work. Both production nodes follow
+  anchors, and the same commitment is timestamped into Bitcoin as independent evidence. ⛔ The
+  depth cap is local policy, not a validity rule: every node must carry the same number or two
+  of them can end up on different chains after a deep reorg.
 - **No coercion resistance.** Expressions are individually verifiable, which means they come
   with a receipt. See [WHITEPAPER.md](WHITEPAPER.md) §8.1.
 
-Issuance is **settled**: 2 MOLI per block, halving every 2,102,400 blocks to a permanent floor
-of **0.25 MOLI**, forever. No hard cap, deliberately — see [WHITEPAPER.md](WHITEPAPER.md) §8.3.
-Fee burn is **off**. Distribution is **settled**: GIZ is issuable one-directionally by its
-creator and never transferable, with supply uncapped and each expression burning the token's
-declared cost. The remaining open problems, including coercion resistance and `single`-mode
-eligibility, are §8.
+Issuance is **settled, and Bitcoin is the reference**: **2 MOLI** per block, halving every
+**5,640,000 blocks — four years** at the measured interval — down to a permanent floor of
+**0.05 MOLI**. Scaled to this chain's block time that tracks Bitcoin's own curve closely: about
+97% inflation in year two against Bitcoin's 100%, 12.4% against 12.5% in year five, 4.0%
+against 4.0% in year ten. ⛔ **This chain is therefore not deflationary for years, and neither
+was Bitcoin** — a slow curve is what lets coins reach many hands, and mining is the only way
+MOLI is distributed at all. No hard cap, deliberately — see [WHITEPAPER.md](WHITEPAPER.md) §8.3.
+The genesis file still carries the original 2,102,400-block epoch and 0.25 floor, because
+genesis is history and cannot be rewritten; `src/monetary.js` replaces the schedule from
+**block 80,000**.
+
+**Fee burn is off, and was rejected rather than deferred.** Even with every block full at the
+node's 1 gwei minimum, total fees come to about 30.9 MOLI a day against 7,724 issued — burning
+all of it offsets **0.40%**. The sink that scales with real use is publishing: from block
+80,000, creating a token destroys **50 MOLI** and issuing units destroys **0.1**, charged to
+the publisher and credited to nobody. ⛔ Expressing will costs no MOLI and never may.
+
+Distribution is **settled**: GIZ is issuable one-directionally by its creator and never
+transferable, with supply uncapped and each expression burning the token's declared cost. The
+remaining open problems, including coercion resistance and `single`-mode eligibility, are §8.
 
 **Speaking is free.** An expression may be signed with `gasPrice: 0`: the act already burns the
 token's declared `expressionCost`, so the anti-spam property a fee would provide is provided
@@ -228,7 +253,8 @@ Apple 3.1.5(ii) and by Google Play, and the app's path is the linking-proof gran
 
 ## Not financial advice
 
-MOLI is the coin of an experimental network run by its users. It is not an investment, not a
+MOLI is the coin of a young network run by its users. **It has no market price**: nothing has
+crossed the bridge, no exchange lists it, and no pool quotes it. It is not an investment, not a
 security offering, and nobody guarantees it has or keeps any value. Mining consumes
 electricity. Never share a private key or seed phrase with anyone.
 

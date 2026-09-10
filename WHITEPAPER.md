@@ -259,9 +259,20 @@ most likely to change the rest of the design. It is open.
 
 ### 8.3 Issuance — decided 29 August 2026
 
-**Settled: tail emission.** The reward starts at 2 MOLI and halves every 2,102,400 blocks
-(about a year at 15 s) until it reaches a permanent floor of **0.25 MOLI per block**, where it
-stays forever.
+**Settled: tail emission, on Bitcoin's clock.** The reward starts at 2 MOLI and halves every
+**5,640,000 blocks — four years** at the measured 22.37 s interval — until it reaches a
+permanent floor of **0.05 MOLI per block**, where it stays forever.
+
+⛔ Revised 9 September 2026. The original schedule halved every 2,102,400 blocks to a 0.25
+floor; the epoch was written as one year against a 15 s target the chain does not achieve,
+because the retarget controls the *median* and block intervals are exponential, so the mean
+settles near `15 / ln2`. A faster schedule was then proposed and rejected: an emission curve
+that completes quickly is one the first miner takes almost entirely, and on a chain where
+mining is the only means of distribution that sets the initial concentration in concrete
+rather than dissolving it. The floor moved with the level, because keeping 0.25 over a smaller
+supply makes the long run *worse* — the same fixed tail over less base. `src/monetary.js`
+applies the new schedule from block 80,000; genesis keeps the old numbers because genesis is
+history.
 
 | | Reward/block | Issued that year | Cumulative |
 |---|---|---|---|
