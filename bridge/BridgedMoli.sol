@@ -117,6 +117,8 @@ contract BridgedMoli {
     error ABridgeOutBurnsNothing();
     error ZeroAmount();
     error BadProof();
+    /// The header at `index` does not name the one below it as its parent.
+    error BrokenAncestry(uint256 index);
 
     constructor(IMolibraAnchor anchor_, uint256 challengeBlocks_) {
         anchorContract = anchor_;
@@ -149,10 +151,31 @@ contract BridgedMoli {
         bytes32[] calldata siblings,
         bool[] calldata siblingOnRight
     ) external {
+        _requireUsableAnchor(height, keccak256(headerRlp));
+        _mintFromProvedBurn(headerRlp, rawTx, siblings, siblingOnRight, height);
+    }
+
+    /**
+     * Everything both claim paths do once the header is known to be Molibra's.
+     *
+     * ⛔ Shared rather than copied. Two claim routes with two transcriptions of
+     * the replay guard and the recipient rule is two places for them to drift,
+     * and the one that drifts is the one that mints twice.
+     *
+     * ⛔ The caller must already have tied `headerRlp` to an anchor - directly
+     * in `claim()`, or through the ancestry walk in `claimVia()`. This function
+     * proves inclusion and reads the instruction; it does not decide whether
+     * the block was real.
+     */
+    function _mintFromProvedBurn(
+        bytes calldata headerRlp,
+        bytes calldata rawTx,
+        bytes32[] calldata siblings,
+        bool[] calldata siblingOnRight,
+        uint256 height
+    ) private {
         bytes32 txHash = keccak256(rawTx);
         if (claimed[txHash]) revert AlreadyClaimed();
-
-        _requireUsableAnchor(height, keccak256(headerRlp));
 
         if (merkleRoot(txHash, siblings, siblingOnRight) != txRootOf(headerRlp)) revert NotInBlock();
 
@@ -198,6 +221,91 @@ contract BridgedMoli {
      * Nothing after it is parsed, because nothing after it is needed and every
      * branch not written is a branch that cannot be wrong.
      */
+    /**
+     * The parentHash out of a Molibra header: item 1 of the same list.
+     *
+     * ⛔ Item 1, not item 0. `number` comes first and is a short integer, so a
+     * reader that assumed the hash was first would silently take 32 bytes
+     * spanning the number and part of the hash - and compare a value that is
+     * wrong in a way no test with a single block would reveal.
+     */
+    function parentHashOf(bytes calldata headerRlp) public pure returns (bytes32) {
+        uint256 i = _listPayloadStart(headerRlp);
+        i = _skipItem(headerRlp, i);
+        if (headerRlp[i] != 0xa0) revert BadProof();
+        return bytes32(headerRlp[i + 1:i + 33]);
+    }
+
+    /**
+     * ⭐⭐ Mint against a burn whose own block was NEVER anchored, by showing
+     * that block is an ancestor of one that was.
+     *
+     * ## Why this exists
+     *
+     * `claim()` requires `anchors(height)` for the burn's own block. That makes
+     * the publisher a chokepoint: anchoring is sparse - eight heights in the
+     * first 46,859 blocks - and because `MolibraAnchor.anchor()` demands
+     * strictly increasing heights, anchoring PAST a burn strands it forever.
+     * The MOLI is destroyed and the bMOLI can never be minted. Whoever runs the
+     * publisher could do that to any particular burn, deliberately or by
+     * accident, and nobody could route around it.
+     *
+     * This is the route around it. It asks no permission of the publisher: any
+     * later anchor will do, and the publisher cannot choose not to make one
+     * without stopping anchoring altogether.
+     *
+     * ## What it costs, and why the cheap path is kept
+     *
+     * The proof carries every header between the burn and the anchor - 144
+     * bytes each. Against a daily anchor that is thousands of headers and
+     * millions of gas, paid by the claimant; against a nearby anchor it is
+     * cheap. So `claim()` remains the fast path for the ordinary case where the
+     * publisher did anchor the burn's block, and this is the escape hatch that
+     * makes the fast path optional rather than mandatory.
+     *
+     * ## ⛔ What is NOT trusted here
+     *
+     * Nothing new. Ancestry is proved by keccak alone: each header names its
+     * parent, and a forged link would be a preimage attack. No accumulator is
+     * introduced, no root the publisher computes off-chain, and no extra
+     * authority - all of which would have been cheaper and would have handed
+     * the publisher exactly the power this function exists to remove.
+     *
+     * @param ancestry headers from the one AFTER the burn's block up to and
+     *                 including the anchored block, in ascending order
+     */
+    function claimVia(
+        bytes calldata burnHeaderRlp,
+        bytes calldata rawTx,
+        bytes32[] calldata siblings,
+        bool[] calldata siblingOnRight,
+        uint256 anchoredHeight,
+        bytes[] calldata ancestry
+    ) external {
+        // An empty chain means the burn's own block is the anchored one, which
+        // is `claim()`. Refusing here keeps the two paths from overlapping in a
+        // way that would need the same check written twice.
+        if (ancestry.length == 0) revert BadProof();
+
+        // ⛔ Walk UP from the burn, one keccak per header, and let the loop end
+        //    holding the anchored block's hash. Hashing each header once - not
+        //    once as a child and again as a parent - is what keeps a long chain
+        //    affordable.
+        bytes32 running = keccak256(burnHeaderRlp);
+        for (uint256 i = 0; i < ancestry.length; i++) {
+            if (parentHashOf(ancestry[i]) != running) revert BrokenAncestry(i);
+            running = keccak256(ancestry[i]);
+        }
+
+        // ⛔ The anchor is checked LAST, against the hash the walk arrived at.
+        //    Checking it first against a caller-supplied header would let the
+        //    chain be assembled to reach any anchor the caller liked.
+        _requireUsableAnchor(anchoredHeight, running);
+
+        _mintFromProvedBurn(burnHeaderRlp, rawTx, siblings, siblingOnRight,
+                            anchoredHeight - ancestry.length);
+    }
+
     function txRootOf(bytes calldata headerRlp) public pure returns (bytes32) {
         uint256 i = _listPayloadStart(headerRlp);
         for (uint256 item = 0; item < 5; item++) {

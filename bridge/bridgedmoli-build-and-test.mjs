@@ -414,5 +414,105 @@ check('  and the supply is unchanged by the attempt',
 console.log(`\n⭐ one claim costs ${done.gasUsed} gas`);
 console.log(`   deploy cost ${moli.gas} gas`);
 
+
+/* ===================================================================== */
+/* 4. ethereum: minting when the burn's OWN block was never anchored      */
+/* ===================================================================== */
+//
+// ⛔⛔ This is the property that stops the publisher being a chokepoint.
+// `claim()` needs `anchors(height)` for the burn's own block, and because
+// `anchor()` demands strictly increasing heights, anchoring PAST a burn strands
+// it forever. `claimVia()` routes around that with an ancestry proof, so a burn
+// stays claimable whatever the publisher does next.
+//
+// A FRESH anchor is deployed here on purpose. Reusing the one above - where
+// 12,346 is already anchored - would let `claim()` succeed and prove nothing
+// about the new path.
+
+console.log('\n4. ethereum: the escape hatch (burn block never anchored)');
+
+const bond2 = await deploy(PUBLISHER, 'Bond');
+const anchor2 = await deploy(PUBLISHER, 'MolibraAnchor', addr(bond2.address) + word(MIN_BOND));
+await send(PUBLISHER, bond2.address, sel('approve(address,uint256)') + addr(anchor2.address) + word(MIN_BOND));
+await send(PUBLISHER, anchor2.address, sel('bond(uint256)') + word(MIN_BOND));
+const moli2 = await deploy(PUBLISHER, 'BridgedMoli', addr(anchor2.address) + word(CHALLENGE));
+
+// Two descendants of the burn's block. Each names the previous by hash, which
+// is the only thing the contract will accept as ancestry.
+const h47 = { ...header, number: 12347n, parentHash: blockHash, gasUsed: 0n, nonce: 7n };
+const rlp47 = encodeHeader(h47);
+const hash47 = toHex(keccak256(fromHex(rlp47)));
+const h48 = { ...header, number: 12348n, parentHash: hash47, gasUsed: 0n, nonce: 8n };
+const rlp48 = encodeHeader(h48);
+const hash48 = toHex(keccak256(fromHex(rlp48)));
+
+// Only the TOP block is anchored. 12,346 never is.
+const anch2 = await send(PUBLISHER, anchor2.address,
+  sel('anchor(uint256,bytes32,uint256)') + word(12348) + hash48.slice(2) + word(12258218062n));
+check('a later block is anchored, and the burn\'s block never is',
+  !anch2.failed, 'anchored 12348; 12346 is absent from this contract');
+for (let i = 0; i < Number(CHALLENGE) + 1; i++) await send(ANYONE, ANYONE, '0x');
+
+const stillNo = await send(ANYONE, moli2.address, claimCall(12346, headerRlp, rawTx, siblings, onRight));
+check('⛔ claim() cannot mint it - the burn\'s own height is unanchored', stillNo.failed,
+  'which is exactly the situation that used to be unrecoverable');
+
+/** ABI-encode claimVia(bytes,bytes,bytes32[],bool[],uint256,bytes[]). */
+const claimViaCall = (hdr, tx, sibs, rights, anchoredHeight, ancestry) => {
+  const pad = (s) => s.padEnd(Math.ceil(s.length / 64) * 64, '0');
+  const bytesBody = (hex) => word(hex.length / 2) + pad(hex);
+  const heads = [];
+  const tails = [];
+  let off = 6 * 32;
+  const push = (body) => { heads.push(word(off)); tails.push(body); off += body.length / 2; };
+
+  push(bytesBody(hdr.slice(2)));
+  push(bytesBody(toHex(tx).slice(2)));
+  push(word(sibs.length) + sibs.map((x) => x.slice(2)).join(''));
+  push(word(rights.length) + rights.map((r) => word(r ? 1 : 0)).join(''));
+  // bytes[]: count, then one offset per element relative to the array body,
+  // then each element as (length, padded data).
+  const elems = ancestry.map((a) => bytesBody(a.slice(2)));
+  let inner = 32 * elems.length;
+  const innerHeads = [];
+  for (const e of elems) { innerHeads.push(word(inner)); inner += e.length / 2; }
+  const arrayBody = word(elems.length) + innerHeads.join('') + elems.join('');
+
+  return sel('claimVia(bytes,bytes,bytes32[],bool[],uint256,bytes[])')
+    + heads[0] + heads[1] + heads[2] + heads[3] + word(anchoredHeight) + word(off)
+    + tails.join('') + arrayBody;
+};
+
+// ⛔ The negative first, so a pass cannot be a fluke: a chain whose middle
+//    header does not name the burn's block is not ancestry, however well formed.
+const forged = { ...h47, parentHash: '0x' + 'cd'.repeat(32) };
+const broken = await send(ANYONE, moli2.address,
+  claimViaCall(headerRlp, rawTx, siblings, onRight, 12348, [encodeHeader(forged), rlp48]));
+check('⛔⛔ a chain that does not link back to the burn is refused', broken.failed,
+  'otherwise anyone could attach any block to any anchor');
+
+const skipped = await send(ANYONE, moli2.address,
+  claimViaCall(headerRlp, rawTx, siblings, onRight, 12348, [rlp48]));
+check('⛔ a chain that skips a block is refused', skipped.failed,
+  'the walk is every header or none - a gap is a forged link');
+
+const viaOk = await send(ANYONE, moli2.address,
+  claimViaCall(headerRlp, rawTx, siblings, onRight, 12348, [rlp47, rlp48]));
+check('⭐⭐ claimVia mints against a LATER anchor', !viaOk.failed,
+  viaOk.error ?? `ancestry of 2 headers, ${viaOk.gasUsed} gas`);
+
+const bal2 = await read(moli2.address,
+  sel('balanceOf(address)') + addr('0x3333333333333333333333333333333333333333'));
+check('⭐⭐ and the recipient named in the burn holds it',
+  BigInt(toHex(bal2.returnValue)) === BURN_AMOUNT,
+  `${BigInt(toHex(bal2.returnValue))}`);
+
+const viaTwice = await send(ANYONE, moli2.address,
+  claimViaCall(headerRlp, rawTx, siblings, onRight, 12348, [rlp47, rlp48]));
+check('⛔ and the replay guard covers this path too', viaTwice.failed,
+  'two routes to one mint would be two chances to mint twice');
+
+console.log(`\n⭐ claimVia over 2 headers costs ${viaOk.gasUsed} gas`);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
