@@ -440,7 +440,7 @@ async function main() {
   // ⛔ Priced in gwei, not coins. The first attempt charged 50 MOLI - about
   //    0.05% of the whole money supply per publish - because the number was
   //    picked to reach a deflation target rather than to price the act.
-  check('⛔ publishing costs gwei, not whole coins',
+  check('⛔ publishing costs quanta, not whole coins',
     TOKEN_CREATION_BURN === 10n ** 15n && TOKEN_CREATION_BURN * 1000n === MOLI,
     'a routine application action must cost like one');
   check('and does not decay or halve afterwards',

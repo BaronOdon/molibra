@@ -22,6 +22,7 @@ and sign for it with no bespoke client.
 | Fork choice | Heaviest chain by cumulative difficulty, capped at 128 blocks and floored by an Ethereum anchor |
 | Transactions | Legacy type 0, EIP-155 replay-protected |
 | Contracts | EVM at the shanghai hardfork (`@ethereumjs/evm`) |
+| Denomination | **1 MOLI = 10¹⁸ quanta** (singular *quantum*) |
 | Block reward | 2 MOLI, halving every 5,640,000 blocks (~4 years) to a 0.05 MOLI floor (§8.3) |
 
 ## Origin and authorship

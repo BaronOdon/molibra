@@ -5,10 +5,10 @@
  *
  * It is the lever everyone reaches for first, and here it cannot work. The block
  * gas limit is 8,000,000 and the chain produces roughly 3,862 blocks a day, so
- * even with EVERY block full at the 1 gwei node minimum, total fees come to
+ * even with EVERY block full at the node minimum of 10^9 quanta per gas, total fees come to
  * about 30.9 MOLI a day against 7,724 issued. Burning all of it offsets
  * **0.40%** of issuance. To offset issuance through fees you would need full
- * blocks at ~250 gwei, which prices ordinary transactions out of existence to
+ * blocks at ~250x that price, which prices ordinary transactions out of existence to
  * chase a supply statistic. Rejected by the operator on 9 Sep 2026 on exactly
  * this arithmetic; the numbers are recorded here so the idea is not revived by
  * someone who has not run them.
@@ -176,13 +176,13 @@ export const PUBLISH_BURN_ACTIVATION = 80_000n;
 /**
  * What creating a token costs, destroyed rather than paid to anyone.
  *
- * ⛔⛔ **Priced in gwei, not in coins, and the first attempt got this backwards.**
+ * ⛔⛔ **Priced in quanta, not in coins, and the first attempt got this backwards.**
  * It was 50 MOLI - about 0.05% of the entire money supply for one publish - a
  * number chosen to make a deflation target arrive rather than to price the act.
  * That is optimising the arithmetic instead of the thing being charged for.
  * Publishing a question is a routine application action; it must cost like one.
  *
- * 0.001 MOLI is a million gwei: roughly fifty times the gas of an ordinary
+ * 0.001 MOLI is 10^15 quanta: roughly fifty times the gas of an ordinary
  * transfer, so it is felt as a real cost and deters spam, and is nowhere near
  * enough to deter using the board for what the board is for. Deliberately LOW,
  * because a published cost can be raised and cannot really be lowered once
@@ -196,7 +196,7 @@ export const PUBLISH_BURN_ACTIVATION = 80_000n;
  * schedule does give is issuance capped at a fixed absolute number forever, so
  * inflation falls toward zero as a proportion; that is the honest claim.
  */
-export const TOKEN_CREATION_BURN = 10n ** 15n;        // 0.001 MOLI = 1,000,000 gwei
+export const TOKEN_CREATION_BURN = 10n ** 15n;        // 0.001 MOLI = 10^15 quanta
 
 /**
  * What issuing units of an existing token costs, likewise destroyed.
@@ -209,7 +209,7 @@ export const TOKEN_CREATION_BURN = 10n ** 15n;        // 0.001 MOLI = 1,000,000 
  * ⛔ This is charged to the ISSUER, who is the publisher. It is never charged to
  * a recipient, and never to a speaker.
  */
-export const TOKEN_ISSUE_BURN = 10n ** 12n;   // 0.000001 MOLI = 1,000 gwei
+export const TOKEN_ISSUE_BURN = 10n ** 12n;   // 0.000001 MOLI = 10^12 quanta
 
 /** What creating a token destroys at this height. Zero before the flag day. */
 export function tokenCreationBurn(blockNumber) {

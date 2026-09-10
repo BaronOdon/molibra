@@ -32,9 +32,22 @@ GIZ is **its own token, not a denomination of MOLI**. It has to be, because it m
 as **non-transferable**, and MOLI is transferable — a denomination cannot differ from its
 parent on the one property that matters here.
 
-What it borrows from wei is **granularity**, not identity: GIZ is fine-grained and spent in
-small amounts, so a single holding covers many expressions across many questions rather than
-being a one-shot ticket.
+What it borrows from the **quantum** is granularity, not identity: GIZ is fine-grained and
+spent in small amounts, so a single holding covers many expressions across many questions
+rather than being a one-shot ticket.
+
+⛔ **MOLI's smallest unit is the *quantum* (plural *quanta*): 1 MOLI = 10¹⁸ quanta.** It is
+named for the Macrobiotic Quantum Theory sealed in genesis, and deliberately not for anything
+else. Two names were rejected, each for its own reason:
+
+- **`gwei`** — borrowed from Ethereum, and a reader holding MOLI while a wallet says "gwei"
+  has every reason to think they are looking at ether. The denomination of a distinct chain
+  should not be another chain's word.
+- **`giz`** — proposed for its association with real chalk, which the movement, the theory and
+  DataToalha all use in life. The association is right and the collision is fatal: *giz* **is**
+  chalk in Portuguese, so a priced MOLI unit and the unpriced chalk token become one word
+  spoken aloud — on the single board where the whole argument is that what you spend to speak
+  has no price. The chalk keeps the word.
 
 | | |
 |---|---|
@@ -112,7 +125,7 @@ Token {
   purpose         market | behaviour | social | purchase | electoral  // §1a — immutable
   initialSupply   minted to the creator at creation; normally 0    // §3
   maxSupply       0 means UNCAPPED                                 // §3
-  expressionCost  what one expression burns, in wei granularity    // §5
+  expressionCost  what one expression burns, in quantum granularity  // §5
   issuable        may the creator issue more, one-directionally    // §3
   transferable    false by default                // §6 — opt-in, disclosed
   electoral       DERIVED from purpose, never stated separately
@@ -256,7 +269,7 @@ mint path. A token with `fixed` supply is mathematically incapable of inflating.
 **Expressing will burns the token's declared `expressionCost`.** The amount is destroyed,
 not transferred.
 
-The cost is denominated in wei granularity (`10**15` is 0.001 of a unit), never as one whole
+The cost is denominated in quantum granularity (`10**15` quanta is 0.001 of a unit), never as one whole
 unit — that is what makes a single holding cover many questions rather than being a one-shot
 ticket. It is **fixed** for `single`, `quantum` and `capped`: nobody's expression can be
 larger than anyone else's, which is what keeps those modes egalitarian. Only `weighted` lets

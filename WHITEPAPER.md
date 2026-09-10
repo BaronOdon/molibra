@@ -158,7 +158,9 @@ and published with the token.
 **Chalk**, symbol **GIZ**, is the application token for public expression, and it is
 **non-transferable**. It must be its own token rather than a denomination of MOLI, precisely
 because a denomination cannot differ from its parent on transferability. It borrows granularity
-from the wei convention, not identity: fine-grained, spent in small amounts across many
+from the **quantum** — MOLI's own smallest unit, 1 MOLI = 10¹⁸ quanta, named for the
+Macrobiotic Quantum Theory sealed in genesis rather than borrowed from another chain's
+vocabulary — not identity: fine-grained, spent in small amounts across many
 questions, **earned**, destroyed on use.
 
 Earned, not bought and not received from another holder. GIZ reaches people by **issuance**,
