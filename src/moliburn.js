@@ -103,22 +103,31 @@ export const MOLI_BURN_TAG = toHex(keccak256(utf8('moliBurn(address,uint256)')))
  * destroyed it, with roughly a 0.02% chance of the block ever being provable.
  * Irreversibly, and with the operator's own coin first in line.
  *
- * ⛔ What must be true before this gate opens:
+ * ⛔ What had to be true before this gate could open:
  *
  *   1. The publisher anchors the height of any block CONTAINING a burn, in
  *      preference to its usual tip-200 - and always the OLDEST unanchored burn
  *      first, because anchoring past one strands it permanently. This needs no
  *      consensus change: burns are found by scanning blocks for the tag above.
  *   2. Or `BridgedMoli` is redeployed to accept an ancestry proof, removing the
- *      constraint at the root. It is immutable and holds no supply, so
- *      replacing it costs nothing but the work.
+ *      constraint at the root.
  *
- * Neither is built yet. 120,000 is about nineteen days from the tip of 47,118
- * at the measured 22.37 s interval - margin to build one of them properly
- * rather than against a deadline. It is still free to change until the first
- * burn is mined, and that is exactly what this margin protects.
+ * ✅ **BOTH now exist, so the gate comes back to 80,000** (10 Sep 2026, tip
+ * 50,334 - about 7.7 days). `oldestUnanchoredBurn` in anchor-publisher.mjs does
+ * the first; the redeployed BridgedMoli at
+ * `0xa302877efb74f567f3605851194b46f1d5746822` does the second, and its
+ * `claimVia` proves a burn against ANY later anchor, so a claim no longer needs
+ * the publisher's cooperation at all.
+ *
+ * ⭐ 80,000 is deliberately the same height as the issuance change in
+ * src/monetary.js: one coordinated upgrade of both nodes rather than two.
+ *
+ * ⛔ Lowering this is safe ONLY while both of those hold. If either is ever
+ * removed, a burn becomes unclaimable again and the MOLI is destroyed for
+ * nothing - which is why the test asserts the MECHANISM exists rather than
+ * asserting a number. It remains free to change until the first burn is mined.
  */
-export const MOLI_BURN_ACTIVATION = 120_000n;
+export const MOLI_BURN_ACTIVATION = 80_000n;
 
 /** Build the `data` for a burn-to-bridge instruction. */
 export function encodeMoliBurn(recipient, amount) {

@@ -215,9 +215,18 @@ check('⭐ and AT the activation height it burns', onTime.outbound.burned === BU
 //
 // If you are here because this check failed, the question to answer is not
 // "what should the number be" but "can a burn actually be claimed yet".
-check('⛔ the burn gate has not been lowered below the safe floor',
-  MOLI_BURN_ACTIVATION >= 120_000n,
-  'a burn is only claimable if its exact block is anchored - see src/moliburn.js');
+// ⛔⛔ A TRIPWIRE ON THE MECHANISM, not on the number.
+//
+// The gate went 60,000 -> 120,000 on 9 Sep because a burn was only claimable if
+// its exact block had been anchored, and only 8 heights in 46,859 were. It came
+// back to 80,000 on 10 Sep because both fixes shipped. Asserting a magic number
+// would have gone stale the moment the number moved; what actually keeps a burn
+// claimable is that burn-aware anchoring still exists, so that is what is
+// checked. If this fails, do not adjust the constant - find out why the
+// publisher stopped choosing burn heights.
+check('⛔⛔ burn-aware anchoring still exists, which is what makes the gate safe',
+  typeof (await import('../anchor-publisher.mjs')).oldestUnanchoredBurn === 'function',
+  'without it, anchoring past a burn destroys the MOLI with no bMOLI mintable');
 
 
 // ---------------------------------------------------------------------------
