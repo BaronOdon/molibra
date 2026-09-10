@@ -30,7 +30,8 @@ The only record that cannot be argued with. Bisected to the exact block.
 |---|---|---|
 | `0x2beba454d810eac41c6778e351f81d37a07ae03b` | **MolibraAnchor** — bonded 20,000 WSRO | `anchorCount` 5, `tipHeight` **36,821** |
 | `0x381f567704e0fcba10d090325962bbc6723c8852` | **MolibraSettlement** | funded 0.0001 ETH |
-| `0x5a60f4de4effd2282e271aeee52acdeae0b2d809` | **BridgedMoli (bMOLI)** | `totalSupply` 0 — nothing has crossed |
+| `0xa302877efb74f567f3605851194b46f1d5746822` | **BridgedMoli (bMOLI)** — ⭐ CURRENT | `totalSupply` 0. Deployed 10 Sep 2026, ETH block 25,948,058. Adds `claimVia`. |
+| ~~`0x5a60f4de4effd2282e271aeee52acdeae0b2d809`~~ | BridgedMoli — **SUPERSEDED**, do not reference | Never held a supply, so nothing was migrated and nobody was stranded. Kept here because an address that appears in old handoffs must be identifiable as retired rather than merely absent. |
 | `0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8` | **WSRO / Coinspirit ERC-20** | mint renounced |
 | `0xafd6aa99dbbf2313a4101556fe7f0edc8556a3c4` | **CoinspiritCertificate** | |
 | `0xfcaee25dd24c129a9069fcd2bedc7cd05798c47e` | SushiSwap V3 position #3163 pool | the only live liquidity |
