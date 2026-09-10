@@ -436,7 +436,13 @@ async function main() {
     && tokenCreationBurn(ISSUANCE_ACTIVATION - 1n) === 0n);
   check('the charge begins exactly at the activation block',
     tokenCreationBurn(ISSUANCE_ACTIVATION) === TOKEN_CREATION_BURN
-    && TOKEN_CREATION_BURN === 50n * MOLI);
+    && TOKEN_CREATION_BURN === MOLI / 1000n);
+  // ⛔ Priced in gwei, not coins. The first attempt charged 50 MOLI - about
+  //    0.05% of the whole money supply per publish - because the number was
+  //    picked to reach a deflation target rather than to price the act.
+  check('⛔ publishing costs gwei, not whole coins',
+    TOKEN_CREATION_BURN === 10n ** 15n && TOKEN_CREATION_BURN * 1000n === MOLI,
+    'a routine application action must cost like one');
   check('and does not decay or halve afterwards',
     tokenCreationBurn(ISSUANCE_ACTIVATION * 1000n) === TOKEN_CREATION_BURN);
 
@@ -448,13 +454,18 @@ async function main() {
   const nowPerDay = 2n * MOLI * blocksPerDay;                    // today's issuance
   const floorPerDay = REWARD_FLOOR_AFTER * blocksPerDay;         // at the 24-year tail
 
-  check('at TODAY\'s issuance the charge is nowhere near deflationary',
-    TOKEN_CREATION_BURN * 100n < nowPerDay,
-    `needs ~${nowPerDay / TOKEN_CREATION_BURN} publications/day to offset 2 MOLI blocks`);
-  check('at the eventual floor ~4 publications a day outpaces issuance',
-    4n * TOKEN_CREATION_BURN > floorPerDay
-    && TOKEN_CREATION_BURN < floorPerDay,
-    `floor issues ~${floorPerDay / MOLI} MOLI/day`);
+  // ⛔⛔ Asserted so no future note revives the claim: at a correctly priced
+  //    publish, burning does NOT outpace issuance at ANY plausible volume -
+  //    not today and not at the floor. An earlier draft priced the act at 50
+  //    MOLI so that ~4 publications a day would cross over, which inverted the
+  //    goals. The honest property is that issuance is capped absolutely, so
+  //    inflation falls toward zero as a proportion - not that supply shrinks.
+  check('⛔ publishing burns do NOT make MOLI deflationary today',
+    TOKEN_CREATION_BURN * 1000n < nowPerDay,
+    `would need ~${nowPerDay / TOKEN_CREATION_BURN} publications/day`);
+  check('⛔ nor at the eventual floor',
+    TOKEN_CREATION_BURN * 1000n < floorPerDay,
+    `would need ~${floorPerDay / TOKEN_CREATION_BURN} publications/day - not a target, a fact`);
 
   // Backward compatibility: every block mined before this rule existed sits in
   // era 0, so the chain already on disk stays valid and needs no reset.

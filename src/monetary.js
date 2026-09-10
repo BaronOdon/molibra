@@ -176,16 +176,27 @@ export const PUBLISH_BURN_ACTIVATION = 80_000n;
 /**
  * What creating a token costs, destroyed rather than paid to anyone.
  *
- * 50 MOLI against a supply near 92,820 at the time of writing. Chosen to be felt
- * without being prohibitive while MOLI has no market price at all - and chosen
- * LOW on purpose, because a published cost can be raised and cannot really be
- * lowered once things are built on top of it.
+ * ⛔⛔ **Priced in gwei, not in coins, and the first attempt got this backwards.**
+ * It was 50 MOLI - about 0.05% of the entire money supply for one publish - a
+ * number chosen to make a deflation target arrive rather than to price the act.
+ * That is optimising the arithmetic instead of the thing being charged for.
+ * Publishing a question is a routine application action; it must cost like one.
  *
- * For scale: against issuance at the 0.25 MOLI floor (~965 MOLI/day), this
- * reaches net deflation at about **20 creations a day**. That is a product
- * target somebody can actually aim at, which is the point of choosing it.
+ * 0.001 MOLI is a million gwei: roughly fifty times the gas of an ordinary
+ * transfer, so it is felt as a real cost and deters spam, and is nowhere near
+ * enough to deter using the board for what the board is for. Deliberately LOW,
+ * because a published cost can be raised and cannot really be lowered once
+ * things are built on top of it.
+ *
+ * ⛔ **This does NOT make MOLI deflationary, and nothing here should be sold as
+ * if it did.** Offsetting the 70,487 MOLI/year tail at this price would take
+ * about 193,000 publications a day. Correctly pricing the act and manufacturing
+ * scarcity are different goals, and when they conflict the price of the act
+ * wins - a chain nobody can afford to publish on has solved nothing. What the
+ * schedule does give is issuance capped at a fixed absolute number forever, so
+ * inflation falls toward zero as a proportion; that is the honest claim.
  */
-export const TOKEN_CREATION_BURN = 50n * 10n ** 18n;
+export const TOKEN_CREATION_BURN = 10n ** 15n;        // 0.001 MOLI = 1,000,000 gwei
 
 /**
  * What issuing units of an existing token costs, likewise destroyed.
@@ -198,7 +209,7 @@ export const TOKEN_CREATION_BURN = 50n * 10n ** 18n;
  * ⛔ This is charged to the ISSUER, who is the publisher. It is never charged to
  * a recipient, and never to a speaker.
  */
-export const TOKEN_ISSUE_BURN = 10n ** 17n;   // 0.1 MOLI
+export const TOKEN_ISSUE_BURN = 10n ** 12n;   // 0.000001 MOLI = 1,000 gwei
 
 /** What creating a token destroys at this height. Zero before the flag day. */
 export function tokenCreationBurn(blockNumber) {
