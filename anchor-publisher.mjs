@@ -112,10 +112,21 @@ const callUint = async (data) => {
   const v = await call(data);
   return v && v !== '0x' ? BigInt(v) : 0n;
 };
+// ⛔ The burn scan pages from the anchored floor to the tip back to back, and the
+// node's token bucket refuses exactly that shape. The scan grows every day the
+// floor does not move, so once the publisher stalled (out of gas, 18 Sep) every
+// later run died on a 429 before reaching the funding check. Honour retryAfter
+// and wait, as the node's own sync does (src/node.js).
 async function audit(path) {
-  const r = await fetch(NODE + path, { signal: AbortSignal.timeout(30000) });
-  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
-  return r.json();
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const r = await fetch(NODE + path, { signal: AbortSignal.timeout(30000) });
+    if (r.ok) return r.json();
+    if (r.status !== 429) throw new Error(`${path}: HTTP ${r.status}`);
+    const body = await r.json().catch(() => ({}));
+    const after = Number(r.headers.get('retry-after')) || Number(body.retryAfter) || 1;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(30, after) * 1000 * (attempt + 1)));
+  }
+  throw new Error(`${path}: still rate-limited after 12 attempts`);
 }
 
 /**
