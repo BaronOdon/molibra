@@ -74,6 +74,7 @@ export class Node {
     this.treasury = null;
     this.issuer = null;
     this._stopSignal = { stop: false };
+    this.syncIntervalMs = 10000;
   }
 
   enableTreasury(options = {}) {
@@ -92,10 +93,16 @@ export class Node {
     return this.issuer;
   }
 
-  async start({ host = '127.0.0.1', port = 8545 } = {}) {
+  async start({ host = '127.0.0.1', port = 8545, advertise = null } = {}) {
     this.server = await startRpcServer(this, { host, port });
-    this.rpcUrl = `http://${host}:${port}`;
+    this.rpcUrl = advertise ? advertise.replace(/\/$/, '') : `http://${host}:${port}`;
     return this;
+  }
+
+  /** Whether this URL is one a PEER could reach: not a bind wildcard, not loopback. */
+  static isDialable(url) {
+    const host = String(url).replace(/^https?:\/\//, '').split(':')[0];
+    return !['0.0.0.0', '::', '[::]', 'localhost', '127.0.0.1'].includes(host);
   }
 
   async stop() {
@@ -187,6 +194,26 @@ export class Node {
   }
 
   /**
+   * ⛔⛔ A node that learns a peer after start-up must begin FOLLOWING it.
+   *
+   * `startSyncing` refuses when the peer set is empty, which is right at boot
+   * and wrong forever afterwards: nothing restarted it when a peer arrived. The
+   * public node ran for weeks with `--peers` unset, so its sync timer never
+   * existed - it could only ever be pushed to, never pull, and every
+   * convergence with the second miner was the SECOND node giving way. Had the
+   * second node found the heavier chain, the first could not have followed it
+   * at all, and check-nodes would have shown a fork that never healed.
+   *
+   * This is also the newcomer's case, which is the one that matters: someone
+   * downloads the node, points it at the public miner and announces. The miner
+   * should follow them back from that moment, without being restarted.
+   */
+  followPeersIfIdle() {
+    if (this.syncTimer || !this.peers.size) return false;
+    return this.startSyncing();
+  }
+
+  /**
    * ⛔⛔ Keep following the chain, forever - not once at startup.
    *
    * This exists because of a failure found by running the newcomer's own
@@ -210,7 +237,11 @@ export class Node {
    * on being pushed to would work here and fail for the people who actually
    * download this. Announcing is an optimisation on top, never the mechanism.
    */
-  startSyncing({ intervalMs = 10000 } = {}) {
+  startSyncing({ intervalMs = this.syncIntervalMs } = {}) {
+    // Remembered so a node that learns its first peer later - by being
+    // announced to - can start following on the same cadence it was configured
+    // with, rather than a default that silently disagrees with the flag.
+    this.syncIntervalMs = intervalMs;
     if (this.syncTimer || !this.peers.size) return false;
     this.syncing = false;
 
@@ -256,7 +287,13 @@ export class Node {
   /** Tell a peer where to reach us, so it can push new blocks rather than
    *  making us wait for the next poll. Harmless when it fails. */
   async announceTo(peerUrl) {
-    if (!this.rpcUrl) return;
+    // ⛔ Never announce an address nobody can dial. `rpcUrl` is built from the
+    // BIND host, and a public node binds 0.0.0.0 - so the announcement said
+    // "reach me at 0.0.0.0:8545", which is either refused or, worse, accepted
+    // and then synced from. The peer that would have followed us back never
+    // could. `--advertise` sets the address to publish when it differs from the
+    // one we listen on, and without it we simply stay quiet.
+    if (!this.rpcUrl || !Node.isDialable(this.rpcUrl)) return;
     await this.post(peerUrl.replace(/\/$/, ''), '/molibra/announce', { url: this.rpcUrl });
   }
 

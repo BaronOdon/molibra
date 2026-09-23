@@ -1327,7 +1327,11 @@ async function handlePeerPost(node, path, payload, res) {
         return json(res, 429, { error: `peer set full (${MAX_PEERS})`, peers: node.peers.size });
       }
       node.addPeer(url);
-      return json(res, 200, { peers: node.peers.size, added: url });
+      // ⛔ Follow them back. A node started without --peers never created a sync
+      //    timer, so before this it could accept an announcement and still
+      //    never pull from anyone - deaf for as long as it ran.
+      node.followPeersIfIdle?.();
+      return json(res, 200, { peers: node.peers.size, added: url, following: Boolean(node.syncTimer) });
     }
 
     if (path === '/molibra/submit-block') {

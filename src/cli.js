@@ -129,7 +129,11 @@ const commands = {
     if (args.treasury) node.enableTreasury(args.claim ? { claimAmount: BigInt(args.claim) } : {});
     const host = args.host ?? '127.0.0.1';
     const port = Number(args.port ?? 8545);
-    await node.start({ host, port });
+    // ⛔ --advertise is the address OTHER nodes should use, which is not the
+    //    one we bind: a public node binds 0.0.0.0 and must be reached at its
+    //    real address. Without it a node stays silent rather than announcing
+    //    somewhere nobody can dial.
+    await node.start({ host, port, advertise: args.advertise ?? null });
 
     console.log(`Molibra node`);
     console.log(`  chain     : ${node.chain.genesis.name} (${node.chain.genesis.symbol}), id ${node.chain.chainId}`);
@@ -137,6 +141,10 @@ const commands = {
     console.log(`  rpc       : ${node.rpcUrl}`);
     console.log(`  audit     : ${node.rpcUrl}/molibra`);
     if (node.peers.size) console.log(`  peers     : ${[...node.peers].join(', ')}`);
+    if (!args.advertise && !Node.isDialable(node.rpcUrl)) {
+      console.log('  announce  : OFF - this node binds an address peers cannot dial.'
+        + ' Pass --advertise http://<your-ip>:<port> so peers can follow you back.');
+    }
 
     // ⛔ Keep following the chain, not one snapshot at startup.
     //
