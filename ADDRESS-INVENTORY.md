@@ -31,6 +31,7 @@ The only record that cannot be argued with. Bisected to the exact block.
 | `0x2beba454d810eac41c6778e351f81d37a07ae03b` | **MolibraAnchor** — bonded 20,000 WSRO | `anchorCount` 5, `tipHeight` **36,821** |
 | `0x381f567704e0fcba10d090325962bbc6723c8852` | **MolibraSettlement** | funded 0.0001 ETH |
 | `0xa302877efb74f567f3605851194b46f1d5746822` | **BridgedMoli (bMOLI)** — ⭐ CURRENT | `totalSupply` 0. Deployed 10 Sep 2026, ETH block 25,948,058. Adds `claimVia`. |
+| `0x035b2377bc5d95a5a4683112e1acf1696c40fef4` | ⛔ **STRAY BridgedMoli — NOT bMOLI, never use** | Deployed by accident 21 Sep 2026 20:11 UTC from the operator wallet via the live page's Deploy button, which still embedded the pre-`claimVia` bytecode (4,858 runtime bytes vs 5,393). Tx `0x3a22f1e6…bd2f`, cost 0.00026 ETH. Ownerless, cannot be removed. ⛔ It would accept the SAME burn proof as the real one — never claim on it. |
 | ~~`0x5a60f4de4effd2282e271aeee52acdeae0b2d809`~~ | BridgedMoli — **SUPERSEDED**, do not reference | Never held a supply, so nothing was migrated and nobody was stranded. Kept here because an address that appears in old handoffs must be identifiable as retired rather than merely absent. |
 | `0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8` | **WSRO / Coinspirit ERC-20** | mint renounced |
 | `0xafd6aa99dbbf2313a4101556fe7f0edc8556a3c4` | **CoinspiritCertificate** | |
