@@ -13,12 +13,43 @@ import { serializeBlock, mineHeader, blockHash } from './block.js';
 import { normalizeAddress } from './crypto.js';
 import { Treasury } from './faucet.js';
 import { Issuer } from './issuer.js';
+// ⛔ The sync's walk-back window is DERIVED from the deepest reorg the chain
+//    will accept, never a number of its own: a window shallower than that could
+//    miss a common ancestor the chain would still reorganise to.
+import { MAX_REORG_DEPTH } from './limits.js';
 
 /** How many blocks a sync verifies between yielding the loop AND writing to
  *  disk. One number, deliberately, so the two cadences cannot drift apart:
  *  the pause that keeps the node answering is also the point at which its
  *  progress becomes durable. */
 const SYNC_BATCH = 32;
+
+/**
+ * Fetch, retrying a CONNECTION failure once.
+ *
+ * ⛔⛔ A reused keep-alive socket that the peer has already closed comes back as
+ * `TypeError: fetch failed` with `ECONNRESET` underneath, and it is not the
+ * peer refusing anything - the next connection succeeds immediately. Treating
+ * it as a peer failure is what made a whole sync pass evaporate: the head call
+ * is first, so one dead socket cost every block that pass would have adopted,
+ * and the node then mined on a stale view until the next tick. This reproduces
+ * in test/sync-window.mjs, which is how it was finally seen rather than
+ * theorised about.
+ *
+ * ⛔ Only the connection is retried. An HTTP status - 429 included - is an
+ * answer and is handled by the caller, which knows what each one means.
+ */
+async function fetchOnce(url, init, attempts = 2) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      const connection = error?.cause?.code;
+      if (attempt >= attempts || !connection) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
 
 export class Node {
   constructor({ genesisPath, dataDir, miner = null, peers = [], minGasPrice = 1000000000n,
@@ -273,7 +304,12 @@ export class Node {
    * skipped by hash, not by height, so a fork is fetched rather than ignored.
    * Returns how many new blocks entered the tree.
    */
-  async syncFrom(peerUrl) {
+  // `window` is injected only so the walk-back can be tested against a chain a
+  // few dozen blocks long: mining hundreds of blocks back to back ramps the
+  // difficulty, so a test that needed a real MAX_REORG_DEPTH of history would
+  // take minutes and be skipped by whoever is in a hurry. Production never
+  // passes it.
+  async syncFrom(peerUrl, { deep = false, window = Number(MAX_REORG_DEPTH) + 64 } = {}) {
     // ⛔ A peer is an ORIGIN, and every route below adds its own /molibra
     // prefix. Passing the RPC path - which is what a wallet is configured with,
     // and therefore what anyone reaches for - used to build /molibra/molibra/head,
@@ -294,7 +330,7 @@ export class Node {
     // mined its own branch for twenty minutes and had to reorg 64 deep - half
     // of MAX_REORG_DEPTH. A timeout short enough to fire on a healthy peer is
     // not a safety feature; it is the partition.
-    const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(30000) })).json();
+    const head = await (await fetchOnce(base + '/molibra/head', { signal: AbortSignal.timeout(30000) })).json();
     if (!head?.header?.number) {
       // Say which URL was asked and what came back. A TypeError three lines
       // later tells an operator mid-recovery nothing at all.
@@ -312,7 +348,21 @@ export class Node {
     // endpoint should do a stranger.
     const beforeHead = this.chain.head.hash;
     let accepted = 0;
-    let cursor = 0;
+    // ⛔⛔ Start a walk back far enough to cover any reorg this chain permits,
+    // NOT at genesis. Starting at 0 re-fetched the entire chain on every tick:
+    // at height 105,000 that is ~206 pages, and one pass took about six minutes
+    // on the A1 nodes while the timer fires every ten seconds. The sync is
+    // correct that way - blocks already held are skipped by hash - but it costs
+    // a full-chain walk to learn twenty new blocks, and the cost grows with the
+    // chain forever, so the two miners sat 20-35 blocks apart in steady state
+    // and a newcomer's first catch-up is the same walk repeated.
+    //
+    // A reorg deeper than MAX_REORG_DEPTH is refused by the chain anyway, so
+    // anything older than that cannot change what we hold and need not be
+    // asked for. `syncedNothingWhileBehind` below is the safety net: if the
+    // shallow window found no common ancestor - the only way this can be wrong
+    // - the walk is repeated from genesis before returning.
+    let cursor = deep ? 0 : Math.max(0, Number(this.chain.height) - window);
     for (let page = 0; cursor <= peerHeight && page < 10000; page++) {
       // ⛔⛔ A peer's rate limiter will 429 a sync long before the sync is done,
       // and it gets worse the longer the chain: a full catch-up is ~80 pages
@@ -327,7 +377,7 @@ export class Node {
       // the client was wrong to treat throttling as completion.
       let payload = null;
       for (let attempt = 0; attempt < 12; attempt++) {
-        const res = await fetch(`${base}/molibra/blocks?from=${cursor}&to=${peerHeight}`, {
+        const res = await fetchOnce(`${base}/molibra/blocks?from=${cursor}&to=${peerHeight}`, {
           signal: AbortSignal.timeout(30000),
         });
         const body = await res.json();
@@ -377,6 +427,15 @@ export class Node {
       if (last < cursor) break; // no progress; stop rather than spin
       cursor = last + 1;
       if (!payload.truncated) break;
+    }
+    // ⛔ The safety net for the shallow window above. Being behind the peer and
+    // adopting NOTHING is the one symptom of a window that did not reach back
+    // to the common ancestor - every page then held blocks whose parents we do
+    // not have. Asking again from genesis costs a full walk, which is exactly
+    // what the window exists to avoid, so it happens only in that case and only
+    // once: `deep` is already true on the retry, so this cannot recurse.
+    if (accepted === 0 && !deep && peerHeight > this.chain.height) {
+      return this.syncFrom(peerUrl, { deep: true, window });
     }
     this.lastSyncReorg = this.chain.head.hash !== beforeHead ? this.chain.lastReorg : null;
     return accepted;
