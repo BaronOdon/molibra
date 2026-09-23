@@ -282,7 +282,19 @@ export class Node {
     // a node mining from genesis with its history already moved aside. The two
     // forms are unambiguous, so accept both rather than blaming the operator.
     const base = peerUrl.replace(/\/$/, '').replace(/\/molibra$/, '');
-    const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(5000) })).json();
+    // ⛔⛔ 30s, not 5s, and the reason is a 64-deep fork on 22 Sep 2026.
+    //
+    // Every other request in this sync already allowed 30s; only this first
+    // one allowed 5. A mining peer blocks its event loop in bursts, so a
+    // response that normally takes under 1.5s occasionally takes longer than
+    // five - measured from node 2 as 2 stalls in 60 probes, all at exactly
+    // 5.001s, while the same host answered a 512-block page 60 times out of 60.
+    // The head call is FIRST, so its failure aborts the whole sync: 102 of
+    // today's 259 attempts died here, and when enough landed together node 2
+    // mined its own branch for twenty minutes and had to reorg 64 deep - half
+    // of MAX_REORG_DEPTH. A timeout short enough to fire on a healthy peer is
+    // not a safety feature; it is the partition.
+    const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(30000) })).json();
     if (!head?.header?.number) {
       // Say which URL was asked and what came back. A TypeError three lines
       // later tells an operator mid-recovery nothing at all.
