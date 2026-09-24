@@ -579,7 +579,7 @@ async function handleAudit(node, req, res) {
           [...chain.state.outbound.byRecipient].map(([k, v]) => [k, v.toString()]),
         ),
       },
-      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli'],
+      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli', '/molibra/download'],
     });
   }
 
@@ -913,6 +913,15 @@ async function handleAudit(node, req, res) {
   if (path === '/molibra/whitepaper.md') {
     const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'WHITEPAPER.md');
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  // ⛔ The page a mining invitation points at. This answered 404 for weeks while
+  //    invitations had to send strangers to a git URL instead.
+  if (path === '/molibra/download') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'download.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
   }

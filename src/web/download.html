@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Run a Molibra node · download and mine</title>
+<!--
+  The page a mining invitation can point at. Until it existed, /molibra/download
+  answered 404 and every invitation had to send people to a git URL.
+
+  ⛔ It states the two things a newcomer most needs to hear and is least likely
+  to be told: mining is the ONLY way to obtain MOLI on this chain, and crossing
+  to Ethereum is ONE-WAY. Both are facts about the protocol, not warnings added
+  for politeness, and a page that omits them sells something the chain does not
+  do.
+
+  ⛔ No wallet code, no buttons that spend anything. This page only tells you
+  what to type. Every number on it is read from the node it is served by.
+-->
+<style>
+  :root{ --bg:#0b0b0c; --panel:#141416; --line:#26262b; --ink:#ececf0; --dim:#8b8b94;
+         --gold:#FFD100; --ok:#4ade80; --bad:#ff5c5c; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 20px}
+  .wrap{max-width:900px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:16px;margin-bottom:16px}
+  a{color:var(--gold)}
+  pre{background:#0e0e10;border:1px solid var(--line);border-radius:8px;padding:11px;
+      overflow-x:auto;font-size:12.5px;margin:10px 0 0;white-space:pre-wrap;word-break:break-word}
+  code{font-family:ui-monospace,Menlo,monospace}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12.5px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  ol{padding-left:18px} li{margin:6px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Run a Molibra node</h1>
+<p class="sub">Two dependencies, one command. The chain is small enough to verify from
+  genesis on an ordinary machine, which is the point — nothing here asks you to trust
+  this page.</p>
+
+<div class="card">
+  <h2>1 · Get it</h2>
+  <pre>git clone https://github.com/BaronOdon/molibra.git
+cd molibra
+npm install</pre>
+  <p class="sub" style="margin:12px 0 0">Node.js 20 or newer. Apache-2.0.</p>
+</div>
+
+<div class="card">
+  <h2>2 · Join the chain and mine</h2>
+  <pre>node src/cli.js node --port 8545 --datadir ./data \
+  --peers <span id="peer">…</span> \
+  --advertise http://YOUR-IP:8545 \
+  --miner 0xYourAddress --mine</pre>
+  <div class="note">Your first start replays and re-verifies the whole chain before the
+    RPC answers — minutes, not seconds, and it is <b>not</b> a hang. <b>⛔ Never restart a
+    node mid-replay.</b></div>
+  <p class="sub" style="margin:10px 0 0"><code>--advertise</code> is the address other nodes
+    should dial. Without it a node behind a wildcard bind cannot be followed back, so it
+    only ever pulls.</p>
+</div>
+
+<div class="card">
+  <h2>3 · Check what you joined</h2>
+  <pre>curl http://127.0.0.1:8545/molibra          # your node's view
+curl <span id="peerCurl">…</span>/molibra   # the public node's view</pre>
+  <p class="sub" style="margin:10px 0 0">Same height, same head hash a few blocks back:
+    you are on the chain. Different: you are not, and the node will say so rather than
+    pretend.</p>
+  <dl>
+    <dt>chain id</dt><dd>20226</dd>
+    <dt>symbol</dt><dd>MOLI — 1 MOLI = 10<sup>18</sup> quanta</dd>
+    <dt>height now</dt><dd id="height">…</dd>
+    <dt>block reward</dt><dd id="reward">2 MOLI</dd>
+    <dt>public node</dt><dd id="peerNode">…</dd>
+  </dl>
+</div>
+
+<div class="card">
+  <h2>4 · Add it to a wallet</h2>
+  <dl>
+    <dt>Network name</dt><dd>Molibra</dd>
+    <dt>RPC URL</dt><dd>https://molibra.org — or your own node</dd>
+    <dt>Chain ID</dt><dd>20226</dd>
+    <dt>Symbol</dt><dd>MOLI</dd>
+  </dl>
+  <p class="sub" style="margin:10px 0 0">A wallet may warn that the network is unfamiliar.
+    Chain 20226 is registered in <code>ethereum-lists/chains</code>; the warning is about
+    what your wallet has seen before, not about whether the chain is real.</p>
+</div>
+
+<div class="card">
+  <h2>⛔ Two things to know before you mine</h2>
+  <div class="note bad"><b>Mining is the only way to obtain MOLI here.</b> There is no sale,
+    no presale and no allocation. That is deliberate and it cuts both ways: nobody can buy
+    a position, and nobody will hand you one either.</div>
+  <div class="note bad"><b>Crossing to Ethereum is ONE-WAY.</b> Burning MOLI destroys it here
+    and mints <a href="/molibra/bridgedmoli">bMOLI</a> there against a proof. Nothing brings
+    it back — the instruction that would release MOLI against a proved bMOLI burn does not
+    exist yet. Cross only what you mean to leave.</div>
+  <p class="sub">A burn is claimable once its block has been anchored on Ethereum and a
+    challenge window has passed — in practice about a day, not instantly.</p>
+</div>
+
+</div>
+<script>
+/* ⛔ Follow the ORIGIN this page was served from, keeping the literal only as the
+   fallback for opening the file straight off disk. A page fetched over
+   https://molibra.org cannot fetch http://<ip>:8545 - the browser blocks it as
+   mixed content and the page breaks quietly, HTML intact and every fetch dead.
+   These commands are what a newcomer pastes, so they must name the host that
+   actually served them. */
+const NODE = location.protocol.startsWith('http')
+  ? location.origin
+  : 'http://193.123.191.142:8545';
+for (const id of ['peer', 'peerCurl', 'peerNode']) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = NODE;
+}
+
+/* Every number here comes from the node serving the page - never hardcoded, so a
+   stale page cannot quote a chain that has moved on. */
+fetch(NODE + '/molibra').then((r) => r.json()).then((s) => {
+  document.getElementById('height').textContent = Number(s.height).toLocaleString();
+  const gate = s.activations?.moliBurn;
+  if (gate && !gate.active) {
+    document.getElementById('reward').textContent += '  (burn gate opens at ' + gate.height + ')';
+  }
+}).catch(() => {});
+</script>
+</body>
+</html>
