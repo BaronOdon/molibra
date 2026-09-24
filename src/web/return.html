@@ -1,0 +1,310 @@
+<title>bMOLI → MOLI · return</title>
+<!--
+  The way back. It holds no key; every transaction is signed in your wallet.
+
+  1. On ETHEREUM: send bMOLI to the keyless return vault. One ordinary transfer.
+  2. The header authority (the operator) commits that Ethereum block's
+     receiptsRoot on Molibra - produced by scripts-inbound/prove-return.mjs.
+  3. On MOLIBRA: anyone submits the return. The MOLI goes to the address that
+     SENT the bMOLI, never to whoever submits it.
+
+  Payloads for steps 2 and 3 arrive in the URL, never hand-edited in:
+    ?commit=0x…&ret=0x…
+-->
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;
+        --gold:#FFD100;--ok:#4ade80;--bad:#ff5c5c}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px 16px;max-width:920px;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
+  input{width:100%;box-sizing:border-box;background:#0e0e10;border:1px solid var(--line);border-radius:8px;
+        color:var(--ink);padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:10px 16px;
+         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
+  button.ghost{background:#22222a;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
+       white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)} .log.ok{color:var(--ok)}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  .note.bad{border-left-color:var(--bad);background:#1d0f0f}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+</style>
+
+<h1>bMOLI → MOLI · return</h1>
+<p class="sub" id="banner">not connected</p>
+
+<div class="card">
+  <h2>How it works</h2>
+  <p>bMOLI cannot be destroyed on Ethereum, so it is <b>sent to a vault nobody can spend from</b>:
+    an address derived from a hash, with no private key behind it. Molibra reads the transfer out of
+    an Ethereum receipt proof and releases the same amount of MOLI.</p>
+  <dl>
+    <dt>vault</dt><dd id="vault">0x0173f059ce912bb442296f3763746637f7d20fc1 — keccak256("molibra:moli-return:v1"), keyless</dd>
+    <dt>bMOLI</dt><dd>0xa302877efb74f567f3605851194b46f1d5746822 — Ethereum</dd>
+    <dt>you receive</dt><dd>MOLI on Molibra, at the <b>same address that sent the bMOLI</b></dd>
+    <dt>live from</dt><dd id="from">Molibra block 118,000</dd>
+  </dl>
+  <div class="note bad">
+    ⛔ <b>Send from a wallet whose key you hold.</b> The MOLI is paid to the sender's address on
+    Molibra. Sent from a contract (a swap router, a Safe), it lands at that contract's address,
+    where nobody has a key. And the vault is final: bMOLI sent there never comes back out.
+  </div>
+  <div class="note">
+    The bound: MOLI comes back only as MOLI that went out. A return larger than what is
+    outstanding is refused by every node, however valid its proof.
+  </div>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  <button id="refresh" class="ghost">Read both chains</button>
+  <div class="log" id="status">—</div>
+</div>
+
+<div class="card">
+  <h2>1 · Wallet</h2>
+  <button id="connect">Connect wallet</button>
+  <button id="addNet" class="ghost">Add Molibra (chainId 20226)</button>
+  <dl>
+    <dt>account</dt><dd id="acct">—</dd>
+    <dt>chain</dt><dd id="chain">—</dd>
+    <dt>bMOLI (Ethereum)</dt><dd id="bmoli">—</dd>
+  </dl>
+  <div class="log" id="walletLog">This page holds no key.</div>
+</div>
+
+<div class="card">
+  <h2>2 · Send bMOLI to the vault — on Ethereum</h2>
+  <label>Amount of bMOLI</label>
+  <input id="amount" value="1">
+  <div class="log" id="sendDecoded"></div>
+  <button id="send">Send to the vault</button>
+  <div class="log" id="sendLog"></div>
+</div>
+
+<div class="card">
+  <h2>3 · Commit the Ethereum header — operator only</h2>
+  <p class="sub">Produced by <code>node scripts-inbound/prove-return.mjs &lt;hash&gt;</code> once the transfer is
+    mined. Only the header authority's commit counts; from anyone else, consensus refuses it.</p>
+  <label>HEADER_COMMIT calldata</label>
+  <input id="commitData" placeholder="arrives in the URL as ?commit=0x…">
+  <button id="commit" disabled>Commit the header</button>
+  <div class="log" id="commitLog"></div>
+</div>
+
+<div class="card">
+  <h2>4 · Return — on Molibra, signed by anyone</h2>
+  <p class="sub">The full receipt proof travels in this transaction and every node checks it. The MOLI goes
+    to the sender the proof names, whoever signs this.</p>
+  <label>MOLI_RETURN calldata</label>
+  <input id="retData" placeholder="arrives in the URL as ?ret=0x…">
+  <button id="ret" disabled>Return — release the MOLI</button>
+  <div class="log" id="retLog"></div>
+</div>
+
+<script src="/molibra/mobilewallet.js"></script>
+<script>
+// ⛔⛔ The origin that SERVED this page (see inbound.html): over https a page
+// cannot fetch http://<ip>:8545, so a hardcoded host kills every button.
+const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+const CHAIN_ID = 20226;
+const CHAIN_HEX = '0x4f02';
+const VAULT = '0x0173f059ce912bb442296f3763746637f7d20fc1';
+const BMOLI = '0xa302877efb74f567f3605851194b46f1d5746822';
+const TRANSFER = '0xa9059cbb';          // transfer(address,uint256)
+const BALANCE_OF = '0x70a08231';
+const TOTAL_SUPPLY = '0x18160ddd';
+// Native payloads are addressed to a contract, never to yourself: MetaMask
+// refuses calldata to an account it manages. Consensus reads the payload
+// before the EVM, so this contract is never called (see inbound.html).
+const PAYLOAD_TO = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
+
+const $ = (id) => document.getElementById(id);
+const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
+const eth = () => window.molibraWallet.require();
+const fmt = (wei) => (Number(wei) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 6 });
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+let account = null;
+let outstanding = null;
+
+const params = new URLSearchParams(location.search);
+if (params.get('commit')) $('commitData').value = params.get('commit');
+if (params.get('ret')) $('retData').value = params.get('ret');
+
+async function ethRead(method, params) {
+  const r = await fetch(ETH_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+const ethCall = async (data) => BigInt(await ethRead('eth_call', [{ to: BMOLI, data }, 'latest']));
+
+$('refresh').onclick = async () => {
+  try {
+    const n = await (await fetch(NODE + '/molibra')).json();
+    const o = n.outbound ?? {};
+    outstanding = BigInt(o.outstanding ?? o.burned ?? 0);
+    const from = BigInt(o.returnsFrom ?? 118000);
+    $('from').textContent = `Molibra block ${from.toLocaleString()}`
+      + (BigInt(n.height) >= from ? ' — live' : ` — ${(from - BigInt(n.height)).toLocaleString()} blocks to go`);
+    const [supply, inVault] = await Promise.all([
+      ethCall(TOTAL_SUPPLY), ethCall(BALANCE_OF + word(VAULT)),
+    ]);
+    say('status', `Molibra height ${n.height}\n`
+      + `MOLI burned to cross ${fmt(o.burned ?? 0)} · returned ${fmt(o.returned ?? 0)} · outstanding ${fmt(outstanding)}\n`
+      + `bMOLI supply ${fmt(supply)} · in the vault ${fmt(inVault)} · circulating ${fmt(supply - inVault)}\n`
+      + (supply - inVault >= outstanding ? '' : '⚠ more is outstanding than circulates: returns are waiting to be submitted'));
+  } catch (e) { say('status', e.message, true); }
+};
+$('refresh').onclick();
+
+async function readBmoli() {
+  if (!account) return 0n;
+  const b = await ethCall(BALANCE_OF + word(account));
+  $('bmoli').textContent = fmt(b) + ' bMOLI';
+  return b;
+}
+
+$('connect').onclick = async () => {
+  try {
+    account = (await eth().request({ method: 'eth_requestAccounts' }))[0];
+    $('acct').textContent = account;
+    $('chain').textContent = 'chain ' + Number(await eth().request({ method: 'eth_chainId' }));
+    await readBmoli();
+    $('banner').textContent = 'connected — nothing is sent until you sign it';
+    say('walletLog', 'connected');
+  } catch (e) { say('walletLog', e.message, true); }
+};
+
+$('addNet').onclick = async () => {
+  try {
+    await eth().request({ method: 'wallet_addEthereumChain', params: [{
+      chainId: CHAIN_HEX, chainName: 'Molibra',
+      nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
+      rpcUrls: [NODE], blockExplorerUrls: [NODE + '/molibra'],
+    }] });
+    say('walletLog', 'Molibra added.');
+  } catch (e) { say('walletLog', e.message, true); }
+};
+
+async function switchTo(chainHex, want, label) {
+  let id = Number(await eth().request({ method: 'eth_chainId' }));
+  if (id !== want) {
+    try {
+      await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
+    } catch (e) {
+      if (e.code === 4902) throw new Error(`${label} is not in your wallet yet`);
+      throw e;
+    }
+    id = Number(await eth().request({ method: 'eth_chainId' }));
+    if (id !== want) throw new Error(`still not on ${label}`);
+  }
+  $('chain').textContent = `${label} (${id})`;
+}
+
+/* ---------------------------------------------------- step 2, on Ethereum */
+
+function sendCalldata() {
+  const n = Number($('amount').value);
+  if (!(n > 0)) throw new Error('the amount must be positive');
+  const wei = BigInt(Math.round(n * 1e6)) * 10n ** 12n;
+  return { wei, data: TRANSFER + word(VAULT) + word(wei) };
+}
+function showSend() {
+  try {
+    const { wei, data } = sendCalldata();
+    say('sendDecoded', `to ${BMOLI} (bMOLI)\ncalldata ${data}\ndecodes as transfer(${VAULT}, ${wei}) = ${fmt(wei)} bMOLI`
+      + (outstanding !== null && wei > outstanding ? `\n⛔ more than the ${fmt(outstanding)} outstanding: it would never be returned` : ''),
+      outstanding !== null && wei > outstanding);
+  } catch (e) { say('sendDecoded', e.message, true); }
+}
+$('amount').oninput = showSend;
+showSend();
+
+$('send').onclick = async () => {
+  try {
+    if (!account) throw new Error('connect the wallet first');
+    const { wei, data } = sendCalldata();
+    if (outstanding !== null && wei > outstanding) throw new Error('more than is outstanding: refused before signing');
+    await switchTo('0x1', 1, 'Ethereum mainnet');
+    if (await readBmoli() < wei) throw new Error('this wallet does not hold that much bMOLI');
+    if (!confirm(`Send ${fmt(wei)} bMOLI to the return vault?\n\nIt never comes back out. `
+      + `You receive ${fmt(wei)} MOLI on Molibra at ${account} once the return is submitted.`)) return;
+    // ⛔ A LOW tip, suggested explicitly. Two transactions on 24 Sep 2026 paid
+    // ~2 gwei of tip against a 0.05 gwei base fee - dollars instead of cents.
+    const block = await ethRead('eth_getBlockByNumber', ['latest', false]);
+    const base = BigInt(block.baseFeePerGas);
+    const tip = 50_000_000n;                          // 0.05 gwei
+    say('sendLog', `base fee ${(Number(base) / 1e9).toFixed(3)} gwei · tip 0.05 gwei\nawaiting signature…`);
+    const hash = await eth().request({ method: 'eth_sendTransaction', params: [{
+      from: account, to: BMOLI, value: '0x0', data,
+      maxPriorityFeePerGas: '0x' + tip.toString(16),
+      maxFeePerGas: '0x' + (base * 2n + tip).toString(16),
+    }] });
+    say('sendLog', `sent: ${hash}\nwaiting to be mined…`);
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const r = await eth().request({ method: 'eth_getTransactionReceipt', params: [hash] }).catch(() => null);
+      if (r) {
+        say('sendLog', r.status === '0x1'
+          ? `⭐ in the vault, Ethereum block ${BigInt(r.blockNumber)}.\n\nNext, the operator runs:\n`
+            + `node scripts-inbound/prove-return.mjs ${hash}`
+          : `⛔ the transfer reverted: ${hash}`, r.status !== '0x1');
+        await readBmoli();
+        $('refresh').onclick();
+        return;
+      }
+    }
+    say('sendLog', `not mined within 7 minutes — check the explorer.\nhash: ${hash}`, true);
+  } catch (e) { say('sendLog', e.message, true); }
+};
+
+/* ------------------------------------------------- steps 3-4, on Molibra */
+
+async function sendNative(data, logId, label) {
+  if (!account) throw new Error('connect the wallet first');
+  await switchTo(CHAIN_HEX, CHAIN_ID, 'Molibra');
+  const hex = data.trim();
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) throw new Error('that is not calldata');
+  say(logId, label + '\nawaiting signature…');
+  // ⛔ Explicit gas: estimation simulates this as a contract call, which it is
+  // not, and would under-report (see inbound.html).
+  const hash = await eth().request({ method: 'eth_sendTransaction',
+    params: [{ from: account, to: PAYLOAD_TO, value: '0x0', data: hex, gas: '0x7a120' }] });
+  say(logId, label + '\nsent: ' + hash + '\nwaiting to be mined…');
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const r = await eth().request({ method: 'eth_getTransactionReceipt', params: [hash] }).catch(() => null);
+    if (r) {
+      say(logId, r.status === '0x1'
+        ? `⭐ mined. ${hash}` : `⛔ refused by consensus: ${hash}`, r.status !== '0x1');
+      $('refresh').onclick();
+      return r;
+    }
+  }
+  throw new Error('not mined within 5 minutes');
+}
+
+$('commit').onclick = async () => {
+  try { await sendNative($('commitData').value, 'commitLog', 'HEADER_COMMIT'); }
+  catch (e) { say('commitLog', e.message, true); }
+};
+$('ret').onclick = async () => {
+  try { await sendNative($('retData').value, 'retLog', 'MOLI_RETURN'); }
+  catch (e) { say('retLog', e.message, true); }
+};
+
+const gate = () => {
+  $('commit').disabled = !/^0x[0-9a-f]+$/i.test($('commitData').value.trim());
+  $('ret').disabled = !/^0x[0-9a-f]+$/i.test($('retData').value.trim());
+};
+$('commitData').oninput = gate; $('retData').oninput = gate; gate();
+</script>

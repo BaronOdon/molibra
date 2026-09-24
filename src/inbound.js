@@ -131,12 +131,15 @@ export class InboundLedger {
    * invisible - the old root would simply be gone - so it is refused at the
    * point where the evidence still exists.
    */
-  commitHeader({ originChainId, blockNumber, receiptsRoot, by }) {
+  commitHeader({ originChainId, blockNumber, receiptsRoot, by, authority = false }) {
     const chain = BigInt(originChainId);
     const root = String(receiptsRoot).toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(root)) throw new Error('a receipts root is 32 bytes');
     const committer = normalizeAddress(by);
-    const mayCommit = [...this.assets.values()].some(
+    // `authority`: the named header authority for that chain (from the
+    // bridge-v2 flag day, src/molireturn.js), who commits for the MOLI return
+    // leg as well as for registered assets, so needs no asset of its own.
+    const mayCommit = authority || [...this.assets.values()].some(
       (a) => BigInt(a.origin.chainId) === chain && a.registrar === committer);
     if (!mayCommit) {
       throw new Error(
@@ -153,6 +156,11 @@ export class InboundLedger {
     }
     if (!existing) this.headers.set(key, { receiptsRoot: root, by: committer });
     return { chainId: chain.toString(), blockNumber: BigInt(blockNumber).toString(), receiptsRoot: root, by: committer };
+  }
+
+  /** The committed record - root AND committer - or null. */
+  headerFor(originChainId, blockNumber) {
+    return this.headers.get(headerKey(originChainId, blockNumber)) ?? null;
   }
 
   /** null when no root has been committed for that block - never a guess. */

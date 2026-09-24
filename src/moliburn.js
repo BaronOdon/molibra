@@ -33,11 +33,10 @@
  *
  * ## What this does NOT do
  *
- * It does not bring MOLI back. Burning here mints there; returning requires
- * the reverse - a proved burn of the ERC-20 on Ethereum, honoured here by
- * releasing MOLI - and that is a separate instruction that does not exist yet.
- * ⛔ Until it does, crossing is ONE-WAY and must be labelled that way
- * everywhere a person can reach it. The same honesty the WSRO leg needed.
+ * It does not bring MOLI back. That is `src/molireturn.js` (24 Sep 2026): a
+ * proved bMOLI transfer into a keyless vault on Ethereum, honoured here by
+ * releasing MOLI, never more than was burned. ⛔ Until BRIDGE_V2_ACTIVATION is
+ * passed, crossing is still ONE-WAY and must be labelled that way.
  */
 
 import { keccak256, toHex, fromHex, concatBytes, normalizeAddress } from './crypto.js';
@@ -176,9 +175,15 @@ export function decodeMoliBurn(data) {
  * the root it already has.
  */
 export class OutboundLedger {
-  constructor(burned = 0n, byRecipient = new Map()) {
+  constructor(burned = 0n, byRecipient = new Map(), returned = 0n,
+              returnedTo = new Map(), returnKeys = new Set()) {
     this.burned = BigInt(burned);
     this.byRecipient = byRecipient;
+    // The way back (src/molireturn.js). Kept in the same ledger because the
+    // bound that matters is between the two: returned can never pass burned.
+    this.returned = BigInt(returned);
+    this.returnedTo = returnedTo;
+    this.returnKeys = returnKeys;
   }
 
   burn(recipient, amount) {
@@ -189,16 +194,62 @@ export class OutboundLedger {
     this.byRecipient.set(to, (this.byRecipient.get(to) ?? 0n) + value);
   }
 
-  clone() {
-    return new OutboundLedger(this.burned, new Map(this.byRecipient));
+  /** MOLI still on the far side: the most any return, or all of them, may release. */
+  outstanding() {
+    return this.burned - this.returned;
   }
 
-  /** Nothing at all when nothing has been burned: no hard fork. */
+  /**
+   * Refuses, before anything mutates, a return that was already honoured or
+   * that would bring back more MOLI than ever went out.
+   */
+  assertReturnable(key, amount) {
+    const value = BigInt(amount);
+    if (value <= 0n) throw new Error('a return must be positive');
+    if (this.returnKeys.has(key)) {
+      throw new Error('that Ethereum receipt has already been returned: a return is honoured once');
+    }
+    if (value > this.outstanding()) {
+      throw new Error(
+        `refused: returning ${value} would exceed the ${this.outstanding()} MOLI outstanding on `
+        + 'the far side. MOLI comes back only as MOLI that went out.');
+    }
+  }
+
+  recordReturn(key, bySender) {
+    let total = 0n;
+    for (const v of bySender.values()) total += v;
+    this.assertReturnable(key, total);
+    this.returnKeys.add(key);
+    this.returned += total;
+    for (const [from, v] of bySender) {
+      const to = normalizeAddress(from);
+      this.returnedTo.set(to, (this.returnedTo.get(to) ?? 0n) + v);
+    }
+    return total;
+  }
+
+  clone() {
+    return new OutboundLedger(this.burned, new Map(this.byRecipient), this.returned,
+      new Map(this.returnedTo), new Set(this.returnKeys));
+  }
+
+  /**
+   * Nothing at all when nothing has been burned, and no return lines until the
+   * first return: a chain written before either hashes exactly as it did.
+   */
   rootLines() {
     if (this.burned === 0n) return [];
     const lines = [`moliburn:total:${this.burned.toString(16)}`];
     for (const to of [...this.byRecipient.keys()].sort()) {
       lines.push(`moliburn:${to}:${this.byRecipient.get(to).toString(16)}`);
+    }
+    if (this.returned > 0n) {
+      lines.push(`molireturn:total:${this.returned.toString(16)}`);
+      for (const to of [...this.returnedTo.keys()].sort()) {
+        lines.push(`molireturn:${to}:${this.returnedTo.get(to).toString(16)}`);
+      }
+      for (const k of [...this.returnKeys].sort()) lines.push(`molireturnkey:${k}`);
     }
     return lines;
   }
@@ -209,7 +260,17 @@ export class OutboundLedger {
     for (const to of [...this.byRecipient.keys()].sort()) {
       byRecipient[to] = this.byRecipient.get(to).toString();
     }
-    return { burned: this.burned.toString(), byRecipient };
+    const out = { burned: this.burned.toString(), byRecipient };
+    if (this.returned > 0n) {
+      const returnedTo = {};
+      for (const to of [...this.returnedTo.keys()].sort()) {
+        returnedTo[to] = this.returnedTo.get(to).toString();
+      }
+      Object.assign(out, {
+        returned: this.returned.toString(), returnedTo, returnKeys: [...this.returnKeys].sort(),
+      });
+    }
+    return out;
   }
 
   static fromJSON(raw) {
@@ -218,6 +279,11 @@ export class OutboundLedger {
     for (const [to, amount] of Object.entries(raw.byRecipient ?? {})) {
       byRecipient.set(normalizeAddress(to), BigInt(amount));
     }
-    return new OutboundLedger(BigInt(raw.burned ?? 0), byRecipient);
+    const returnedTo = new Map();
+    for (const [to, amount] of Object.entries(raw.returnedTo ?? {})) {
+      returnedTo.set(normalizeAddress(to), BigInt(amount));
+    }
+    return new OutboundLedger(BigInt(raw.burned ?? 0), byRecipient, BigInt(raw.returned ?? 0),
+      returnedTo, new Set(raw.returnKeys ?? []));
   }
 }

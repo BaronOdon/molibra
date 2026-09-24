@@ -16,9 +16,10 @@
     Burning MOLI on Molibra destroys it. BridgedMoli then mints exactly that
     much bMOLI on Ethereum, against a proof of the destroying transaction.
 
-  ⛔ It is ONE-WAY. There is no path back: returning would need a proved burn
-  of the ERC-20 honoured on Molibra by releasing MOLI, and that instruction
-  does not exist. Burned MOLI does not come back.
+  ⛔ It is ONE-WAY until Molibra block 118,000. From that block, bMOLI sent
+  to the keyless return vault is released as MOLI on Molibra against a
+  receipt proof (src/molireturn.js, page /molibra/return) - never more than
+  was burned. Before it, burned MOLI does not come back.
 
   ⛔ Backing is the BONDED ANCHOR, not verified proof-of-work. That is
   strictly weaker than MolibraRelay, which verifies the work itself and costs
@@ -68,8 +69,9 @@
 <p class="sub" id="banner">not connected</p>
 
 <div class="note bad">
-  <b>⛔ One-way.</b> Burning MOLI destroys it. There is no instruction that brings it back,
-  so bMOLI cannot be redeemed for MOLI. <b>⛔ Backing is the bonded anchor, not proof-of-work</b>
+  <b>⛔ ONE-WAY until Molibra block 118,000.</b> Burning MOLI destroys it. From that block,
+  bMOLI can be <a href="/molibra/return">returned</a> for MOLI at the address that sends it,
+  never more than was burned; before it, nothing brings MOLI back.<b>⛔ Backing is the bonded anchor, not proof-of-work</b>
   — and the bond only covers a publisher signing <i>two</i> attestations for one height. A single
   false anchor is not slashable, and this contract has no owner and no pause, so during the
   challenge window there is no on-chain remedy. The window buys time to stop accepting the token.

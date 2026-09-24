@@ -339,9 +339,14 @@ The challenge window therefore buys time to *notice* and to stop accepting, not 
 remedy. A watcher runs against every attestation and reports disagreement; that watcher is the
 thing that makes the window worth anything, and it is why it exists.
 
-⛔ **MOLI leaving is one-way.** Burning MOLI here to mint a representation elsewhere destroys it;
-returning would require the reverse instruction, which does not exist yet. Until it does, this
-says so.
+⛔ **MOLI leaving is one-way until block 118,000.** Burning MOLI here to mint a representation
+elsewhere destroys it. From block 118,000 the reverse exists: bMOLI sent on Ethereum to a keyless
+vault (an address derived from `keccak256("molibra:moli-return:v1")`, with no key behind it) is
+proved here by an Ethereum receipt proof and released as MOLI to the address that sent it. Two
+bounds carry it. MOLI comes back only as MOLI that went out (`returned <= burned`), so even a
+false Ethereum header can release no more than is outstanding. And the receipts root it rests on
+is committed publicly by one named header authority, whose word is refutable by anyone with an
+Ethereum node. The proof is trustless and the root is trusted, and both halves are named.
 
 §8.5 remains the honest constraint on all of it: an attestation is only as good as the chain it
 attests to.

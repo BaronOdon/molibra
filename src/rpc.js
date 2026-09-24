@@ -21,6 +21,7 @@ import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
 import { simulate } from './evm.js';
 import { MOLI_BURN_ACTIVATION } from './moliburn.js';
+import { MOLI_RETURN_ADDRESS, BRIDGE_V2_ACTIVATION } from './molireturn.js';
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
 
@@ -578,8 +579,15 @@ async function handleAudit(node, req, res) {
         byRecipient: Object.fromEntries(
           [...chain.state.outbound.byRecipient].map(([k, v]) => [k, v.toString()]),
         ),
+        // The way back (src/molireturn.js). `outstanding` is the most any
+        // return may ever release, and should equal bMOLI's totalSupply minus
+        // the vault's balance once every return is claimed.
+        returned: chain.state.outbound.returned.toString(),
+        outstanding: chain.state.outbound.outstanding().toString(),
+        returnVault: MOLI_RETURN_ADDRESS,
+        returnsFrom: BRIDGE_V2_ACTIVATION.toString(),
       },
-      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli', '/molibra/download'],
+      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli', '/molibra/return', '/molibra/download'],
     });
   }
 
@@ -921,6 +929,14 @@ async function handleAudit(node, req, res) {
   //    invitations had to send strangers to a git URL instead.
   if (path === '/molibra/download') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'download.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /** bMOLI back to MOLI: send to the keyless vault, commit the header, return. */
+  if (path === '/molibra/return') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'return.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;

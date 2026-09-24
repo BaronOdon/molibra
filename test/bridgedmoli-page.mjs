@@ -95,7 +95,8 @@ check('⛔ and the page never mentions the bridgeOut tag as something it can min
 // accept this token based on them, so their absence is a defect, not a
 // cosmetic one.
 for (const [label, needle] of [
-  ['says it is one-way', 'ONE-WAY'],
+  ['says it is one-way until the return leg activates', 'ONE-WAY until Molibra block 118,000'],
+  ['links the way back', '/molibra/return'],
   ['says backing is the bonded anchor, not proof-of-work', 'bonded anchor'],
   ['says the challenge window is immutable', 'mmutable'],
   ['warns that a single false anchor is not slashable', 'single'],

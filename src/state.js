@@ -39,6 +39,10 @@ import {
 } from './stateproof.js';
 import { foreignAssetRecord } from './foreign.js';
 import { proveBurn } from './burnproof.js';
+import {
+  decodeMoliReturn, proveReturn, returnKey, inboundPositionKey, HISTORICAL_INBOUND_POSITIONS,
+  BRIDGE_V2_ACTIVATION, ETH_CHAIN_ID, ETH_HEADER_AUTHORITY,
+} from './molireturn.js';
 
 /** A storage word of zero. Unset and zero are the same thing, as in the EVM. */
 export const ZERO_WORD = '0x' + '00'.repeat(32);
@@ -736,9 +740,24 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     registering = { record, cap: registration.cap, assetContract: registration.assetContract };
   }
 
+  // ⛔⛔ From the bridge-v2 flag day, three rules that close holes in the
+  // inbound leg (src/molireturn.js has the reasoning). Below it, the old rules
+  // exactly, so all history replays unchanged.
+  const bridgeV2 = BigInt(blockNumber ?? 0n) >= BRIDGE_V2_ACTIVATION;
+
   const header = decodeHeaderCommit(tx.data);
   if (header) {
     if (tx.value !== 0n) throw new Error('committing a header moves no value');
+    // 1. Ethereum headers come from ONE named authority. Before this, any
+    //    address that registered a throwaway asset on chain 1 could commit a
+    //    fabricated root, or squat a real burn's block with junk.
+    if (bridgeV2 && BigInt(header.originChainId) === ETH_CHAIN_ID
+        && normalizeAddress(tx.from) !== ETH_HEADER_AUTHORITY) {
+      throw new Error(
+        `Ethereum headers are committed by ${ETH_HEADER_AUTHORITY} only: a receipts root is `
+        + "the bridge's trusted input, and it has one named source");
+    }
+    header.authority = bridgeV2 && BigInt(header.originChainId) === ETH_CHAIN_ID;
     // Rehearsed on a copy so a refused commit leaves the ledger untouched.
     state.inbound.clone().commitHeader({ ...header, by: tx.from });
   }
@@ -771,7 +790,60 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
       tokenId: asset.id, ethTxHash: proved.ethTxHash,
       amount: proved.amount, recipient: proved.recipient,
     });
-    claiming = { asset, proved, value };
+    let position = null;
+    if (bridgeV2) {
+      // 2. The root must be the one THIS asset's registrar committed, not
+      //    whichever root reached the chain first.
+      const committed = state.inbound.headerFor(asset.origin.chainId, claimed.blockNumber);
+      if (committed.by !== asset.registrar) {
+        throw new Error(
+          `the root for that block was committed by ${committed.by}, not by ${asset.symbol}'s `
+          + `registrar ${asset.registrar}: a claim rests on its own asset's authority`);
+      }
+      // 3a. Paid to the burner. A burn names no recipient on another chain,
+      //     so a claimant-named one lets a watcher take a burn by claiming first.
+      if (proved.recipient !== normalizeAddress(proved.burnedBy)) {
+        throw new Error(
+          `a burn is paid to the address that burned (${proved.burnedBy}); the recipient `
+          + 'is read from the burn, not chosen by whoever submits the claim');
+      }
+      // 3b. Single-use by POSITION. The tx hash in the payload is never checked
+      //     by the proof, so a key made from it could be reset by inventing one.
+      position = inboundPositionKey(asset.origin.chainId, claimed.blockNumber, claimed.txIndex);
+      if (HISTORICAL_INBOUND_POSITIONS.has(position) || state.inbound.claimed.has(position)) {
+        throw new Error('that Ethereum receipt has already been claimed: a burn is claimable once');
+      }
+    }
+    claiming = { asset, proved, value, position };
+  }
+
+  // ------------------------------------------------------ MOLI coming back
+  //
+  // bMOLI sent on Ethereum to the keyless return vault, proved here against a
+  // root committed by the Ethereum header authority, and paid to the SENDER.
+  // Never more than is outstanding: returned can never pass burned. See
+  // src/molireturn.js. Off below the flag day - the payload is then ordinary
+  // data, exactly as an old node reads it.
+  const returning = bridgeV2 ? decodeMoliReturn(tx.data) : null;
+  let returned = null;
+  if (returning) {
+    if (tx.value !== 0n) throw new Error('a MOLI return carries no value: its amount is in the proof');
+    const committed = state.inbound.headerFor(ETH_CHAIN_ID, returning.blockNumber);
+    if (!committed) {
+      throw new Error(
+        `no receiptsRoot is committed for Ethereum block ${returning.blockNumber}. `
+        + `${ETH_HEADER_AUTHORITY} commits it with HEADER_COMMIT first.`);
+    }
+    if (committed.by !== ETH_HEADER_AUTHORITY) {
+      throw new Error(`the root for Ethereum block ${returning.blockNumber} was not committed `
+        + `by the header authority ${ETH_HEADER_AUTHORITY}`);
+    }
+    const { bySender, total } = proveReturn({
+      receiptsRoot: committed.receiptsRoot, txIndex: returning.txIndex, proof: returning.proof,
+    });
+    const key = returnKey(returning.blockNumber, returning.txIndex);
+    state.outbound.assertReturnable(key, total);
+    returned = { key, bySender, total };
   }
 
   const releasing = decodeBridgeRelease(tx.data);
@@ -842,7 +914,7 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   // vote could be routed to bytecode, the electoral rules would be optional.
   const native = Boolean(expression || creation || issue || moved || express
     || opening || credential || registration || header || claimed || releasing
-    || burningMoli);
+    || burningMoli || returning);
 
   // ⛔ A bridged asset's units are destroyed through BRIDGE_RELEASE, never by
   // calling `burn` on the contract directly.
@@ -978,6 +1050,13 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
       amount: claiming.value,
       recipient: claiming.proved.recipient,
     });
+    if (claiming.position) state.inbound.claimed.add(claiming.position);
+  }
+  if (returned) {
+    // ⛔ Credited to the senders the proof names - never to tx.from, who may
+    // be anybody relaying the proof. Every check already passed above.
+    state.outbound.recordReturn(returned.key, returned.bySender);
+    for (const [from, amount] of returned.bySender) state.credit(from, amount);
   }
   if (releasingAsset) {
     state.inbound.release({ tokenId: releasingAsset.id, amount: releasing.amount });
