@@ -122,9 +122,9 @@ log "installed for $USER_NAME, mining to $MINER"
 if [ "$QUIET" = "1" ]; then
   : # a managed install: nobody is at the screen to read it
 elif grep -q '"created": *true' "$SUMMARY" 2>/dev/null; then
-  dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nA NEW WALLET was created for you:\n$MINER\n\nIts secret key is in:\n$ROOT/MY-WALLET-KEEP-SECRET.txt\n\nBACK UP THAT FILE. If it is lost, the MOLI in the wallet is lost with it.\n\nThe first start downloads the chain (a few minutes); mining begins by itself after that."
+  dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nA NEW WALLET was created for you:\n$MINER\n\nIts secret key is in:\n$ROOT/MY-WALLET-KEEP-SECRET.txt\n\nBACK UP THAT FILE. If it is lost, the MOLI in the wallet is lost with it.\n\nThe first start downloads the chain (about 30 to 60 minutes); mining begins by itself after that."
 else
-  dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nYour MOLI goes to:\n$MINER\n\nThe first start downloads the chain (a few minutes); mining begins by itself after that."
+  dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nYour MOLI goes to:\n$MINER\n\nThe first start downloads the chain (about 30 to 60 minutes); mining begins by itself after that."
 fi
 [ "$QUIET" = "1" ] || as_user open "http://127.0.0.1:20226/molibra/miner" || true
 exit 0

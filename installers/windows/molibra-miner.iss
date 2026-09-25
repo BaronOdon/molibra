@@ -164,13 +164,13 @@ begin
           'A NEW WALLET was created for you:' + #13#10 + Miner + #13#10#13#10 +
           'Its secret key is saved in:' + #13#10 + WalletFile + #13#10 +
           'BACK UP THAT FILE. If it is lost, the MOLI in the wallet is lost with it.' + #13#10#13#10 +
-          'The first start downloads the chain (a few minutes). Mining begins by itself after that. ' +
+          'The first start downloads the chain (about 30 to 60 minutes). Mining begins by itself after that. ' +
           'Open "Molibra Miner - Status" on your desktop to watch it.'
       else
         WizardForm.FinishedLabel.Caption :=
           'Molibra Miner is running in the background. It starts with Windows and keeps going after you log off.' + #13#10#13#10 +
           'Your MOLI goes to:' + #13#10 + Miner + #13#10#13#10 +
-          'The first start downloads the chain (a few minutes). Mining begins by itself after that. ' +
+          'The first start downloads the chain (about 30 to 60 minutes). Mining begins by itself after that. ' +
           'Open "Molibra Miner - Status" on your desktop to watch it.';
       WizardForm.FinishedLabel.AutoSize := False;
       WizardForm.FinishedLabel.Height := ScaleY(230);
