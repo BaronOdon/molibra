@@ -29,11 +29,41 @@ cp "$LAUNCHER" "$PAY/molibra-miner.mjs"
 cp "$(dirname "$LAUNCHER")/status.html" "$PAY/status.html"
 cp "$HERE/Uninstall Molibra Miner.command" "$APPS/"
 chmod 755 "$APPS/Uninstall Molibra Miner.command"
-cat > "$APPS/Molibra Miner.webloc" <<'W'
+# ---- the application window: native SwiftUI, Apple Silicon + Intel, signed
+APP="$APPS/Molibra Miner.app"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+for arch in arm64 x86_64; do
+  xcrun swiftc -O -parse-as-library -target "$arch-apple-macos12.0" \
+    "$HERE/../app/mac/MolibraMiner.swift" -o "$WORK/MolibraMiner-$arch"
+done
+lipo -create "$WORK/MolibraMiner-arm64" "$WORK/MolibraMiner-x86_64" -output "$APP/Contents/MacOS/Molibra Miner"
+ICONSET="$WORK/AppIcon.iconset"; mkdir -p "$ICONSET"
+for s in 16 32 128 256 512; do
+  sips -z $s $s "$HERE/../app/icon.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s*2)) $((s*2)) "$HERE/../app/icon.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>URL</key><string>http://127.0.0.1:20227/</string></dict></plist>
-W
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>Molibra Miner</string>
+  <key>CFBundleDisplayName</key><string>Molibra Miner</string>
+  <key>CFBundleIdentifier</key><string>org.molibra.miner.app</string>
+  <key>CFBundleExecutable</key><string>Molibra Miner</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict></plist>
+PL
+security unlock-keychain -p "$(cat "$HOME/devid/.keychain-pass")" "$KC"
+codesign --force --options runtime --timestamp --keychain "$KC" \
+  --sign "Developer ID Application: MARCELO MARSHALL DE SIQUEIRA (VZW9226DZB)" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
 mkdir -p "$WORK/scripts"
 cp "$HERE/scripts/postinstall" "$WORK/scripts/postinstall"
 chmod 755 "$WORK/scripts/postinstall"

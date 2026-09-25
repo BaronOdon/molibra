@@ -40,7 +40,9 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName=Molibra Miner
-UninstallDisplayIcon={app}\runtime\node.exe
+UninstallDisplayIcon={app}\Molibra Miner.exe
+SetupIconFile=..\app\molibra.ico
+CloseApplications=yes
 SetupLogging=yes
 VersionInfoCompany=Molibra
 VersionInfoDescription=Molibra Miner installer
@@ -52,12 +54,13 @@ Source: "stage\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignor
 Source: "stage\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion
 Source: "stage\molibra-miner.mjs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\status.html"; DestDir: "{app}"; Flags: ignoreversion
+Source: "stage\Molibra Miner.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-; "Molibra Miner" opens the miner's own window. It waits for the miner, starts it
-; if it is not running, and shows the reason if it cannot - never a browser error.
-Name: "{userdesktop}\Molibra Miner"; Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" window"; WorkingDir: "{app}"; Flags: runminimized; Comment: "Molibra Miner status"
-Name: "{group}\Molibra Miner"; Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" window"; WorkingDir: "{app}"; Flags: runminimized; Comment: "Molibra Miner status"
+; "Molibra Miner" is the miner's own application window: native, not a browser.
+; It starts the miner if it is not running, and shows why if it cannot.
+Name: "{userdesktop}\Molibra Miner"; Filename: "{app}\Molibra Miner.exe"; WorkingDir: "{app}"; Comment: "Molibra Miner"
+Name: "{group}\Molibra Miner"; Filename: "{app}\Molibra Miner.exe"; WorkingDir: "{app}"; Comment: "Molibra Miner"
 Name: "{group}\Uninstall Molibra Miner"; Filename: "{uninstallexe}"
 
 [Run]
@@ -67,7 +70,7 @@ Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" ini
 Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" taskxml"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\schtasks.exe"; Parameters: "/Create /TN ""{#TaskName}"" /XML ""{app}\task.xml"" /F"; Flags: runhidden waituntilterminated; StatusMsg: "Registering Molibra Miner to start with Windows..."
 Filename: "{sys}\schtasks.exe"; Parameters: "/Run /TN ""{#TaskName}"""; Flags: runhidden waituntilterminated
-Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" window"; WorkingDir: "{app}"; Description: "Open Molibra Miner"; Flags: postinstall nowait runhidden skipifsilent
+Filename: "{app}\Molibra Miner.exe"; WorkingDir: "{app}"; Description: "Open Molibra Miner"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#TaskName}"" /F"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteTask"
@@ -95,6 +98,33 @@ Type: files; Name: "{group}\Molibra Miner - Status.url"
 [Code]
 var
   WalletPage: TInputQueryWizardPage;
+  UpdatePage: TOutputMsgWizardPage;
+  PrevVersion: String;
+  ExistingWallet: String;
+
+// The version already on this computer, if any: Inno records it under the
+// app's uninstall key, which is the same key this setup will overwrite.
+function InstalledVersion(): String;
+var K: String;
+begin
+  Result := '';
+  K := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F0C3B2A-4D1E-4C8B-9E27-20226A11B0E1}_is1';
+  if not RegQueryStringValue(HKLM64, K, 'DisplayVersion', Result) then
+    if not RegQueryStringValue(HKLM32, K, 'DisplayVersion', Result) then
+      RegQueryStringValue(HKCU, K, 'DisplayVersion', Result);
+end;
+
+// The wallet an earlier install already mines to, read from its config.json.
+function ReadExistingWallet(): String;
+var S: AnsiString; P: Integer;
+begin
+  Result := '';
+  if LoadStringFromFile(ExpandConstant('{localappdata}\Molibra\config.json'), S) then begin
+    P := Pos('"miner": "', String(S));
+    if P > 0 then Result := Copy(String(S), P + 10, 42);
+    if Copy(Result, 1, 2) <> '0x' then Result := '';
+  end;
+end;
 
 function IsHexChar(C: Char): Boolean;
 begin
@@ -112,6 +142,18 @@ end;
 
 procedure InitializeWizard;
 begin
+  PrevVersion := InstalledVersion();
+  ExistingWallet := ReadExistingWallet();
+  // ⛔ An update must SAY it is an update: the person already has a miner,
+  //    and must not wonder whether they are installing a second one.
+  if PrevVersion <> '' then
+    UpdatePage := CreateOutputMsgPage(wpWelcome,
+      'Update Molibra Miner',
+      'Molibra Miner ' + PrevVersion + ' is already installed on this computer.',
+      'Setup will UPDATE it from version ' + PrevVersion + ' to version {#AppVersion}.' + #13#10#13#10 +
+      'Your wallet, your settings, your mined MOLI and the chain already downloaded are all kept.' + #13#10 +
+      'The miner stops for a moment while it is updated, then starts again by itself.' + #13#10#13#10 +
+      'From this version on, Molibra Miner updates itself automatically - you will not need to do this again.');
   WalletPage := CreateInputQueryPage(wpLicense,
     'Where should your MOLI go?',
     'Your mining rewards are paid to a wallet address.',
@@ -121,6 +163,25 @@ begin
   WalletPage.Add('Wallet address (optional):', False);
   // A scripted or managed install can name the wallet: Molibra-Miner-Setup.exe /WALLET=0x...
   WalletPage.Values[0] := ExpandConstant('{param:WALLET|}');
+end;
+
+// A wallet already set is kept; asking again would only invite a mistake.
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (PageID = WalletPage.ID) and (ExistingWallet <> '');
+end;
+
+// ⛔ Stop the running miner BEFORE files are replaced: its node.exe is in use
+//    and Windows would refuse to overwrite it halfway through the update.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var Code: Integer; App: String;
+begin
+  Result := '';
+  App := ExpandConstant('{localappdata}\Molibra');
+  Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "{#TaskName}"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if FileExists(App + '\runtime\node.exe') and FileExists(App + '\molibra-miner.mjs') then
+    Exec(App + '\runtime\node.exe', '"' + App + '\molibra-miner.mjs" stop', App, SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(2000);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -177,6 +238,13 @@ begin
           'Its secret key is saved in:' + #13#10 + WalletFile + #13#10 +
           'BACK UP THAT FILE. If it is lost, the MOLI in the wallet is lost with it.' + #13#10#13#10 +
           'The first start downloads the chain (about 30 to 60 minutes). Mining begins by itself after that. ' +
+          'The Molibra Miner window opens now; the "Molibra Miner" icon on your desktop brings it back.'
+      else if PrevVersion <> '' then
+        WizardForm.FinishedLabel.Caption :=
+          'Molibra Miner was UPDATED from version ' + PrevVersion + ' to version {#AppVersion}.' + #13#10#13#10 +
+          'It is running again in the background, mining to the same wallet:' + #13#10 + Miner + #13#10#13#10 +
+          'Nothing else changed: your wallet, settings and downloaded chain were kept. ' +
+          'From now on it updates itself automatically.' + #13#10#13#10 +
           'The Molibra Miner window opens now; the "Molibra Miner" icon on your desktop brings it back.'
       else
         WizardForm.FinishedLabel.Caption :=

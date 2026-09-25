@@ -127,5 +127,5 @@ else
   dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nYour MOLI goes to:\n$MINER\n\nThe first start downloads the chain (about 30 to 60 minutes); mining begins by itself after that."
 fi
 # The Molibra Miner window: waits for the miner and shows its state (never a browser error).
-[ "$QUIET" = "1" ] || (as_user "$NODE" "$ROOT/molibra-miner.mjs" window >/dev/null 2>&1 &) || true
+[ "$QUIET" = "1" ] || as_user open "/Applications/Molibra Miner/Molibra Miner.app" || true
 exit 0

@@ -346,9 +346,19 @@ function logTail(file, lines = 12) {
 let statusServer = null;
 function startStatusServer() {
   const page = (() => { try { return readFileSync(join(ROOT, 'status.html')); } catch { return null; } })();
-  const server = statusServer = createServer((req, res) => {
+  const server = statusServer = createServer(async (req, res) => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
     if (req.url.startsWith('/status')) {
+      // The node's own height, live: its RPC answers during catch-up, while its
+      // progress LINE is printed only once a minute.
+      if (child && ['catching-up', 'mining', 'loading'].includes(status.phase)) {
+        try {
+          const cfg = readConfig();
+          const r = await fetch(`http://127.0.0.1:${cfg.port ?? PORT}/molibra`, { signal: AbortSignal.timeout(1500) });
+          const h = Number((await r.json()).height);
+          if (Number.isFinite(h)) status.height = h;
+        } catch { /* busy verifying; the last known height stands */ }
+      }
       res.writeHead(200, { ...headers, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ...status, log: logTail('miner.log', 6), nodeLog: logTail('node.log', 8) }));
     } else if (page) {

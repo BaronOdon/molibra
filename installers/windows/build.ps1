@@ -73,6 +73,15 @@ foreach ($f in 'molibra-miner.mjs', 'status.html') {
 }
 Write-Host "app      $($commit.Substring(0,7))"
 
+# ---- 2b. the application window: native, compiled here from readable source by
+#          the C# compiler that ships with Windows - no third-party libraries.
+$fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+& (Join-Path $fw 'csc.exe') /nologo /target:winexe /optimize+ /codepage:65001 "/out:$(Join-Path $Stage 'Molibra Miner.exe')" `
+  "/win32icon:$(Join-Path $Repo 'installers\app\molibra.ico')" /reference:System.Web.Extensions.dll /reference:System.Numerics.dll `
+  /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $Repo 'installers\app\windows\MolibraMiner.cs')
+if ($LASTEXITCODE -ne 0) { throw 'the Molibra Miner window did not compile' }
+Write-Host "window   Molibra Miner.exe compiled"
+
 # ---- 3. compile
 & $Iscc "/DAppVersion=$Version" /Q (Join-Path $Here 'molibra-miner.iss')
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
