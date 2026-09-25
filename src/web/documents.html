@@ -130,8 +130,11 @@ const NODE = location.protocol.startsWith('http')
   : 'http://193.123.191.142:8545';
 const CHAIN_ID = 20226, CHAIN_HEX = '0x4f02';
 
-// Filled in once the registry is deployed. ?registry= overrides it.
-const REGISTRY_ADDRESS = '';
+// THE registry: deployed 25 Sep 2026, block 114,418, from 0xf51a…3F5a; record
+// #1 is the e-mail that carried the manifesto to the United Nations.
+// ⛔ 0x7acdaa4e981b4d6c2ebd6d2b44df2eabe880522b (block 114,420) is an EMPTY
+// duplicate from a second Deploy click - never use it. ?registry= overrides.
+const REGISTRY_ADDRESS = '0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946';
 
 /* Selectors and the event topic are checked against keccak256 of their
    signatures by contracts/registry-build-and-test.mjs. */
@@ -306,20 +309,29 @@ async function requireMolibra() {
   await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] });
   if (await refreshWallet() !== CHAIN_ID) throw new Error('still not on Molibra');
 }
+// ⛔ Every action button is locked while a transaction is pending. The first
+// registry was deployed TWICE (blocks 114,418 and 114,420) by a second click
+// during the wait - each click is a separate signature and a separate contract.
+const ACTIONS = ['deploy', 'register', 'sign', 'revoke'];
 async function send(tx, logId, label) {
   await requireMolibra();
-  say(logId, label + '\nawaiting your signature in the wallet…');
-  const hash = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, ...tx }] });
-  say(logId, label + '\nsent ' + hash + '\nwaiting for a block…');
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
-    if (r) {
-      say(logId, r.status === '0x1' ? `⭐ mined in block ${BigInt(r.blockNumber)} · tx ${hash}` : `⛔ reverted: ${hash}`, r.status !== '0x1');
-      return r;
+  ACTIONS.forEach((id) => { $(id).disabled = true; });
+  try {
+    say(logId, label + '\nawaiting your signature in the wallet…');
+    const hash = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, ...tx }] });
+    say(logId, label + '\nsent ' + hash + '\nwaiting for a block… (buttons stay locked until it is mined)');
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+      if (r) {
+        say(logId, r.status === '0x1' ? `⭐ mined in block ${BigInt(r.blockNumber)} · tx ${hash}` : `⛔ reverted: ${hash}`, r.status !== '0x1');
+        return r;
+      }
     }
+    throw new Error('not mined within 5 minutes — tx ' + hash);
+  } finally {
+    ACTIONS.forEach((id) => { $(id).disabled = false; });
   }
-  throw new Error('not mined within 5 minutes — tx ' + hash);
 }
 const needHash = () => {
   const h = $('hash').value.trim().toLowerCase();
