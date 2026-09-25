@@ -45,8 +45,16 @@ $commit = (git -C $Repo rev-parse HEAD).Trim()
 $tar = Join-Path $env:TEMP 'molibra-app.tar'
 git -C $Repo archive --format=tar -o $tar HEAD src genesis.json package.json package-lock.json LICENSE NOTICE
 New-Item -ItemType Directory -Force -Path (Join-Path $Stage 'app') | Out-Null
-tar -xf $tar -C (Join-Path $Stage 'app')
+# ⛔ Windows' own tar, by full path. A bare `tar` can resolve to Git's MSYS tar,
+#    which reads "C:" as a REMOTE HOST, extracts nothing and says so only on
+#    stderr - the first build shipped an installer with an empty app folder.
+& (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $tar -C (Join-Path $Stage 'app')
 Remove-Item $tar
+# ⛔ Checked BEFORE npm runs: in a folder with no package.json, npm walks UP and
+#    operates on whatever package.json it finds - here, the repository's own.
+foreach ($must in 'src\cli.js', 'package.json', 'package-lock.json', 'genesis.json') {
+  if (-not (Test-Path (Join-Path $Stage "app\$must"))) { throw "staged app is missing $must - not building" }
+}
 Push-Location (Join-Path $Stage 'app')
 & (Join-Path $Stage 'runtime\node.exe') (Join-Path $Stage 'runtime\node_modules\npm\bin\npm-cli.js') ci --omit=dev --no-audit --no-fund --loglevel=error
 if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
