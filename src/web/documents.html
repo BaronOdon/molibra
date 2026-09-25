@@ -1,0 +1,434 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molibra · Document registry</title>
+<!--
+  Holds no key; every transaction is signed in your wallet.
+
+  ⛔ The FILE never leaves this browser. It is hashed here (SHA-256, the same
+  hash `sha256sum` / `Get-FileHash` prints) and only the 32-byte hash goes on
+  chain. A public chain can never erase anything, so nothing personal is sent.
+
+  Records are numbered from 1 in registration order: "the first document ever
+  registered on Molibra" is hashAt(1), read off the contract, not a claim.
+
+  Bytecode is stamped by contracts/registry-build-and-test.mjs - rebuild there
+  if the contract changes, or the page deploys something nobody has read.
+-->
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--bad:#ff5c5c;--ok:#5cd18b}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px 16px;max-width:900px;margin:0 auto;
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+  .sub{color:var(--dim);margin:0 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  label{display:block;color:var(--dim);font-size:12px;margin:10px 0 4px}
+  input,textarea{width:100%;box-sizing:border-box;background:#0e0e10;border:1px solid var(--line);border-radius:8px;
+        color:var(--ink);padding:9px 11px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  textarea{min-height:58px;resize:vertical}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:10px 16px;
+         font-weight:650;cursor:pointer;margin:12px 8px 0 0;font-size:14px}
+  button.ghost{background:#22222a;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .log{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:10px;
+       white-space:pre-wrap;word-break:break-all}
+  .log.bad{color:var(--bad)}
+  .note{border-left:3px solid var(--gold);background:#1a1608;padding:9px 12px;margin:12px 0;font-size:13px}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .drop{border:1px dashed var(--line);border-radius:10px;padding:22px;text-align:center;color:var(--dim);cursor:pointer}
+  .drop.on{border-color:var(--gold);color:var(--ink)}
+  .hash{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:var(--gold);word-break:break-all;margin-top:10px}
+  .badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:650}
+  .badge.ok{background:#11301f;color:var(--ok)} .badge.no{background:#301111;color:var(--bad)} .badge.wait{background:#2a2410;color:var(--gold)}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  td,th{border-top:1px solid var(--line);padding:6px 4px;text-align:left;vertical-align:top}
+  th{color:var(--dim);font-weight:500}
+  td.mono{font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  tr.pick{cursor:pointer} tr.pick:hover{background:#1a1a1e}
+  .hidden{display:none}
+</style>
+
+<h1>Document registry</h1>
+<p class="sub" id="banner">Prove a document existed, and who agreed to it — without publishing it.</p>
+
+<div class="card">
+  <h2>1 · The document</h2>
+  <div class="drop" id="drop">Drop a file here, or click to choose.<br>
+    <span style="font-size:12px">It is hashed in this browser. The file itself is never uploaded.</span></div>
+  <input type="file" id="file" class="hidden">
+  <label>SHA-256 — computed from the file, or paste one</label>
+  <input id="hash" placeholder="0x… (64 hex characters)">
+  <div class="log" id="fileLog"></div>
+</div>
+
+<div class="card">
+  <h2>2 · Status on Molibra</h2>
+  <div id="statusBox" class="log">Choose a file or paste a hash.</div>
+  <dl id="statusDl" class="hidden"></dl>
+</div>
+
+<div class="card">
+  <h2>3 · Wallet</h2>
+  <button id="connect">Connect wallet</button>
+  <button id="addNet" class="ghost">Add Molibra (20226)</button>
+  <dl><dt>account</dt><dd id="acct">—</dd><dt>chain</dt><dd id="chain">—</dd><dt>MOLI</dt><dd id="bal">—</dd></dl>
+  <div class="log" id="walletLog">This page holds no key. Nothing is sent until you sign it in your wallet.</div>
+</div>
+
+<div class="card" id="registerCard">
+  <h2>4 · Register it</h2>
+  <p class="sub">Records the hash, a label, and the wallets asked to sign. Anyone may register; only the
+    wallets named here can sign or revoke. ⛔ The label is public forever — never put personal data in it.</p>
+  <label>Label</label>
+  <input id="label" maxlength="200" placeholder="e.g. Manifesto às Nações Unidas (31/07/2025)">
+  <label>Signers — one address per line (your connected wallet is added if left empty)</label>
+  <textarea id="signers" placeholder="0x…"></textarea>
+  <button id="register">Register</button>
+  <div class="log" id="registerLog"></div>
+</div>
+
+<div class="card">
+  <h2>5 · Sign it</h2>
+  <p class="sub">Signing records, on chain and from your own wallet, that you agree to exactly this file.
+    Only a wallet named as a signer can sign.</p>
+  <button id="sign">Sign</button>
+  <button id="revoke" class="ghost">Revoke…</button>
+  <div class="log" id="signLog"></div>
+</div>
+
+<div class="card">
+  <h2>Registry</h2>
+  <dl><dt>contract</dt><dd id="regAddr">—</dd><dt>records</dt><dd id="regCount">—</dd></dl>
+  <table id="list" class="hidden"><thead><tr><th>#</th><th>label</th><th>hash</th><th>signed</th></tr></thead><tbody></tbody></table>
+  <div class="log" id="listLog"></div>
+  <div id="deployBox" class="hidden">
+    <div class="note">No registry is configured on this page yet. Deploying one is a one-time step: the
+      contract has no owner, no admin and no upgrade. After it is mined, keep the address — it goes in
+      the URL as <code>?registry=0x…</code> and then into this page's source.</div>
+    <button id="deploy">Deploy DocumentRegistry</button>
+    <div class="log" id="deployLog"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@noble/hashes/": "/molibra/vendor/hashes/"
+  }
+}
+</script>
+<script src="/molibra/mobilewallet.js"></script>
+<script type="module">
+import { sha256 } from '@noble/hashes/sha256';
+
+// ⛔⛔ The origin that SERVED this page, not a hardcoded host (mixed content
+// kills every fetch on an https page). The literal is only the fallback for
+// opening the file directly.
+const NODE = location.protocol.startsWith('http')
+  ? location.origin
+  : 'http://193.123.191.142:8545';
+const CHAIN_ID = 20226, CHAIN_HEX = '0x4f02';
+
+// Filled in once the registry is deployed. ?registry= overrides it.
+const REGISTRY_ADDRESS = '';
+
+/* Selectors and the event topic are checked against keccak256 of their
+   signatures by contracts/registry-build-and-test.mjs. */
+const SEL = {
+  register: '0xd97875d4',   // register(bytes32,string,address[])
+  sign:     '0x799cd333',   // sign(bytes32)
+  revoke:   '0xb75c7dc6',   // revoke(bytes32)
+  status:   '0x52ad0d5e',   // status(bytes32)
+  count:    '0x06661abd',   // count()
+  numberOf: '0xfd8e1856',   // numberOf(bytes32)
+  hashAt:   '0x8bc44252',   // hashAt(uint256)
+};
+// Registered(bytes32 indexed hash, uint256 indexed number, address indexed registrant, string, address[])
+const REGISTERED_TOPIC = '0x365429d94af2b1183dfbfbf6a5b29374c1921c9fe03ac90459cfbebfe0bf4bd2';
+const REGISTRY_BYTECODE = '0x6080604052348015600f57600080fd5b50610d308061001f6000396000f3fe608060405234801561001057600080fd5b50600436106100885760003560e01c8063b75c7dc61161005b578063b75c7dc614610105578063d97875d414610118578063f64157ad1461012b578063fd8e18561461017757600080fd5b806306661abd1461008d57806352ad0d5e146100a9578063799cd333146100d05780638bc44252146100e5575b600080fd5b61009660025481565b6040519081526020015b60405180910390f35b6100bc6100b736600461083c565b610197565b6040516100a09897969594939291906108d5565b6100e36100de36600461083c565b61041e565b005b6100966100f336600461083c565b60046020526000908152604090205481565b6100e361011336600461083c565b61054a565b6100e36101263660046109ef565b61062f565b61015f610139366004610ab9565b60016020908152600092835260408084209091529082529020546001600160401b031681565b6040516001600160401b0390911681526020016100a0565b61009661018536600461083c565b60036020526000908152604090205481565b60008181526020819052604081206003810154829160609182918291859182918291906001600160401b038111156101d1576101d1610ae5565b6040519080825280602002602001820160405280156101fa578160200160208202803683370190505b5060038201549095501515935060005b60038201548110156102d95760008b81526001602052604081206003840180549192918490811061023d5761023d610afb565b60009182526020808320909101546001600160a01b0316835282019290925260400190205486516001600160401b039091169087908390811061028257610282610afb565b60200260200101906001600160401b031690816001600160401b0316815250508581815181106102b4576102b4610afb565b60200260200101516001600160401b03166000036102d157600094505b60010161020a565b50805460018201546002830180546001600160a01b03808516946001600160401b03600160a01b90910481169460038801938c938c93831692600160401b90041690869061032690610b11565b80601f016020809104026020016040519081016040528092919081815260200182805461035290610b11565b801561039f5780601f106103745761010080835404028352916020019161039f565b820191906000526020600020905b81548152906001019060200180831161038257829003601f168201915b50505050509550848054806020026020016040519081016040528092919081815260200182805480156103fb57602002820191906000526020600020905b81546001600160a01b031681526001909101906020018083116103dd575b505050505094509850985098509850985098509850985050919395975091939597565b60008181526020818152604080832060039092528220549091036104555760405163aba4733960e01b815260040160405180910390fd5b60018101546001600160401b0316156104815760405163905e710760e01b815260040160405180910390fd5b61048b813361075d565b6104a85760405163da0357f760e01b815260040160405180910390fd5b60008281526001602090815260408083203384529091529020546001600160401b0316156104e95760405163585eb56560e11b815260040160405180910390fd5b6000828152600160209081526040808320338085529252808320805467ffffffffffffffff1916426001600160401b031617905551909184917fdc9da68bd73c4161c8f5bc195573e6649390acdb7090a16542862b767eacac5a9190a35050565b60008181526020818152604080832060039092528220549091036105815760405163aba4733960e01b815260040160405180910390fd5b60018101546001600160401b0316156105ad5760405163905e710760e01b815260040160405180910390fd5b6105b7813361075d565b6105d45760405163da0357f760e01b815260040160405180910390fd5b600181018054426001600160401b03166001600160e01b03199091161733600160401b81029190911790915560405183907f5bc2baf870c5baf189838b5e0b0e3b04a3263e2df5d305d1c15f3e6022f5dc4590600090a35050565b8461064d57604051631c37cddf60e21b815260040160405180910390fd5b6000858152600360205260409020541561067a57604051630ea075bf60e21b815260040160405180910390fd5b600085815260208190526040902080546001600160e01b0319163367ffffffffffffffff60a01b191617600160a01b426001600160401b031602178155600281016106c6858783610b9a565b506106d56003820184846107c4565b5060006002600081546106e790610c59565b91829055506000888152600360209081526040808320849055838352600490915290819020899055519091503390829089907f365429d94af2b1183dfbfbf6a5b29374c1921c9fe03ac90459cfbebfe0bf4bd29061074c908b908b908b908b90610c80565b60405180910390a450505050505050565b6000805b60038401548110156107b857826001600160a01b031684600301828154811061078c5761078c610afb565b6000918252602090912001546001600160a01b0316036107b05760019150506107be565b600101610761565b50600090505b92915050565b828054828255906000526020600020908101928215610817579160200282015b828111156108175781546001600160a01b0319166001600160a01b038435161782556020909201916001909101906107e4565b50610823929150610827565b5090565b5b808211156108235760008155600101610828565b60006020828403121561084e57600080fd5b5035919050565b600081518084526020840193506020830160005b828110156108905781516001600160a01b0316865260209586019590910190600101610869565b5093949350505050565b600081518084526020840193506020830160005b828110156108905781516001600160401b03168652602095860195909101906001016108ae565b60018060a01b03891681526001600160401b03881660208201526101006040820152600087518061010084015260005b81811015610923576020818b01810151610120868401015201610905565b5060006101208285010152601f19601f82011683019050610120838203016060840152610954610120820189610855565b90508281036080840152610968818861089a565b91505061097960a083018615159052565b6001600160401b03841660c08301526001600160a01b03831660e08301529998505050505050505050565b60008083601f8401126109b657600080fd5b5081356001600160401b038111156109cd57600080fd5b6020830191508360208260051b85010111156109e857600080fd5b9250929050565b600080600080600060608688031215610a0757600080fd5b8535945060208601356001600160401b03811115610a2457600080fd5b8601601f81018813610a3557600080fd5b80356001600160401b03811115610a4b57600080fd5b886020828401011115610a5d57600080fd5b6020919091019450925060408601356001600160401b03811115610a8057600080fd5b610a8c888289016109a4565b969995985093965092949392505050565b80356001600160a01b0381168114610ab457600080fd5b919050565b60008060408385031215610acc57600080fd5b82359150610adc60208401610a9d565b90509250929050565b634e487b7160e01b600052604160045260246000fd5b634e487b7160e01b600052603260045260246000fd5b600181811c90821680610b2557607f821691505b602082108103610b4557634e487b7160e01b600052602260045260246000fd5b50919050565b601f821115610b9557806000526020600020601f840160051c81016020851015610b725750805b601f840160051c820191505b81811015610b925760008155600101610b7e565b50505b505050565b6001600160401b03831115610bb157610bb1610ae5565b610bc583610bbf8354610b11565b83610b4b565b6000601f841160018114610bf95760008515610be15750838201355b600019600387901b1c1916600186901b178355610b92565b600083815260209020601f19861690835b82811015610c2a5786850135825560209485019460019092019101610c0a565b5086821015610c475760001960f88860031b161c19848701351681555b505060018560011b0183555050505050565b600060018201610c7957634e487b7160e01b600052601160045260246000fd5b5060010190565b6040815283604082015283856060830137600060608583018101829052601f19601f870116830183810382016020850152908101849052849082906080015b85821015610cee576001600160a01b03610cd884610a9d565b1681526020928301926001929092019101610cbf565b9897505050505050505056fea2646970667358221220b6da0870beff502f1c1bf7669102142898223e3d457261cfa0294220a1d2d33364736f6c634300081a0033';
+
+const $ = (id) => document.getElementById(id);
+const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
+const eth = () => window.molibraWallet.require();
+const isAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a).trim());
+const isHash = (h) => /^0x[0-9a-fA-F]{64}$/.test(String(h).trim());
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const hex = (u8) => '0x' + [...u8].map((b) => b.toString(16).padStart(2, '0')).join('');
+const when = (t) => t ? new Date(Number(t) * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '—';
+let account = null;
+
+const params = new URLSearchParams(location.search);
+const registry = () => {
+  const r = (params.get('registry') || REGISTRY_ADDRESS).trim();
+  return isAddr(r) ? r : '';
+};
+
+/* ------------------------------------------------------------ ABI helpers */
+/* ABI-BEGIN — contracts/registry-build-and-test.mjs runs exactly this region
+   against the compiled contract. Keep the markers and keep it DOM-free. */
+function encRegister(hash, label, signers) {
+  const utf8 = new TextEncoder().encode(label);
+  const strWords = Math.ceil(utf8.length / 32);
+  const strHex = [...utf8].map((b) => b.toString(16).padStart(2, '0')).join('').padEnd(strWords * 64, '0');
+  const offStr = 96;
+  const offArr = offStr + 32 + strWords * 32;
+  return SEL.register + hash.slice(2).toLowerCase() + word(offStr) + word(offArr)
+    + word(utf8.length) + strHex
+    + word(signers.length) + signers.map(addr32).join('');
+}
+function words(ret) {
+  const h = ret.replace(/^0x/, '');
+  const w = []; for (let i = 0; i < h.length; i += 64) w.push(h.slice(i, i + 64));
+  return w;
+}
+const toAddr = (w) => '0x' + w.slice(24);
+function decStatus(ret) {
+  const w = words(ret);
+  const at = (byteOff) => byteOff / 32;
+  const str = (off) => {
+    const i = at(off), len = Number(BigInt('0x' + w[i]));
+    const bytes = (w.slice(i + 1).join('')).slice(0, len * 2);
+    return new TextDecoder().decode(new Uint8Array(bytes.match(/../g)?.map((b) => parseInt(b, 16)) ?? []));
+  };
+  const arr = (off, f) => {
+    const i = at(off), n = Number(BigInt('0x' + w[i]));
+    return w.slice(i + 1, i + 1 + n).map(f);
+  };
+  return {
+    registrant: toAddr(w[0]),
+    registeredAt: BigInt('0x' + w[1]),
+    label: str(Number(BigInt('0x' + w[2]))),
+    signers: arr(Number(BigInt('0x' + w[3])), toAddr),
+    signedTimes: arr(Number(BigInt('0x' + w[4])), (x) => BigInt('0x' + x)),
+    fullySigned: BigInt('0x' + w[5]) === 1n,
+    revokedAt: BigInt('0x' + w[6]),
+    revokedBy: toAddr(w[7]),
+  };
+}
+/* ABI-END */
+
+const rpc = async (m, p = []) => {
+  const r = await fetch(NODE, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: m, params: p }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+};
+const call = (data) => rpc('eth_call', [{ to: registry(), data }, 'latest']);
+const numberOf = async (h) => BigInt(await call(SEL.numberOf + h.slice(2)));
+
+/* ------------------------------------------------------------ the file */
+async function hashFile(f) {
+  say('fileLog', `hashing ${f.name} (${f.size.toLocaleString()} bytes)…`);
+  const buf = new Uint8Array(await f.arrayBuffer());
+  const h = hex(sha256(buf));
+  $('hash').value = h;
+  say('fileLog', `${f.name} · ${f.size.toLocaleString()} bytes\nSHA-256 computed here; the file was not uploaded.`);
+  if (!$('label').value) $('label').value = f.name.replace(/\.[^.]+$/, '');
+  await showStatus();
+}
+$('drop').onclick = () => $('file').click();
+$('file').onchange = () => { if ($('file').files[0]) hashFile($('file').files[0]); };
+$('drop').ondragover = (e) => { e.preventDefault(); $('drop').classList.add('on'); };
+$('drop').ondragleave = () => $('drop').classList.remove('on');
+$('drop').ondrop = (e) => {
+  e.preventDefault(); $('drop').classList.remove('on');
+  if (e.dataTransfer.files[0]) hashFile(e.dataTransfer.files[0]);
+};
+$('hash').onchange = () => showStatus();
+
+/* ------------------------------------------------------------ status */
+async function showStatus() {
+  const h = $('hash').value.trim().toLowerCase();
+  const dl = $('statusDl');
+  dl.classList.add('hidden');
+  if (!isHash(h)) { say('statusBox', h ? 'that is not a 32-byte hash' : 'Choose a file or paste a hash.', !!h); return; }
+  if (!registry()) { say('statusBox', 'no registry configured yet — see "Registry" below'); return; }
+  try {
+    // Existence is the record number, as in the contract - never a timestamp.
+    const n = await numberOf(h);
+    if (n === 0n) {
+      say('statusBox', 'NOT registered. This exact file has no record on Molibra.');
+      return;
+    }
+    const s = decStatus(await call(SEL.status + h.slice(2)));
+    say('statusBox', '');
+    const state = s.revokedAt > 0n ? '<span class="badge no">revoked</span>'
+      : s.fullySigned ? '<span class="badge ok">registered · fully signed</span>'
+      : '<span class="badge wait">registered · awaiting signatures</span>';
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let html = `<dt>record</dt><dd>#${n}${n === 1n ? ' — the first document ever registered on Molibra' : ''}</dd>`
+      + `<dt>state</dt><dd>${state}</dd>`
+      + `<dt>label</dt><dd>${esc(s.label)}</dd>`
+      + `<dt>registered</dt><dd>${when(s.registeredAt)} by ${s.registrant}</dd>`;
+    s.signers.forEach((a, i) => {
+      html += `<dt>signer ${i + 1}</dt><dd>${a}<br>${s.signedTimes[i] ? '✔ signed ' + when(s.signedTimes[i]) : '… not yet signed'}</dd>`;
+    });
+    if (s.revokedAt > 0n) html += `<dt>revoked</dt><dd>${when(s.revokedAt)} by ${s.revokedBy}</dd>`;
+    dl.innerHTML = html;
+    dl.classList.remove('hidden');
+  } catch (e) { say('statusBox', 'could not read the registry: ' + e.message, true); }
+}
+
+/* ------------------------------------------------------------ wallet */
+async function refreshWallet() {
+  const id = Number(await eth().request({ method: 'eth_chainId' }));
+  $('chain').textContent = id === CHAIN_ID ? `Molibra (${id})` : `chain ${id} — NOT Molibra`;
+  if (account && id === CHAIN_ID) {
+    $('bal').textContent = (Number(BigInt(await rpc('eth_getBalance', [account, 'latest']))) / 1e18).toLocaleString() + ' MOLI';
+  }
+  return id;
+}
+$('addNet').onclick = async () => {
+  try {
+    // ⛔ No blockExplorerUrls: see connect.html - the wallet would build dead links from it.
+    await eth().request({ method: 'wallet_addEthereumChain', params: [{
+      chainId: CHAIN_HEX, chainName: 'Molibra',
+      nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
+      rpcUrls: [NODE] }] });
+    await refreshWallet();
+  } catch (e) { say('walletLog', e.message, true); }
+};
+$('connect').onclick = async () => {
+  try {
+    account = (await eth().request({ method: 'eth_requestAccounts' }))[0];
+    $('acct').textContent = account;
+    if (!$('signers').value.trim()) $('signers').value = account;
+    await refreshWallet();
+    say('walletLog', 'connected — nothing is sent until you sign it');
+  } catch (e) { say('walletLog', e.message, true); }
+};
+async function requireMolibra() {
+  if (!account) throw new Error('connect the wallet first (3)');
+  if (await refreshWallet() === CHAIN_ID) return;
+  await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN_HEX }] });
+  if (await refreshWallet() !== CHAIN_ID) throw new Error('still not on Molibra');
+}
+async function send(tx, logId, label) {
+  await requireMolibra();
+  say(logId, label + '\nawaiting your signature in the wallet…');
+  const hash = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, ...tx }] });
+  say(logId, label + '\nsent ' + hash + '\nwaiting for a block…');
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+    if (r) {
+      say(logId, r.status === '0x1' ? `⭐ mined in block ${BigInt(r.blockNumber)} · tx ${hash}` : `⛔ reverted: ${hash}`, r.status !== '0x1');
+      return r;
+    }
+  }
+  throw new Error('not mined within 5 minutes — tx ' + hash);
+}
+const needHash = () => {
+  const h = $('hash').value.trim().toLowerCase();
+  if (!isHash(h)) throw new Error('choose the file first (1)');
+  if (!registry()) throw new Error('no registry configured yet');
+  return h;
+};
+
+/* ------------------------------------------------------------ actions */
+$('register').onclick = async () => {
+  try {
+    const h = needHash();
+    const label = $('label').value.trim();
+    if (!label) throw new Error('give it a label');
+    await requireMolibra();
+    let signers = $('signers').value.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+    if (!signers.length) signers = [account];
+    const badS = signers.find((s) => !isAddr(s));
+    if (badS) throw new Error('not an address: ' + badS);
+    // Refuse before the wallet does: a register that reverts still costs gas.
+    const already = await numberOf(h);
+    if (already !== 0n) throw new Error(`this file is already registered, as record #${already} — see 2`);
+    const r = await send({ to: registry(), data: encRegister(h, label, signers), gas: '0x7a120' },   // 500,000
+      'registerLog', `Register "${label}" with ${signers.length} signer(s)`);
+    if (r.status === '0x1') {
+      const log = (r.logs || []).find((l) => l.topics && l.topics[0] === REGISTERED_TOPIC);
+      const n = log ? BigInt(log.topics[2]) : null;
+      say('registerLog', `⭐ registered${n !== null ? ' as record #' + n : ''} · tx ${r.transactionHash}`
+        + (signers.map((x) => x.toLowerCase()).includes(account.toLowerCase()) ? '\nNow sign it (5).' : ''));
+    }
+    await showStatus(); await showList();
+  } catch (e) { say('registerLog', e.message, true); }
+};
+
+$('sign').onclick = async () => {
+  try {
+    const h = needHash();
+    await requireMolibra();
+    if (await numberOf(h) === 0n) throw new Error('register it first (4)');
+    const s = decStatus(await call(SEL.status + h.slice(2)));
+    const i = s.signers.findIndex((a) => a.toLowerCase() === account.toLowerCase());
+    if (i < 0) throw new Error('the connected wallet is not one of the named signers');
+    if (s.signedTimes[i]) throw new Error('this wallet already signed it, ' + when(s.signedTimes[i]));
+    await send({ to: registry(), data: SEL.sign + h.slice(2), gas: '0x30d40' },   // 200,000
+      'signLog', `Sign "${s.label}"`);
+    await showStatus(); await showList();
+  } catch (e) { say('signLog', e.message, true); }
+};
+
+$('revoke').onclick = async () => {
+  try {
+    const h = needHash();
+    await requireMolibra();
+    if (await numberOf(h) === 0n) throw new Error('not registered');
+    const s = decStatus(await call(SEL.status + h.slice(2)));
+    if (!confirm(`Revoke "${s.label}"?\n\nThe record stays on Molibra forever, marked revoked by your wallet. `
+      + 'Nobody can sign it after this, and it cannot be undone.')) return;
+    await send({ to: registry(), data: SEL.revoke + h.slice(2), gas: '0x30d40' }, 'signLog', `Revoke "${s.label}"`);
+    await showStatus(); await showList();
+  } catch (e) { say('signLog', e.message, true); }
+};
+
+$('deploy').onclick = async () => {
+  try {
+    if (REGISTRY_BYTECODE.indexOf('0x') !== 0) throw new Error('no bytecode built into this page');
+    // ⛔⛔ Gas set EXPLICITLY - see swap.html: a node that does not simulate
+    // creates answers with the calldata cost alone.
+    const r = await send({ data: REGISTRY_BYTECODE, gas: '0x16e360' }, 'deployLog',   // 1,500,000
+      'Deploy DocumentRegistry');
+    if (r.status === '0x1') {
+      say('deployLog', `⭐ DocumentRegistry at ${r.contractAddress}\nReloading with ?registry=${r.contractAddress}`);
+      params.set('registry', r.contractAddress);
+      setTimeout(() => { location.search = params.toString(); }, 1500);
+    }
+  } catch (e) { say('deployLog', e.message, true); }
+};
+
+/* ------------------------------------------------------------ the list */
+async function showList() {
+  const r = registry();
+  $('regAddr').textContent = r || 'not deployed yet';
+  $('deployBox').classList.toggle('hidden', !!r);
+  if (!r) { $('regCount').textContent = '—'; return; }
+  try {
+    const n = Number(BigInt(await call(SEL.count)));
+    $('regCount').textContent = n.toLocaleString();
+    const body = $('list').querySelector('tbody');
+    body.innerHTML = '';
+    for (let i = 1; i <= Math.min(n, 50); i++) {
+      const h = '0x' + words(await call(SEL.hashAt + word(i)))[0];
+      const s = decStatus(await call(SEL.status + h.slice(2)));
+      const signed = s.signedTimes.filter((t) => t > 0n).length;
+      const tr = document.createElement('tr');
+      tr.className = 'pick';
+      const cells = [String(i), s.label, h.slice(0, 18) + '…',
+        s.revokedAt > 0n ? 'revoked' : `${signed}/${s.signers.length}`];
+      cells.forEach((c, j) => { const td = document.createElement('td'); td.textContent = c; if (j === 2) td.className = 'mono'; tr.appendChild(td); });
+      tr.onclick = () => { $('hash').value = h; showStatus(); window.scrollTo(0, 0); };
+      body.appendChild(tr);
+    }
+    $('list').classList.toggle('hidden', n === 0);
+    say('listLog', n === 0 ? 'no records yet — the first one registered here is #1, forever' : '');
+  } catch (e) { say('listLog', 'could not read the registry: ' + e.message, true); }
+}
+
+/* Everything specific to one run comes from the URL, never a hand-edit. */
+if (params.get('hash')) $('hash').value = params.get('hash');
+if (params.get('label')) $('label').value = params.get('label');
+if (params.get('signers')) $('signers').value = params.get('signers').split(',').join('\n');
+showList();
+showStatus();
+</script>

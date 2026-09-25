@@ -607,7 +607,7 @@ async function handleAudit(node, req, res) {
         returnVault: MOLI_RETURN_ADDRESS,
         returnsFrom: BRIDGE_V2_ACTIVATION.toString(),
       },
-      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli', '/molibra/return', '/molibra/download'],
+      endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli', '/molibra/return', '/molibra/documents', '/molibra/download'],
     });
   }
 
@@ -996,6 +996,17 @@ async function handleAudit(node, req, res) {
   /** An installed miner's own status page (the desktop shortcut opens it). */
   if (path === '/molibra/miner') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'miner.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * Document registry: hash a file in the browser, then register / sign / check
+   * it against DocumentRegistry. The file never leaves the browser.
+   */
+  if (path === '/molibra/documents') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'documents.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
