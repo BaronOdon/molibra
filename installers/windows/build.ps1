@@ -10,7 +10,7 @@
   4. ⛔ scan the output with Microsoft Defender and refuse to publish anything it flags;
   5. write SHA256SUMS entries for the release.
 #>
-param([string]$Iscc = 'ISCC.exe', [string]$Version = '1.0.0')
+param([string]$Iscc = 'ISCC.exe', [string]$Version = '1.0.0', [int]$WindowVersion = 2)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -81,6 +81,9 @@ $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
   /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $Repo 'installers\app\windows\MolibraMiner.cs')
 if ($LASTEXITCODE -ne 0) { throw 'the Molibra Miner window did not compile' }
 Write-Host "window   Molibra Miner.exe compiled"
+# The window's version, for its self-update (installers/app/windows/window.json).
+Set-Content -Path (Join-Path $Stage 'window-version.txt') -Value $WindowVersion -Encoding ASCII -NoNewline
+Copy-Item (Join-Path $Stage 'Molibra Miner.exe') (Join-Path $Dist 'Molibra-Miner-Window.exe') -Force
 
 # ---- 3. compile
 & $Iscc "/DAppVersion=$Version" /Q (Join-Path $Here 'molibra-miner.iss')

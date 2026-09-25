@@ -37,6 +37,17 @@ import { gunzipSync } from 'node:zlib';
 import { setPriority } from 'node:os';
 import { createServer } from 'node:http';
 
+/**
+ * ⛔⛔ This supervisor's own version. Self-update copies a supervisor out of
+ * app/ ONLY when that copy's version is HIGHER than this one. Without it, 1.0.1
+ * "updated" itself BACKWARDS on the first independent miner's laptop (25 Sep
+ * 2026): app/ still held a stale copy from 1.0.0's last update, 1.0.1 installed
+ * over it without clearing it, and the new supervisor replaced itself with the
+ * old one - no status service, and a second supervisor fighting the first.
+ * Bump this whenever this file changes.
+ */
+const LAUNCHER_VERSION = 3;
+
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const APP = join(ROOT, 'app');
 const LOGS = join(ROOT, 'logs');
@@ -155,22 +166,44 @@ function swapIn(stage) {
  * differ. Returns true when the supervisor itself changed and must restart.
  */
 function refreshSelf() {
-  let restart = false;
-  for (const name of ['molibra-miner.mjs', 'status.html']) {
-    const src = join(APP, 'installers', 'launcher', name);
-    const dst = join(ROOT, name);
-    try {
-      const fresh = readFileSync(src);
-      let current = null;
-      try { current = readFileSync(dst); } catch { /* first time */ }
-      if (!current || !fresh.equals(current)) {
-        writeFileSync(dst, fresh);
-        log(`${name} updated`);
-        if (name === 'molibra-miner.mjs') restart = true;
-      }
-    } catch { /* this version does not ship it */ }
-  }
-  return restart;
+  const dir = join(APP, 'installers', 'launcher');
+  let candidate;
+  try { candidate = readFileSync(join(dir, 'molibra-miner.mjs')); } catch { return false; }
+  // A copy with no version is older than every versioned one: never adopted.
+  const theirs = Number(candidate.toString('utf8').match(/const LAUNCHER_VERSION = (\d+);/)?.[1] ?? 0);
+  if (theirs <= LAUNCHER_VERSION) return false;
+  writeFileSync(join(ROOT, 'molibra-miner.mjs'), candidate);
+  try { writeFileSync(join(ROOT, 'status.html'), readFileSync(join(dir, 'status.html'))); } catch { /* optional */ }
+  log(`supervisor updated: version ${LAUNCHER_VERSION} -> ${theirs}`);
+  return true;
+}
+
+/**
+ * Windows: keep "Molibra Miner.exe" (the window) current as well. The manifest
+ * installers/app/windows/window.json, at the commit the public node runs, names
+ * the published exe and its SHA-256; a file whose hash differs is refused. A
+ * running exe cannot be overwritten but CAN be renamed, so the old one steps
+ * aside and the next launch is the new one.
+ */
+async function refreshWindow(commit) {
+  if (process.platform !== 'win32' || !commit) return;
+  try {
+    const m = await (await fetch(`https://raw.githubusercontent.com/BaronOdon/molibra/${commit}/installers/app/windows/window.json`,
+      { signal: AbortSignal.timeout(20_000) })).json();
+    const vf = join(ROOT, 'window-version.txt');
+    const have = Number((() => { try { return readFileSync(vf, 'utf8'); } catch { return '0'; } })());
+    if (!(Number(m.version) > have) || !/^[0-9a-f]{64}$/.test(m.sha256 ?? '')) return;
+    const bytes = Buffer.from(await (await fetch(m.url, { signal: AbortSignal.timeout(120_000) })).arrayBuffer());
+    const { createHash } = await import('node:crypto');
+    const got = createHash('sha256').update(bytes).digest('hex');
+    if (got !== m.sha256) { log(`window update refused: hash ${got} is not ${m.sha256}`); return; }
+    const exe = join(ROOT, 'Molibra Miner.exe');
+    rmSync(exe + '.old', { force: true });
+    if (existsSync(exe)) renameSync(exe, exe + '.old');
+    writeFileSync(exe, bytes);
+    writeFileSync(vf, String(m.version));
+    log(`window updated to version ${m.version}`);
+  } catch (e) { log(`window update skipped: ${e.message}`); }
 }
 
 /** Restart this supervisor on its new code, the way each platform allows. */
@@ -492,7 +525,9 @@ try {
     }
     if (restart) await restartSelf();
     startNode();
+    refreshWindow(installedCommit());
     setInterval(() => {
+      refreshWindow(installedCommit());
       updateIfNeeded({ running: true })
         .then(async (changed) => { if (changed === 'restart') await restartSelf(); else if (changed) startNode(); })
         .catch((e) => { log(`update failed, still on the old version: ${e.message}`); if (!child) startNode(); });

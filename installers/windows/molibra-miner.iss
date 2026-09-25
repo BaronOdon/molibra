@@ -55,6 +55,7 @@ Source: "stage\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion
 Source: "stage\molibra-miner.mjs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\status.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\Molibra Miner.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "stage\window-version.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; "Molibra Miner" is the miner's own application window: native, not a browser.
@@ -92,6 +93,12 @@ Type: files; Name: "{app}\not-running.html"
 Type: files; Name: "{userdesktop}\Molibra Miner - Status.url"
 
 [InstallDelete]
+; ⛔ A clean app/ every install. An update used to leave the previous version's
+;    files beside the new ones - including a stale supervisor that 1.0.1 then
+;    "updated" itself back to (the first independent miner, 25 Sep 2026).
+Type: filesandordirs; Name: "{app}\app"
+Type: filesandordirs; Name: "{app}\app-new"
+Type: filesandordirs; Name: "{app}\app-old"
 Type: files; Name: "{userdesktop}\Molibra Miner - Status.url"
 Type: files; Name: "{group}\Molibra Miner - Status.url"
 
@@ -173,15 +180,41 @@ end;
 
 // ⛔ Stop the running miner BEFORE files are replaced: its node.exe is in use
 //    and Windows would refuse to overwrite it halfway through the update.
+// Every node.exe running from THIS install's runtime folder - supervisors and
+// nodes alike, however many a broken update left behind - and nothing else.
+// Asked of Windows' own process list (WMI), not of PID files that can be stale.
+procedure StopOurNodes(App: String);
+var Locator, Wmi, List, P: Variant; I: Integer; Path: String;
+begin
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Locator.ConnectServer('.', 'root\CIMV2');
+    List := Wmi.ExecQuery('SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE Name = ''node.exe''');
+    for I := 0 to List.Count - 1 do begin
+      P := List.ItemIndex(I);
+      Path := '';
+      try Path := P.ExecutablePath; except end;
+      if (Path <> '') and (Pos(Lowercase(App + '\runtime\'), Lowercase(Path)) = 1) then
+        P.Terminate();
+    end;
+  except
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then StopOurNodes(ExpandConstant('{app}'));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var Code: Integer; App: String;
 begin
   Result := '';
   App := ExpandConstant('{localappdata}\Molibra');
   Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "{#TaskName}"', '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if FileExists(App + '\runtime\node.exe') and FileExists(App + '\molibra-miner.mjs') then
-    Exec(App + '\runtime\node.exe', '"' + App + '\molibra-miner.mjs" stop', App, SW_HIDE, ewWaitUntilTerminated, Code);
+  StopOurNodes(App);
   Sleep(2000);
+  StopOurNodes(App);   // anything a dying supervisor restarted in between
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
