@@ -78,3 +78,4 @@ installers/mac/out/
 # OpenTimestamps proofs are generated daily and upgraded in place.
 # They are evidence to SERVE, not source to version - see ots-stamp.mjs.
 timestamps/
+installers/app/**/*.exe
