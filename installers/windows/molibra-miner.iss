@@ -112,6 +112,8 @@ begin
     'No wallet yet? Leave this empty and a new one will be created for you. Its secret key will be ' +
     'saved in a file on this computer, and you will be shown where.');
   WalletPage.Add('Wallet address (optional):', False);
+  // A scripted or managed install can name the wallet: Molibra-Miner-Setup.exe /WALLET=0x...
+  WalletPage.Values[0] := ExpandConstant('{param:WALLET|}');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -132,6 +134,9 @@ end;
 function WalletArg(Param: String): String;
 begin
   Result := Trim(WalletPage.Values[0]);
+  // ⛔ Checked again here, because a silent install never shows the page that
+  //    validates it: a malformed /WALLET= must not reach the command line.
+  if (Result <> '') and not IsAddress(Result) then Result := '';
 end;
 
 function JsonField(Json, Name: String): String;
