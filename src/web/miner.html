@@ -77,7 +77,19 @@ async function tick() {
   $('network').textContent = n === null ? 'cannot reach molibra.org' : n.toLocaleString();
   if (wallet) {
     $('wallet').textContent = wallet;
-    $('balance').textContent = fmt(await rpc('eth_getBalance', [wallet, 'latest'])) + ' MOLI';
+    // ⛔ The NETWORK's balance, not this node's: while catching up, the local
+    //    copy is the chain as it was at some past height, and its balance is
+    //    history - on the first test it showed a figure from block 18,143.
+    let bal = null;
+    try {
+      bal = (await (await fetch('https://molibra.org', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [wallet, 'latest'] }),
+      })).json()).result;
+    } catch { /* offline: fall back to this node's view, labelled as such */ }
+    $('balance').textContent = bal
+      ? fmt(bal) + ' MOLI'
+      : fmt(await rpc('eth_getBalance', [wallet, 'latest'])) + ' MOLI (as of block ' + h.toLocaleString() + ' here)';
     $('explorer').href = 'https://molibra.org/molibra/moliscan/address/' + wallet;
     $('explorer').textContent = 'your wallet on molibra.org';
   }
