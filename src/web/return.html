@@ -133,6 +133,10 @@ const fmt = (wei) => (Number(wei) / 1e18).toLocaleString(undefined, { maximumFra
 const word = (v) => BigInt(v).toString(16).padStart(64, '0');
 let account = null;
 let outstanding = null;
+// ⛔ Below the flag day a return is ordinary data: it reaches the EVM as a
+// call to PAYLOAD_TO, reverts, and the fee is spent for nothing. The button
+// stays locked until the chain says the rule is live.
+let returnsLive = false;
 
 const params = new URLSearchParams(location.search);
 if (params.get('commit')) $('commitData').value = params.get('commit');
@@ -153,8 +157,10 @@ $('refresh').onclick = async () => {
     const o = n.outbound ?? {};
     outstanding = BigInt(o.outstanding ?? o.burned ?? 0);
     const from = BigInt(o.returnsFrom ?? 118000);
+    returnsLive = BigInt(n.height) >= from;
     $('from').textContent = `Molibra block ${from.toLocaleString()}`
-      + (BigInt(n.height) >= from ? ' — live' : ` — ${(from - BigInt(n.height)).toLocaleString()} blocks to go`);
+      + (returnsLive ? ' — live' : ` — ${(from - BigInt(n.height)).toLocaleString()} blocks to go`);
+    gate();
     const [supply, inVault] = await Promise.all([
       ethCall(TOTAL_SUPPLY), ethCall(BALANCE_OF + word(VAULT)),
     ]);
@@ -298,13 +304,17 @@ $('commit').onclick = async () => {
   catch (e) { say('commitLog', e.message, true); }
 };
 $('ret').onclick = async () => {
-  try { await sendNative($('retData').value, 'retLog', 'MOLI_RETURN'); }
+  try {
+    if (!returnsLive) throw new Error('returns are honoured from block 118,000; sent now it would only burn its fee');
+    await sendNative($('retData').value, 'retLog', 'MOLI_RETURN');
+  }
   catch (e) { say('retLog', e.message, true); }
 };
 
-const gate = () => {
+function gate() {
   $('commit').disabled = !/^0x[0-9a-f]+$/i.test($('commitData').value.trim());
-  $('ret').disabled = !/^0x[0-9a-f]+$/i.test($('retData').value.trim());
-};
+  $('ret').disabled = !returnsLive || !/^0x[0-9a-f]+$/i.test($('retData').value.trim());
+  $('ret').textContent = returnsLive ? 'Return — release the MOLI' : 'Return — locked until block 118,000';
+}
 $('commitData').oninput = gate; $('retData').oninput = gate; gate();
 </script>
