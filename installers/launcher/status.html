@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molibra Miner</title>
+<!--
+  The Molibra Miner window. Served by the SUPERVISOR on 127.0.0.1:20227 from
+  its first second - not by the node, whose RPC only exists once the chain is
+  loaded. Opened in an app-style window by `molibra-miner.mjs window`.
+  It reads; it never signs, sends or asks for a key.
+-->
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--ok:#4ade80;--bad:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:20px 16px;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:640px;margin:0 auto}
+  h1{font-size:20px;margin:0;color:var(--gold);letter-spacing:.06em}
+  .sub{color:var(--dim);font-size:13px;margin:2px 0 16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+  .state{font-size:22px;font-weight:700} .ok{color:var(--ok)} .wait{color:var(--gold)} .bad{color:var(--bad)}
+  .detail{color:var(--dim);margin-top:4px;font-size:14px}
+  .bar{height:10px;background:#222;border-radius:6px;overflow:hidden;margin-top:12px}
+  .bar i{display:block;height:100%;background:var(--gold);width:0;transition:width .6s}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:14px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
+  .big{font-size:20px;color:var(--gold);font-weight:700}
+  pre{background:#0e0e10;border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0 0;
+      font-size:11.5px;white-space:pre-wrap;word-break:break-all;color:var(--dim);max-height:180px;overflow:auto}
+  a{color:var(--gold)} details summary{cursor:pointer;color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⛏ MOLIBRA MINER</h1>
+  <div class="sub">Running on this computer · this window updates by itself · closing it does not stop mining</div>
+
+  <div class="card">
+    <div class="state wait" id="state">Connecting…</div>
+    <div class="detail" id="detail"></div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="detail" id="eta"></div>
+  </div>
+
+  <div class="card">
+    <dl>
+      <dt>Balance</dt><dd class="big" id="balance">—</dd>
+      <dt>Blocks found here</dt><dd id="found">—</dd>
+      <dt>Your wallet</dt><dd id="wallet">—</dd>
+      <dt>Blocks on this computer</dt><dd id="height">—</dd>
+      <dt>Blocks on the network</dt><dd id="network">—</dd>
+    </dl>
+    <div class="detail" style="margin-top:10px" id="explorerLine"></div>
+  </div>
+
+  <div class="card">
+    <div class="detail" style="margin:0">Mining runs in the background: it starts with the computer and keeps going after you log out.
+      It uses about one processor core at low priority. A sleeping computer does not mine.
+      How many blocks you find depends on your share of all the computers mining; the first can take a while.
+      Nothing here promises any amount or value.</div>
+    <details style="margin-top:10px"><summary>Technical details</summary><pre id="log">—</pre></details>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (wei) => (Number(BigInt(wei)) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 4 });
+const LABEL = {
+  starting: ['Starting…', 'wait'], updating: ['Updating…', 'wait'], loading: ['Loading…', 'wait'],
+  'catching-up': ['Catching up', 'wait'], mining: ['⛏ Mining', 'ok'], problem: ['Problem', 'bad'],
+};
+let firstSeen = null;
+
+async function tick() {
+  let s;
+  try { s = await (await fetch('/status', { cache: 'no-store' })).json(); }
+  catch {
+    $('state').textContent = 'The miner is not answering'; $('state').className = 'state bad';
+    $('detail').textContent = 'It may be restarting. If this lasts more than a few minutes, restart the computer; it starts by itself.';
+    return;
+  }
+  const [label, cls] = LABEL[s.phase] ?? [s.phase, 'wait'];
+  let net = null;
+  try { net = await (await fetch('https://molibra.org/molibra', { cache: 'no-store' })).json(); } catch { /* offline */ }
+  const n = net ? Number(net.height) : s.networkHeight;
+  const h = s.height;
+  const pct = s.mining ? 100 : (h && n ? Math.min(99, Math.floor(100 * h / n)) : 0);
+  $('state').textContent = s.phase === 'catching-up' ? `${label} — ${pct}%` : label;
+  $('state').className = 'state ' + cls;
+  $('detail').textContent = s.error && s.phase === 'problem' ? `${s.detail} (${s.error})` : s.detail;
+  $('bar').style.width = pct + '%';
+  if (s.phase === 'catching-up' && h) {
+    const now = Date.now();
+    firstSeen ??= { t: now, h };
+    const rate = (h - firstSeen.h) / ((now - firstSeen.t) / 60000);
+    $('eta').textContent = rate > 50 && n ? `About ${Math.max(1, Math.round((n - h) / rate))} minutes left` : '';
+  } else $('eta').textContent = '';
+  $('height').textContent = h ? h.toLocaleString() : '—';
+  $('network').textContent = n ? n.toLocaleString() : 'cannot reach molibra.org';
+  $('found').textContent = s.minedThisSession.length
+    ? `${s.minedThisSession.length} since the miner started (latest #${s.minedThisSession.at(-1).height.toLocaleString()})`
+    : (s.mining ? 'none yet — keep it running' : 'mining has not started yet');
+  if (s.miner) {
+    $('wallet').textContent = s.miner;
+    $('explorerLine').innerHTML = `<a href="https://molibra.org/molibra/moliscan/address/${s.miner}" target="_blank">See your wallet on molibra.org</a>`;
+    try {
+      const r = await (await fetch('https://molibra.org', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [s.miner, 'latest'] }),
+      })).json();
+      $('balance').textContent = fmt(r.result) + ' MOLI';
+    } catch { $('balance').textContent = 'cannot reach molibra.org'; }
+  }
+  $('log').textContent = [...s.log, '', ...s.nodeLog].join('\n') + `\n\nversion ${s.commit?.slice(0, 7) ?? '?'} · since ${s.startedAt}`;
+}
+tick();
+setInterval(tick, 3000);
+</script>
+</body>
+</html>

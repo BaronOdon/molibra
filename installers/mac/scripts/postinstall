@@ -47,7 +47,7 @@ launchctl bootout "system/$LABEL" 2>/dev/null || true
 
 # ---- 1. files (keeping chain data, config and any wallet)
 mkdir -p "$ROOT/logs"
-cp -f "$PAYLOAD/molibra-miner.mjs" "$ROOT/"
+cp -f "$PAYLOAD/molibra-miner.mjs" "$PAYLOAD/status.html" "$ROOT/"
 rm -rf "$ROOT/app-staged" && cp -R "$PAYLOAD/app" "$ROOT/app-staged"
 if [ -f "$ROOT/app/COMMIT" ]; then rm -rf "$ROOT/app-staged"; else rm -rf "$ROOT/app"; mv "$ROOT/app-staged" "$ROOT/app"; fi
 
@@ -126,5 +126,6 @@ elif grep -q '"created": *true' "$SUMMARY" 2>/dev/null; then
 else
   dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nYour MOLI goes to:\n$MINER\n\nThe first start downloads the chain (about 30 to 60 minutes); mining begins by itself after that."
 fi
-[ "$QUIET" = "1" ] || as_user open "http://127.0.0.1:20226/molibra/miner" || true
+# The Molibra Miner window: waits for the miner and shows its state (never a browser error).
+[ "$QUIET" = "1" ] || (as_user "$NODE" "$ROOT/molibra-miner.mjs" window >/dev/null 2>&1 &) || true
 exit 0

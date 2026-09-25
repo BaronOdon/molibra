@@ -51,12 +51,13 @@ LicenseFile=..\..\LICENSE
 Source: "stage\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignoreversion
 Source: "stage\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion
 Source: "stage\molibra-miner.mjs"; DestDir: "{app}"; Flags: ignoreversion
-
-[INI]
-Filename: "{userdesktop}\Molibra Miner - Status.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://127.0.0.1:20226/molibra/miner"
-Filename: "{group}\Molibra Miner - Status.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://127.0.0.1:20226/molibra/miner"
+Source: "stage\status.html"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
+; "Molibra Miner" opens the miner's own window. It waits for the miner, starts it
+; if it is not running, and shows the reason if it cannot - never a browser error.
+Name: "{userdesktop}\Molibra Miner"; Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" window"; WorkingDir: "{app}"; Flags: runminimized; Comment: "Molibra Miner status"
+Name: "{group}\Molibra Miner"; Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" window"; WorkingDir: "{app}"; Flags: runminimized; Comment: "Molibra Miner status"
 Name: "{group}\Uninstall Molibra Miner"; Filename: "{uninstallexe}"
 
 [Run]
@@ -66,7 +67,7 @@ Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" ini
 Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" taskxml"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\schtasks.exe"; Parameters: "/Create /TN ""{#TaskName}"" /XML ""{app}\task.xml"" /F"; Flags: runhidden waituntilterminated; StatusMsg: "Registering Molibra Miner to start with Windows..."
 Filename: "{sys}\schtasks.exe"; Parameters: "/Run /TN ""{#TaskName}"""; Flags: runhidden waituntilterminated
-Filename: "http://127.0.0.1:20226/molibra/miner"; Description: "Open the Molibra Miner status page"; Flags: postinstall shellexec nowait skipifsilent
+Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" window"; WorkingDir: "{app}"; Description: "Open Molibra Miner"; Flags: postinstall nowait runhidden skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#TaskName}"" /F"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteTask"
@@ -83,7 +84,13 @@ Type: filesandordirs; Name: "{app}\logs"
 Type: files; Name: "{app}\task.xml"
 Type: files; Name: "{app}\*.pid"
 Type: files; Name: "{app}\install-summary.json"
+Type: files; Name: "{app}\not-running.html"
+; 1.0.0 put a browser shortcut on the desktop; remove it on upgrade or uninstall.
 Type: files; Name: "{userdesktop}\Molibra Miner - Status.url"
+
+[InstallDelete]
+Type: files; Name: "{userdesktop}\Molibra Miner - Status.url"
+Type: files; Name: "{group}\Molibra Miner - Status.url"
 
 [Code]
 var
@@ -170,13 +177,13 @@ begin
           'Its secret key is saved in:' + #13#10 + WalletFile + #13#10 +
           'BACK UP THAT FILE. If it is lost, the MOLI in the wallet is lost with it.' + #13#10#13#10 +
           'The first start downloads the chain (about 30 to 60 minutes). Mining begins by itself after that. ' +
-          'Open "Molibra Miner - Status" on your desktop to watch it.'
+          'The Molibra Miner window opens now; the "Molibra Miner" icon on your desktop brings it back.'
       else
         WizardForm.FinishedLabel.Caption :=
           'Molibra Miner is running in the background. It starts with Windows and keeps going after you log off.' + #13#10#13#10 +
           'Your MOLI goes to:' + #13#10 + Miner + #13#10#13#10 +
           'The first start downloads the chain (about 30 to 60 minutes). Mining begins by itself after that. ' +
-          'Open "Molibra Miner - Status" on your desktop to watch it.';
+          'The Molibra Miner window opens now; the "Molibra Miner" icon on your desktop brings it back.';
       WizardForm.FinishedLabel.AutoSize := False;
       WizardForm.FinishedLabel.Height := ScaleY(230);
     end;

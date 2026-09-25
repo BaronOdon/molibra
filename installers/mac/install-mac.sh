@@ -15,4 +15,4 @@ spctl --assess --type install "$PKG" || { echo "This package is not accepted by 
 echo "Installing (your Mac password is needed once)..."
 sudo installer -pkg "$PKG" -target / </dev/tty
 rm -f "$PKG"
-echo "Done. Molibra Miner is running; open http://127.0.0.1:20226/molibra/miner to watch it."
+echo 'Done. Molibra Miner is running. Applications > Molibra Miner > "Molibra Miner" shows its progress.'

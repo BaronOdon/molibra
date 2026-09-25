@@ -60,7 +60,17 @@ Push-Location (Join-Path $Stage 'app')
 if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
 Pop-Location
 Set-Content -Path (Join-Path $Stage 'app\COMMIT') -Value $commit -Encoding ASCII
-Copy-Item (Join-Path $Repo 'installers\launcher\molibra-miner.mjs') $Stage
+# From git, not the working tree: byte-identical (LF) to what the self-update
+# later fetches, so an install does not restart itself once over line endings.
+# ⛔ git archive, never `git show | Out-String`: PowerShell 5.1 re-encodes native
+#    output through the console code page and would corrupt every non-ASCII byte.
+$ltar = Join-Path $env:TEMP 'molibra-launcher.tar'
+git -C $Repo archive --format=tar -o $ltar HEAD installers/launcher/molibra-miner.mjs installers/launcher/status.html
+& (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $ltar -C $Stage --strip-components 2
+Remove-Item $ltar
+foreach ($f in 'molibra-miner.mjs', 'status.html') {
+  if (-not (Test-Path (Join-Path $Stage $f))) { throw "staged $f is missing" }
+}
 Write-Host "app      $($commit.Substring(0,7))"
 
 # ---- 3. compile

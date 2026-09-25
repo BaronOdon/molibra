@@ -26,12 +26,13 @@ APPS="$ROOTFS/Applications/Molibra Miner"
 mkdir -p "$PAY/app" "$APPS"
 tar -xf "$APP_TAR" -C "$PAY/app"
 cp "$LAUNCHER" "$PAY/molibra-miner.mjs"
+cp "$(dirname "$LAUNCHER")/status.html" "$PAY/status.html"
 cp "$HERE/Uninstall Molibra Miner.command" "$APPS/"
 chmod 755 "$APPS/Uninstall Molibra Miner.command"
-cat > "$APPS/Molibra Miner - Status.webloc" <<'W'
+cat > "$APPS/Molibra Miner.webloc" <<'W'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>URL</key><string>http://127.0.0.1:20226/molibra/miner</string></dict></plist>
+<plist version="1.0"><dict><key>URL</key><string>http://127.0.0.1:20227/</string></dict></plist>
 W
 mkdir -p "$WORK/scripts"
 cp "$HERE/scripts/postinstall" "$WORK/scripts/postinstall"

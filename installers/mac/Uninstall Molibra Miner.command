@@ -9,7 +9,8 @@ sudo launchctl bootout system/org.molibra.miner 2>/dev/null
 sudo rm -f /Library/LaunchDaemons/org.molibra.miner.plist
 [ -f "$ROOT/molibra-miner.mjs" ] && [ -x "$ROOT/runtime/bin/node" ] && "$ROOT/runtime/bin/node" "$ROOT/molibra-miner.mjs" stop >/dev/null 2>&1
 rm -rf "$ROOT/app" "$ROOT/app-new" "$ROOT/app-old" "$ROOT/runtime" "$ROOT/data" "$ROOT/logs" \
-       "$ROOT"/*.pid "$ROOT/install-summary.json" "$ROOT/molibra-miner.mjs"
+       "$ROOT"/*.pid "$ROOT/install-summary.json" "$ROOT/molibra-miner.mjs" \
+       "$ROOT/status.html" "$ROOT/not-running.html"
 sudo rm -rf "/Library/Application Support/Molibra Miner" "/Applications/Molibra Miner"
 sudo pkgutil --forget org.molibra.miner >/dev/null 2>&1
 echo
