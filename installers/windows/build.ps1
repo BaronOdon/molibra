@@ -75,6 +75,12 @@ Write-Host "app      $($commit.Substring(0,7))"
 
 # ---- 2b. the application window: native, compiled here from readable source by
 #          the C# compiler that ships with Windows - no third-party libraries.
+# ⛔ Refuse mojibake. 1.0.2's window showed "Loadingâ€¦" because the source was
+#    once round-tripped through PowerShell 5.1, which reads BOM-less UTF-8 as ANSI.
+#    Node reads it as UTF-8 and counts the tell-tale sequences.
+$cs = Join-Path $Repo 'installers\app\windows\MolibraMiner.cs'
+$bad = & (Join-Path $Stage 'runtime\node.exe') -e "const s=require('fs').readFileSync(process.argv[1],'utf8');console.log((s.match(/â[\u0080-¿€™“”›]|Ã[\u0080-¿]/g)||[]).length)" $cs
+if ([int]$bad -ne 0) { throw "MolibraMiner.cs contains $bad mis-encoded character sequence(s) - fix the source before building" }
 $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 & (Join-Path $fw 'csc.exe') /nologo /target:winexe /optimize+ /codepage:65001 "/out:$(Join-Path $Stage 'Molibra Miner.exe')" `
   "/win32icon:$(Join-Path $Repo 'installers\app\molibra.ico')" /reference:System.Web.Extensions.dll /reference:System.Numerics.dll `

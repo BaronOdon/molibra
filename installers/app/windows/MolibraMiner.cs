@@ -1,4 +1,4 @@
-﻿// Molibra Miner - the application window (Windows).
+// Molibra Miner - the application window (Windows).
 //
 // A native Windows Forms program, compiled by the C# compiler that ships with
 // Windows (.NET Framework 4.x), with no third-party libraries. It only READS:
@@ -27,8 +27,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyProduct("Molibra Miner")]
 [assembly: System.Reflection.AssemblyCompany("Molibra")]
 [assembly: System.Reflection.AssemblyDescription("Shows the Molibra Miner's progress")]
-[assembly: System.Reflection.AssemblyVersion("1.0.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
 
 namespace Molibra
 {
@@ -79,12 +79,12 @@ namespace Molibra
             StartPosition = FormStartPosition.CenterScreen;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-            var title = L("â›  MOLIBRA MINER", 16f, FontStyle.Bold, Gold); title.SetBounds(20, 16, 500, 32);
-            var sub = L("Runs in the background Â· closing this window does not stop mining", 9f, FontStyle.Regular, Dim);
+            var title = L("⛏  MOLIBRA MINER", 16f, FontStyle.Bold, Gold); title.SetBounds(20, 16, 500, 32);
+            var sub = L("Runs in the background · closing this window does not stop mining", 9f, FontStyle.Regular, Dim);
             sub.SetBounds(22, 50, 520, 20);
 
             var p1 = Card(20, 80, 104);
-            state = L("Connectingâ€¦", 17f, FontStyle.Bold, Gold); state.SetBounds(14, 10, 490, 32); p1.Controls.Add(state);
+            state = L("Connecting…", 17f, FontStyle.Bold, Gold); state.SetBounds(14, 10, 490, 32); p1.Controls.Add(state);
             detail = L("", 9.5f, FontStyle.Regular, Dim); detail.SetBounds(14, 42, 490, 20); p1.Controls.Add(detail);
             bar = new ProgressBar { Style = ProgressBarStyle.Continuous, Maximum = 100 }; bar.SetBounds(14, 66, 490, 12); p1.Controls.Add(bar);
             eta = L("", 9f, FontStyle.Regular, Dim); eta.SetBounds(14, 80, 490, 18); p1.Controls.Add(eta);
@@ -137,7 +137,7 @@ namespace Molibra
         Label Row(Panel p, string name, ref int y, float size = 10f, Color? c = null)
         {
             var n = L(name, 9.5f, FontStyle.Regular, Dim); n.SetBounds(14, y + 2, 170, 22);
-            var v = L("â€”", size, size > 11 ? FontStyle.Bold : FontStyle.Regular, c ?? Ink); v.SetBounds(186, y, 320, size > 11 ? 30 : 24);
+            var v = L("—", size, size > 11 ? FontStyle.Bold : FontStyle.Regular, c ?? Ink); v.SetBounds(186, y, 320, size > 11 ? 30 : 24);
             p.Controls.Add(n); p.Controls.Add(v);
             y += size > 11 ? 36 : 28;
             return v;
@@ -217,7 +217,7 @@ namespace Molibra
             if (!triedStart) { triedStart = true; StartMiner(); }
             // After ~30 s of silence, show the log without being asked: the reason is in it.
             if (++silent > 10) log.Visible = true;
-            state.Text = "Starting the minerâ€¦"; state.ForeColor = Gold;
+            state.Text = "Starting the miner…"; state.ForeColor = Gold;
             detail.Text = "The miner was not running, so it is being started. This can take a minute.";
             var tail = LogTail("miner.log", 12);
             if (tail.Contains("FATAL"))
@@ -240,12 +240,12 @@ namespace Molibra
 
             switch (phase)
             {
-                case "mining": state.Text = "â›  Mining"; state.ForeColor = Ok; break;
-                case "catching-up": state.Text = "Catching up â€” " + pct + "%"; state.ForeColor = Gold; break;
-                case "updating": state.Text = "Updatingâ€¦"; state.ForeColor = Gold; break;
-                case "loading": state.Text = "Loadingâ€¦"; state.ForeColor = Gold; break;
+                case "mining": state.Text = "⛏  Mining"; state.ForeColor = Ok; break;
+                case "catching-up": state.Text = "Catching up — " + pct + "%"; state.ForeColor = Gold; break;
+                case "updating": state.Text = "Updating…"; state.ForeColor = Gold; break;
+                case "loading": state.Text = "Loading…"; state.ForeColor = Gold; break;
                 case "problem": state.Text = "Problem"; state.ForeColor = Bad; break;
-                default: state.Text = "Startingâ€¦"; state.ForeColor = Gold; break;
+                default: state.Text = "Starting…"; state.ForeColor = Gold; break;
             }
             string err = s["error"] as string;
             detail.Text = (s["detail"] as string ?? "") + (phase == "problem" && !string.IsNullOrEmpty(err) ? " (" + err + ")" : "");
@@ -260,12 +260,12 @@ namespace Molibra
             }
             else eta.Text = "";
 
-            height.Text = h > 0 ? h.ToString("#,0") : "â€”";
-            network.Text = n > 0 ? n.ToString("#,0") : "â€”";
+            height.Text = h > 0 ? h.ToString("#,0") : "—";
+            network.Text = n > 0 ? n.ToString("#,0") : "—";
             var mined = s["minedThisSession"] as System.Collections.ArrayList;
             int count = mined == null ? 0 : mined.Count;
             found.Text = count > 0 ? count + " since the miner started"
-                       : (mining ? "none yet â€” keep it running" : "mining has not started yet");
+                       : (mining ? "none yet — keep it running" : "mining has not started yet");
             if (!string.IsNullOrEmpty(miner) && wallet.Text != miner) wallet.Text = miner;
 
             var lines = new List<string>();
