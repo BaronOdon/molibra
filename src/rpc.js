@@ -22,6 +22,26 @@ import { transactionProof, verifyTransactionProof } from './proof.js';
 import { simulate } from './evm.js';
 import { MOLI_BURN_ACTIVATION } from './moliburn.js';
 import { MOLI_RETURN_ADDRESS, BRIDGE_V2_ACTIVATION } from './molireturn.js';
+
+/** The release assets /download/<name> redirects to. Nothing else. */
+const INSTALLER_FILES = ['Molibra-Miner-Setup.exe', 'Molibra-Miner.pkg', 'SHA256SUMS.txt'];
+
+/** The public peers an installed miner follows. */
+const MINER_PEERS = ['http://193.123.191.142:8545', 'http://141.147.99.86:8545'];
+
+/** This checkout's commit, read from .git directly: no git binary needed. */
+function currentCommit() {
+  try {
+    const git = join(dirname(fileURLToPath(import.meta.url)), '..', '.git');
+    const head = readFileSync(join(git, 'HEAD'), 'utf8').trim();
+    if (/^[0-9a-f]{40}$/.test(head)) return head;
+    const ref = head.replace(/^ref:\s*/, '');
+    try { return readFileSync(join(git, ref), 'utf8').trim(); } catch { /* packed */ }
+    const packed = readFileSync(join(git, 'packed-refs'), 'utf8')
+      .split('\n').find((l) => l.endsWith(' ' + ref));
+    return packed ? packed.split(' ')[0] : null;
+  } catch { return null; }
+}
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
 
@@ -927,8 +947,55 @@ async function handleAudit(node, req, res) {
 
   // ⛔ The page a mining invitation points at. This answered 404 for weeks while
   //    invitations had to send strangers to a git URL instead.
-  if (path === '/molibra/download') {
+  if (path === '/molibra/download' || path === '/download' || path === '/download/') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'download.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * What an installed miner should be running: the commit THIS node is on.
+   *
+   * ⛔ Read from this repository's own git refs on every request, so a miner
+   * that asks the public node is told exactly the code the public node runs -
+   * which is what matters before a flag day, when a miner on older code forks
+   * at the activation height. There is no separate "release" to forget to bump.
+   */
+  if (path === '/download/version.json') {
+    const commit = currentCommit();
+    return json(res, commit ? 200 : 503, commit
+      ? { commit, repo: 'https://github.com/BaronOdon/molibra', peers: MINER_PEERS }
+      : { error: 'this node cannot read its own commit' });
+  }
+
+  // The installers. A fixed list, never a path taken from the URL: a file
+  // route that joined the request onto a directory would serve the operator's
+  // disk to anyone who asked for ../..
+  //
+  // The binaries are GitHub Release assets and this answers with a redirect:
+  // a mining node starves its own event loop in bursts and should not be
+  // streaming 30 MB files, and a release is where a signed build belongs. The
+  // Mac one-line installer is plain text in the repository, served from here.
+  const wanted = path.startsWith('/download/') ? path.slice('/download/'.length) : null;
+  if (wanted && INSTALLER_FILES.includes(wanted)) {
+    res.writeHead(302, {
+      Location: `https://github.com/BaronOdon/molibra/releases/latest/download/${wanted}`,
+      'Cache-Control': 'no-cache',
+    });
+    res.end();
+    return;
+  }
+  if (wanted === 'install-mac.sh') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'installers', 'mac', 'install-mac.sh');
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /** An installed miner's own status page (the desktop shortcut opens it). */
+  if (path === '/molibra/miner') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'miner.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;

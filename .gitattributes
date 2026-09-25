@@ -8,3 +8,5 @@
 *.service text eol=lf
 Dockerfile text eol=lf
 *.yml     text eol=lf
+*.command text eol=lf
+installers/mac/scripts/* text eol=lf

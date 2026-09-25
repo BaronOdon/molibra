@@ -284,6 +284,55 @@ export class Node {
     this.syncTimer = null;
   }
 
+  /**
+   * ⛔⛔ Resolve once this node has caught up with its peers - so mining can
+   * start AFTER the first sync, never alongside it.
+   *
+   * `--mine` used to start grinding the moment the node booted. On a fresh
+   * datadir that means mining from genesis at genesis difficulty while the real
+   * chain is still downloading: hundreds of easy blocks in seconds, all on a
+   * private branch. When the real chain arrives its fork point is block 0, far
+   * deeper than any reorg the chain accepts, so the newcomer is refused the
+   * real chain for good and mines a fork that pays nothing anywhere. It is
+   * exactly the journey the download page and the installers describe.
+   *
+   * Caught up = within `margin` blocks of the highest peer that answers.
+   *
+   * ⚠ A node with real history must not be held hostage by an absent peer:
+   * two miners that restart while the other is down would otherwise both wait
+   * forever. So once `lonelyAfterMs` passes with NO peer answering, a node that
+   * already holds `establishedHeight` blocks starts anyway. A fresh node never
+   * does - for it, mining alone is the failure this exists to prevent.
+   */
+  async waitUntilCaughtUp({
+    pollMs = 10_000, margin = 2, lonelyAfterMs = 5 * 60_000,
+    establishedHeight = 1_000, onProgress = null,
+  } = {}) {
+    const startedAt = Date.now();
+    let lastHeard = null;
+    for (;;) {
+      let best = null;
+      for (const peer of this.peers) {
+        try {
+          const base = peer.replace(/\/$/, '').replace(/\/molibra$/, '');
+          const head = await (await fetchOnce(base + '/molibra/head',
+            { signal: AbortSignal.timeout(30_000) })).json();
+          const h = Number(head?.header?.number);
+          if (Number.isFinite(h)) best = Math.max(best ?? 0, h);
+        } catch { /* an unreachable peer is normal; the others may answer */ }
+      }
+      const mine = Number(this.chain.height);
+      if (best !== null) {
+        lastHeard = Date.now();
+        if (mine >= best - margin) return { caughtUp: true, height: mine, peerHeight: best };
+      } else if (mine >= establishedHeight && Date.now() - (lastHeard ?? startedAt) > lonelyAfterMs) {
+        return { caughtUp: false, height: mine, peerHeight: null };
+      }
+      onProgress?.({ height: mine, peerHeight: best });
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+
   /** Tell a peer where to reach us, so it can push new blocks rather than
    *  making us wait for the next poll. Harmless when it fails. */
   async announceTo(peerUrl) {

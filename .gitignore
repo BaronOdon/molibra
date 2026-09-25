@@ -69,6 +69,12 @@ patent-private/
 # before it has been chosen.
 UNDECIDED-*.md
 
+# Installer builds: staged inputs and outputs are published as release
+# assets, never committed.
+installers/windows/stage/
+installers/dist/
+installers/mac/out/
+
 # OpenTimestamps proofs are generated daily and upgraded in place.
 # They are evidence to SERVE, not source to version - see ots-stamp.mjs.
 timestamps/

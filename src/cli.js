@@ -178,6 +178,26 @@ const commands = {
     if (args.mine) {
       if (!node.miner) throw new Error('--mine needs --miner 0x...');
       console.log(`  mining    : to ${node.miner}`);
+      // ⛔⛔ Not until caught up. Mining during the first sync builds a private
+      // chain from genesis that the real one can never replace - see
+      // Node.waitUntilCaughtUp.
+      if (node.peers.size) {
+        console.log('  mining    : waits until this node has caught up with its peers');
+        let lastShown = 0;
+        const verdict = await node.waitUntilCaughtUp({
+          onProgress: ({ height, peerHeight }) => {
+            if (Date.now() - lastShown < 60_000) return;
+            lastShown = Date.now();
+            console.log(peerHeight === null
+              ? `  catching up: height ${height}, no peer answering yet`
+              : `  catching up: ${height.toLocaleString()} of ${peerHeight.toLocaleString()} blocks`
+                + ` (${Math.floor((100 * height) / Math.max(1, peerHeight))}%)`);
+          },
+        });
+        console.log(verdict.caughtUp
+          ? `  caught up at ${verdict.height} - mining starts now`
+          : `  ⚠ no peer has answered for 5 minutes; mining on the ${verdict.height} blocks held`);
+      }
       node.startMining((block) => {
         console.log(`  #${block.header.number}  ${block.hash}  txs=${block.transactions.length}`);
       });

@@ -1,0 +1,114 @@
+#!/bin/bash
+# Molibra Miner - macOS postinstall. Runs as root, once, from Installer.
+#
+#   1. installs for the person logged in at the screen, into
+#      ~/Library/Application Support/Molibra (theirs, not root's);
+#   2. downloads the official Node.js for this Mac's chip, checked against a
+#      PINNED SHA-256 - a runtime that does not match is refused, not run;
+#   3. asks, in a normal macOS dialog, where the MOLI should go - or creates
+#      a new wallet whose key only that user can read;
+#   4. registers a LaunchDaemon that runs AS that user: it starts at boot,
+#      needs nobody logged in, and keeps running after logout.
+#
+# ⛔ Nothing here is hidden or obfuscated, and the only program it runs is
+#    node itself (signed and notarized by the OpenJS Foundation).
+set -euo pipefail
+
+LABEL="org.molibra.miner"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+PAYLOAD="/Library/Application Support/Molibra Miner/payload"
+NODE_VERSION="v24.21.0"
+SHA_ARM64="bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057"
+SHA_X64="1462cb3b3046b815cf8ea436d3da450ec1a9f11dac7e5a46b0ada5305d7e8097"
+
+log() { echo "molibra-miner: $*"; logger -t molibra-miner "$*" || true; }
+
+USER_NAME="$(stat -f%Su /dev/console)"
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ] || [ "$USER_NAME" = "loginwindow" ]; then
+  log "no user is logged in at the screen; install while logged in"; exit 1
+fi
+USER_ID="$(id -u "$USER_NAME")"
+USER_HOME="$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')"
+ROOT="$USER_HOME/Library/Application Support/Molibra"
+as_user() { launchctl asuser "$USER_ID" sudo -u "$USER_NAME" "$@"; }
+dialog() {   # dialog "text" [default answer] -> prints the answer
+  local text="$1" answer="${2-__none__}"
+  if [ "$answer" = "__none__" ]; then
+    as_user osascript -e "display dialog \"$text\" buttons {\"OK\"} default button 1 with title \"Molibra Miner\"" >/dev/null 2>&1 || true
+  else
+    as_user osascript -e "text returned of (display dialog \"$text\" default answer \"$answer\" buttons {\"Continue\"} default button 1 with title \"Molibra Miner\")" 2>/dev/null || true
+  fi
+}
+
+# ---- stop a previous version, if any
+launchctl bootout "system/$LABEL" 2>/dev/null || true
+
+# ---- 1. files (keeping chain data, config and any wallet)
+mkdir -p "$ROOT/logs"
+cp -f "$PAYLOAD/molibra-miner.mjs" "$ROOT/"
+rm -rf "$ROOT/app-staged" && cp -R "$PAYLOAD/app" "$ROOT/app-staged"
+if [ -f "$ROOT/app/COMMIT" ]; then rm -rf "$ROOT/app-staged"; else rm -rf "$ROOT/app"; mv "$ROOT/app-staged" "$ROOT/app"; fi
+
+# ---- 2. runtime
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then ARCH=arm64; SHA=$SHA_ARM64; else ARCH=x64; SHA=$SHA_X64; fi
+NAME="node-$NODE_VERSION-darwin-$ARCH"
+if [ ! -x "$ROOT/runtime/bin/node" ] || [ "$("$ROOT/runtime/bin/node" --version)" != "$NODE_VERSION" ]; then
+  TMP="$(mktemp -d)"
+  curl -fsSL "https://nodejs.org/dist/$NODE_VERSION/$NAME.tar.gz" -o "$TMP/node.tgz"
+  GOT="$(shasum -a 256 "$TMP/node.tgz" | awk '{print $1}')"
+  if [ "$GOT" != "$SHA" ]; then log "Node.js hash $GOT does not match the pinned $SHA - refusing"; rm -rf "$TMP"; exit 1; fi
+  tar -xzf "$TMP/node.tgz" -C "$TMP"
+  rm -rf "$ROOT/runtime" && mv "$TMP/$NAME" "$ROOT/runtime"
+  rm -rf "$TMP"
+fi
+chown -R "$USER_NAME":staff "$ROOT"
+NODE="$ROOT/runtime/bin/node"
+
+# ---- 3. the wallet
+if [ ! -f "$ROOT/config.json" ]; then
+  ADDR=""
+  while :; do
+    ADDR="$(dialog "Where should your MOLI go?\n\nPaste a wallet address that starts with 0x (for example from MetaMask).\n\nNo wallet yet? Leave it empty and a new one will be created for you." "")"
+    ADDR="$(echo "$ADDR" | tr -d '[:space:]')"
+    if [ -z "$ADDR" ] || [[ "$ADDR" =~ ^0x[0-9a-fA-F]{40}$ ]]; then break; fi
+    dialog "That is not a wallet address. It should be 0x followed by 40 letters and numbers."
+  done
+  sudo -u "$USER_NAME" "$NODE" "$ROOT/molibra-miner.mjs" init $ADDR >/dev/null
+fi
+SUMMARY="$ROOT/install-summary.json"
+MINER="$(sed -n 's/.*"miner": *"\([^"]*\)".*/\1/p' "$SUMMARY" 2>/dev/null | head -1)"
+[ -z "$MINER" ] && MINER="$(sed -n 's/.*"miner": *"\([^"]*\)".*/\1/p' "$ROOT/config.json" | head -1)"
+
+# ---- 4. the daemon: runs as the user, from boot, whether or not anyone is logged in
+cat > "$PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>UserName</key><string>$USER_NAME</string>
+  <key>ProgramArguments</key><array>
+    <string>$NODE</string><string>$ROOT/molibra-miner.mjs</string>
+  </array>
+  <key>WorkingDirectory</key><string>$ROOT</string>
+  <key>EnvironmentVariables</key><dict><key>HOME</key><string>$USER_HOME</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>Nice</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$ROOT/logs/launchd.log</string>
+  <key>StandardErrorPath</key><string>$ROOT/logs/launchd.log</string>
+</dict></plist>
+PL
+chown root:wheel "$PLIST"; chmod 644 "$PLIST"
+launchctl bootstrap system "$PLIST"
+launchctl enable "system/$LABEL" || true
+log "installed for $USER_NAME, mining to $MINER"
+
+# ---- tell the person what happened, and where their key is if one was made
+if grep -q '"created": *true' "$SUMMARY" 2>/dev/null; then
+  dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nA NEW WALLET was created for you:\n$MINER\n\nIts secret key is in:\n$ROOT/MY-WALLET-KEEP-SECRET.txt\n\nBACK UP THAT FILE. If it is lost, the MOLI in the wallet is lost with it.\n\nThe first start downloads the chain (a few minutes); mining begins by itself after that."
+else
+  dialog "Molibra Miner is running. It starts with your Mac and keeps going after you log out.\n\nYour MOLI goes to:\n$MINER\n\nThe first start downloads the chain (a few minutes); mining begins by itself after that."
+fi
+as_user open "http://127.0.0.1:20226/molibra/miner" || true
+exit 0

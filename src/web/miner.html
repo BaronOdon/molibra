@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molibra Miner</title>
+<!--
+  The status page an installed miner opens: http://127.0.0.1:20226/molibra/miner
+  Served by the miner's own node, so it works with no internet page in between.
+  It reads; it never signs, sends or asks for a key.
+-->
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--ok:#4ade80;--bad:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:24px 16px;font:15px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:720px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px} .sub{color:var(--dim);margin:0 0 20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+  .state{font-size:20px;font-weight:650} .ok{color:var(--ok)} .wait{color:var(--gold)} .bad{color:var(--bad)}
+  .bar{height:10px;background:#222;border-radius:6px;overflow:hidden;margin-top:12px}
+  .bar i{display:block;height:100%;background:var(--gold);width:0}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:14px}
+  dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  a{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Molibra Miner</h1>
+  <p class="sub">Running on this computer. This page refreshes by itself.</p>
+
+  <div class="card">
+    <div class="state" id="state">Starting…</div>
+    <div class="sub" id="detail" style="margin:6px 0 0"></div>
+    <div class="bar"><i id="bar"></i></div>
+  </div>
+
+  <div class="card">
+    <dl>
+      <dt>Your wallet</dt><dd id="wallet">—</dd>
+      <dt>Balance</dt><dd id="balance">—</dd>
+      <dt>Blocks on this computer</dt><dd id="height">—</dd>
+      <dt>Blocks on the network</dt><dd id="network">—</dd>
+    </dl>
+    <p class="sub" style="margin:14px 0 0">See your wallet on the explorer: <a id="explorer" href="https://molibra.org/molibra/moliscan" target="_blank">molibra.org</a></p>
+  </div>
+
+  <div class="card">
+    <p style="margin:0">Mining runs in the background, starts with the computer and keeps going when you log out.
+      It uses about one processor core at low priority, so the computer stays usable. While the computer is
+      asleep, it does not mine.</p>
+    <p class="sub" style="margin:10px 0 0">How many blocks you find depends on your share of all the computers mining.
+      Nothing here promises any amount or value. <a href="https://molibra.org/download" target="_blank">Help and uninstall</a></p>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const rpc = async (method, params = []) => (await (await fetch('/', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+})).json()).result;
+const fmt = (wei) => (Number(BigInt(wei)) / 1e18).toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+async function tick() {
+  let local;
+  try { local = await (await fetch('/molibra')).json(); }
+  catch {
+    $('state').textContent = 'Starting…'; $('state').className = 'state wait';
+    $('detail').textContent = 'The miner is loading its copy of the chain. This page will update by itself.';
+    return;
+  }
+  let net = null;
+  try { net = await (await fetch('https://molibra.org/molibra')).json(); } catch { /* offline */ }
+  const [wallet, mining] = await Promise.all([rpc('eth_coinbase'), rpc('eth_mining')]);
+  const h = Number(local.height), n = net ? Number(net.height) : null;
+  $('height').textContent = h.toLocaleString();
+  $('network').textContent = n === null ? 'cannot reach molibra.org' : n.toLocaleString();
+  if (wallet) {
+    $('wallet').textContent = wallet;
+    $('balance').textContent = fmt(await rpc('eth_getBalance', [wallet, 'latest'])) + ' MOLI';
+    $('explorer').href = 'https://molibra.org/molibra/moliscan/address/' + wallet;
+    $('explorer').textContent = 'your wallet on molibra.org';
+  }
+  const pct = n ? Math.min(100, Math.floor((100 * h) / n)) : 0;
+  $('bar').style.width = (mining ? 100 : pct) + '%';
+  if (mining) {
+    $('state').textContent = '⛏ Mining'; $('state').className = 'state ok';
+    $('detail').textContent = 'Up to date with the network and mining to your wallet.';
+  } else {
+    $('state').textContent = `Catching up — ${pct}%`; $('state').className = 'state wait';
+    $('detail').textContent = 'Downloading and checking the chain. Mining starts by itself when this reaches 100%.';
+  }
+}
+tick();
+setInterval(tick, 10_000);
+</script>
+</body>
+</html>

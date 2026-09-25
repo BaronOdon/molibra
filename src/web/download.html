@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Run a Molibra node · download and mine</title>
+<title>Mine MOLI · Molibra Miner download</title>
 <!--
   The page a mining invitation can point at. Until it existed, /molibra/download
   answered 404 and every invitation had to send people to a git URL.
@@ -37,15 +37,66 @@
   dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0 0;font-size:12.5px}
   dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
   ol{padding-left:18px} li{margin:6px 0}
+  .dl{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .dl .sub{flex-basis:100%}
+  .btn{display:inline-block;background:var(--gold);color:#111;text-decoration:none;font-weight:700;
+       padding:14px 22px;border-radius:10px;font-size:16px}
+  details summary{cursor:pointer}
+  @media (max-width:520px){ .btn{width:100%;text-align:center} }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<h1>Run a Molibra node</h1>
-<p class="sub">Two dependencies, one command. The chain is small enough to verify from
-  genesis on an ordinary machine, which is the point — nothing here asks you to trust
-  this page.</p>
+<h1>Mine MOLI on your computer</h1>
+<p class="sub">Download, open, answer one question. The miner runs in the background from then on.</p>
+
+<div class="card dl">
+  <a class="btn" href="/download/Molibra-Miner-Setup.exe">⬇ Download for Windows</a>
+  <a class="btn" href="/download/Molibra-Miner.pkg">⬇ Download for Mac</a>
+  <p class="sub" style="margin:12px 0 0">Windows 10 or 11 (64-bit) · macOS 12 or newer, Apple Silicon or Intel ·
+    <a href="/download/SHA256SUMS.txt">checksums</a></p>
+</div>
+
+<div class="card">
+  <h2>How it works</h2>
+  <ol>
+    <li><b>Open the file you downloaded</b> and follow the installer. It asks for administrator rights
+      (on a Mac, your password) once, because the miner is set up to start with the computer.</li>
+    <li><b>Say where your MOLI should go.</b> Paste a wallet address that starts with <code>0x</code>,
+      for example from MetaMask. If you don't have one, leave it empty and a new wallet is created for
+      you. Its secret key is saved in a file on your computer, and the installer tells you where.
+      <b>Back that file up.</b></li>
+    <li><b>That's it.</b> The first start downloads and checks the whole chain, which takes a few minutes.
+      Mining starts by itself once that's finished.</li>
+  </ol>
+  <dl>
+    <dt>Runs</dt><dd style="font-family:inherit">in the background. It starts with the computer and keeps going
+      after you log out</dd>
+    <dt>Uses</dt><dd style="font-family:inherit">about one processor core, at low priority, and some electricity.
+      A sleeping computer does not mine</dd>
+    <dt>Status</dt><dd style="font-family:inherit">the "Molibra Miner - Status" shortcut shows progress, your
+      balance and your wallet</dd>
+    <dt>Updates</dt><dd style="font-family:inherit">automatic. It follows the version the public nodes run,
+      so it stays on the chain through upgrades</dd>
+    <dt>Remove</dt><dd style="font-family:inherit">Windows: Settings › Apps › Molibra Miner › Uninstall.
+      Mac: Applications › Molibra Miner › Uninstall. Your wallet key is always kept</dd>
+  </dl>
+  <div class="note"><b>Mac, from the Terminal instead:</b>
+    <pre style="margin-top:6px">curl -fsSL https://molibra.org/download/install-mac.sh | bash</pre></div>
+  <div class="note"><b>Windows may say "Windows protected your PC"</b> the first time, because this
+    installer is new and has no download history yet. Click <b>More info</b> and then <b>Run anyway</b>.
+    The installer contains the official Node.js, unmodified and signed by the OpenJS Foundation,
+    and the open-source Molibra code from
+    <a href="https://github.com/BaronOdon/molibra">github.com/BaronOdon/molibra</a>.</div>
+  <p class="sub" style="margin:8px 0 0">How many blocks you find depends on your share of all the computers
+    mining. Nothing here promises any amount or value.</p>
+</div>
+
+<details class="card">
+  <summary><b>Advanced: run a node by hand</b></summary>
+  <p class="sub" style="margin:10px 0 0">Two dependencies, one command. The chain is small enough to verify from
+  genesis on an ordinary machine, which is the point: nothing here asks you to trust this page.</p>
 
 <div class="card">
   <h2>1 · Get it</h2>
@@ -97,6 +148,8 @@ curl <span id="peerCurl">…</span>/molibra   # the public node's view</pre>
     Chain 20226 is registered in <code>ethereum-lists/chains</code>; the warning is about
     what your wallet has seen before, not about whether the chain is real.</p>
 </div>
+
+</details>
 
 <div class="card">
   <h2>⛔ Two things to know before you mine</h2>
