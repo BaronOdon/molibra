@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
 <link rel="apple-touch-icon" href="/icon.svg">
 <meta name="theme-color" content="#07070a">
-<title>MOLIBRA · swap</title>
+<title>MOLIBRA · Trocar / Swap</title>
 <!--
   A PUBLIC page. Anyone may connect a wallet and trade.
 
@@ -26,88 +26,177 @@
   electoral purpose - can never appear here. They live in the chain's registry
   and are not EVM contracts, so no pool can exist for them. Structural, not a
   filter this page applies.
+
+  ⛔ Nothing on this page hard-codes a reserve, a price or a depth. Every number
+  is read from the chain when the page draws it, so deepening a pool needs no
+  edit here.
+
+  Language: Portuguese is the main audience. The page opens in PT-BR when the
+  browser language starts with "pt", otherwise in English, and remembers a
+  choice made with the PT/EN toggle. The language is set on <html> BEFORE
+  mobilewallet.js loads, because that script reads it once to pick its own.
 -->
+<script>
+  (function () {
+    var l = null;
+    try { l = localStorage.getItem('molibra.lang'); } catch (e) { l = null; }
+    if (l !== 'pt' && l !== 'en') l = /^pt/i.test(navigator.language || '') ? 'pt' : 'en';
+    document.documentElement.lang = l === 'pt' ? 'pt-BR' : 'en';
+  })();
+</script>
 <style>
-  /* Black and gold - the libertarian flag, read as a terminal. Glass panels
-     over a live perspective grid; the grid is the only motion on the page. */
+  /* Black and gold. Readable first: a sans body at 16px, mono only for the
+     mark and the figures, amounts at 28px, one column that fits a phone. */
   :root{
-    --void:#07070a; --ink:#f5f3ea; --dim:#8d8a7d; --dimmer:#5a584f;
-    --gold:#FFD100; --gold-dk:#c9a600; --gold-glow:rgba(255,209,0,.35);
-    --glass:rgba(20,20,16,.55); --edge:rgba(255,209,0,.16);
-    --bad:#ff4d4d; --ok:#66ff9e; --warn:#ffa62b;
+    --void:#07070a; --card:#121210; --box:#1b1a16; --box-hi:#24221c;
+    --ink:#f5f3ea; --dim:#b3ae9c; --dimmer:#858170; --line:#2e2c24;
+    --gold:#FFD100; --gold-dk:#c9a600; --gold-glow:rgba(255,209,0,.30); --edge:rgba(255,209,0,.20);
+    --bad:#ff7a7a; --ok:#6dffa6; --warn:#ffbe55;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
   body{
     margin:0;color:var(--ink);background:var(--void);
-    font:14px/1.6 var(--mono);padding:28px 18px 80px;position:relative;overflow-x:hidden;
+    font:16px/1.5 var(--sans);
+    padding:16px 16px 64px;overflow-x:hidden;min-height:100vh;
   }
   body::before{
-    content:"";position:fixed;inset:0;z-index:-2;
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
     background:
-      radial-gradient(120% 80% at 50% -10%, rgba(255,209,0,.10), transparent 60%),
-      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
-      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.055) 38px 39px),
+      radial-gradient(120% 70% at 50% -10%, rgba(255,209,0,.12), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px),
       var(--void);
   }
-  body::after{
-    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background:repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px);
-    opacity:.5;
-  }
-  .wrap{max-width:640px;margin:0 auto;position:relative}
-  header{margin:0 0 26px}
-  .mark{font:700 30px/1 var(--mono);letter-spacing:.22em;color:var(--gold);
-        text-shadow:0 0 18px var(--gold-glow);margin:0}
-  .tag{color:var(--dim);font-size:11px;letter-spacing:.28em;text-transform:uppercase;margin:8px 0 0}
-  .status{margin:14px 0 0;font-size:12px;color:var(--dimmer)}
-  .status b{color:var(--ok);font-weight:500}
-  .panel{
-    background:var(--glass);
-    -webkit-backdrop-filter:blur(14px) saturate(130%);
-    backdrop-filter:blur(14px) saturate(130%);
-    border:1px solid var(--edge);border-radius:4px;
-    padding:18px;margin-bottom:14px;position:relative;
-    box-shadow:0 0 0 1px rgba(0,0,0,.5), 0 18px 50px -30px rgba(0,0,0,.9);
-  }
-  h2{font:500 10px/1 var(--mono);letter-spacing:.3em;text-transform:uppercase;
-     color:var(--gold-dk);margin:0 0 14px}
-  label{display:block;color:var(--dim);font-size:10px;letter-spacing:.16em;
-        text-transform:uppercase;margin:14px 0 6px}
-  input,select{
-    width:100%;background:rgba(0,0,0,.45);border:1px solid var(--edge);border-radius:3px;
-    color:var(--ink);padding:12px;font:400 16px/1.2 var(--mono);
-  }
-  select{cursor:pointer}
-  input:focus,select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(255,209,0,.10)}
-  button{
-    background:var(--gold);color:#0a0a0a;border:0;border-radius:3px;padding:13px 20px;
-    font:650 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
-    cursor:pointer;margin:14px 8px 0 0;
-  }
-  button:hover:not(:disabled){box-shadow:0 0 22px var(--gold-glow)}
-  button.ghost{background:transparent;color:var(--gold);border:1px solid var(--edge)}
-  button:disabled{opacity:.3;cursor:not-allowed}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .out{font:650 30px/1.15 var(--mono);color:var(--gold);margin:8px 0 0;word-break:break-all;
-       text-shadow:0 0 22px var(--gold-glow)}
-  dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin:16px 0 0;font-size:12px}
-  dt{color:var(--dimmer);letter-spacing:.1em;text-transform:uppercase;font-size:10px;align-self:center}
-  dd{margin:0;text-align:right;color:var(--ink);word-break:break-all}
-  .note{border-left:2px solid var(--gold);background:rgba(255,209,0,.05);
-        padding:11px 13px;margin:14px 0;font-size:12px;line-height:1.65}
-  .note.bad{border-left-color:var(--bad);background:rgba(255,77,77,.07)}
-  .note.warn{border-left-color:var(--warn);background:rgba(255,166,43,.07)}
-  .log{color:var(--dim);font-size:11px;margin-top:12px;white-space:pre-wrap;word-break:break-all}
-  .log.bad{color:var(--bad)}
-  .flip{display:flex;justify-content:center;margin:14px 0 2px}
-  .flip button{margin:0;width:42px;height:42px;padding:0;font-size:15px;border-radius:50%;
-               background:transparent;color:var(--gold);border:1px solid var(--edge)}
-  .hint{color:var(--dimmer);font-size:11px;margin-top:8px}
+  .wrap{max-width:480px;margin:0 auto}
   a{color:var(--gold)}
-  @media (prefers-reduced-motion:no-preference){
-    .panel{transition:border-color .2s ease}
-    .panel:hover{border-color:rgba(255,209,0,.3)}
+  button,input,select{font:inherit;color:inherit}
+  button{cursor:pointer}
+  button:disabled{cursor:not-allowed}
+  [hidden]{display:none !important}
+
+  /* ------------------------------------------------------------ header */
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 18px}
+  .mark{font:700 20px/1 var(--mono);letter-spacing:.2em;color:var(--gold);text-decoration:none;
+        text-shadow:0 0 16px var(--gold-glow)}
+  .hdr-right{display:flex;align-items:center;gap:8px;min-width:0}
+  .lang{display:flex;border:1px solid var(--edge);border-radius:999px;overflow:hidden;flex:none}
+  .lang button{background:transparent;border:0;color:var(--dim);padding:7px 10px;font:600 13px/1 var(--sans)}
+  .lang button.on{background:var(--gold);color:#0a0a0a}
+  .chip{background:var(--box);border:1px solid var(--edge);color:var(--ink);border-radius:999px;
+        padding:8px 12px;font:600 14px/1 var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+  .chip.warn{border-color:var(--warn);color:var(--warn)}
+
+  /* -------------------------------------------------------------- tabs */
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;margin:0 0 12px}
+  .tabs button{flex:1;background:transparent;border:0;border-radius:10px;padding:11px 8px;
+               font:600 16px/1 var(--sans);color:var(--dim)}
+  .tabs button.on{background:var(--box-hi);color:var(--gold)}
+
+  /* -------------------------------------------------------------- card */
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:20px;padding:16px;
+        margin:0 0 14px;box-shadow:0 20px 60px -30px rgba(0,0,0,.9)}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}
+  h1,h2{margin:0;font:700 20px/1.2 var(--sans)}
+  h2{font-size:18px}
+  .icon{background:transparent;border:0;color:var(--dim);font-size:22px;line-height:1;padding:6px;border-radius:10px}
+  .icon:hover{color:var(--gold)}
+
+  .box{background:var(--box);border:1px solid transparent;border-radius:16px;padding:14px}
+  .box:focus-within{border-color:var(--edge)}
+  .box-top{color:var(--dim);font-size:15px;margin:0 0 6px}
+  .box-mid{display:flex;align-items:center;gap:10px}
+  .amt{flex:1;min-width:0;background:transparent;border:0;outline:none;color:var(--ink);
+       font:600 28px/1.2 var(--mono);padding:2px 0;width:100%}
+  .amt::placeholder{color:var(--dimmer)}
+  .amt.out{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .amt.empty{color:var(--dimmer)}
+  .tok{flex:none;appearance:none;-webkit-appearance:none;background-color:var(--box-hi);
+       border:1px solid var(--edge);border-radius:999px;color:var(--gold);
+       font:700 16px/1 var(--sans);padding:10px 34px 10px 14px;max-width:46%;
+       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23FFD100' stroke-width='2'/%3E%3C/svg%3E");
+       background-repeat:no-repeat;background-position:right 12px center}
+  .tok.static{background-image:none;padding:10px 14px}
+  .box-bot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 0;
+           color:var(--dim);font-size:15px;min-height:28px}
+  .max{background:transparent;border:1px solid var(--edge);color:var(--gold);border-radius:8px;
+       padding:4px 10px;font:700 13px/1.2 var(--sans)}
+  .flip-wrap{display:flex;justify-content:center;height:10px;position:relative;z-index:1}
+  .flip{width:44px;height:44px;margin-top:-17px;border-radius:12px;background:var(--box-hi);
+        border:4px solid var(--card);color:var(--gold);font-size:20px;line-height:1;padding:0}
+
+  .details{margin:12px 2px 0;font-size:15px}
+  .drow{display:flex;justify-content:space-between;gap:12px;padding:4px 0}
+  .drow span:first-child{color:var(--dim)}
+  .drow span:last-child{text-align:right;word-break:break-word}
+
+  .primary{display:block;width:100%;margin:14px 0 0;background:var(--gold);color:#0a0a0a;border:0;
+           border-radius:16px;padding:17px 16px;font:700 18px/1.2 var(--sans)}
+  .primary:hover:not(:disabled){box-shadow:0 0 24px var(--gold-glow)}
+  .primary:disabled{background:var(--box-hi);color:var(--dimmer)}
+  .secondary{background:transparent;color:var(--gold);border:1px solid var(--edge);border-radius:12px;
+             padding:12px 16px;font:600 15px/1.2 var(--sans);margin:10px 8px 0 0}
+  .secondary:disabled{opacity:.4}
+
+  .msg{margin:12px 0 0;padding:12px 14px;border-radius:12px;font-size:15px;line-height:1.5;
+       background:var(--box);border-left:3px solid var(--gold);word-break:break-word}
+  .msg.ok{border-left-color:var(--ok)}
+  .msg.bad{border-left-color:var(--bad)}
+  .msg.warn{border-left-color:var(--warn)}
+  .msg a{display:inline-block;margin-top:4px;font-weight:600}
+  .msg b{color:var(--ink)}
+
+  .settings{background:var(--box);border-radius:14px;padding:12px 14px;margin:0 0 12px}
+  .settings p{margin:0 0 10px;color:var(--dim);font-size:14px}
+  .seg{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .seg button{background:var(--box-hi);border:1px solid var(--line);border-radius:10px;
+              padding:9px 12px;font:600 15px/1 var(--sans);color:var(--ink)}
+  .seg button.on{border-color:var(--gold);color:var(--gold)}
+  .seg .pct{display:flex;align-items:center;gap:4px;background:var(--box-hi);border:1px solid var(--line);
+            border-radius:10px;padding:0 10px}
+  .seg .pct input{width:64px;background:transparent;border:0;outline:none;padding:9px 0;
+                  font:600 15px/1 var(--sans);text-align:right}
+
+  /* ----------------------------------------------------------- pool */
+  .stat{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:15px}
+  .stat span:first-child{color:var(--dim)}
+  .stat span:last-child{text-align:right;word-break:break-word}
+  .sub{display:flex;gap:6px;margin:14px 0 12px}
+  .sub button{flex:1;background:var(--box);border:1px solid var(--line);border-radius:12px;
+              padding:10px;font:600 15px/1 var(--sans);color:var(--dim)}
+  .sub button.on{border-color:var(--gold);color:var(--gold)}
+  .hint{color:var(--dim);font-size:14px;margin:8px 2px 0}
+  .plus{text-align:center;color:var(--dim);font-size:20px;line-height:1;margin:6px 0}
+
+  /* ---------------------------------------------------- other ways */
+  .ways{list-style:none;margin:0;padding:0}
+  .ways li + li{border-top:1px solid var(--line)}
+  .ways a{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 2px;
+          text-decoration:none;color:var(--ink)}
+  .ways a small{display:block;color:var(--dim);font-size:14px;margin-top:2px}
+  .ways a .go{color:var(--gold);font-size:20px;flex:none}
+
+  /* ------------------------------------------------------- advanced */
+  details.card summary{cursor:pointer;font:600 16px/1.3 var(--sans);color:var(--dim);list-style:none}
+  details.card summary::-webkit-details-marker{display:none}
+  details.card summary::before{content:"▸ ";color:var(--gold)}
+  details.card[open] summary::before{content:"▾ "}
+  details.card label{display:block;color:var(--dim);font-size:14px;margin:16px 0 6px}
+  details.card input.field{width:100%;background:var(--box);border:1px solid var(--line);border-radius:10px;
+                           padding:12px;font:400 15px/1.2 var(--mono)}
+  details.card input.field:focus{outline:none;border-color:var(--gold)}
+  .mkts{margin:12px 0 0;font-size:15px}
+  .log{color:var(--dim);font-size:13px;margin-top:10px;white-space:pre-wrap;word-break:break-all;font-family:var(--mono)}
+  .log.bad{color:var(--bad)}
+
+  footer{text-align:center;color:var(--dimmer);font-size:14px;margin:18px 0 0}
+  footer a{color:var(--dim)}
+
+  @media (min-width:700px){
+    body{padding-top:32px}
+    .card{padding:20px}
   }
 </style>
 </head>
@@ -115,87 +204,178 @@
 <div class="wrap">
 
 <header>
-  <p class="mark">MOLIBRA</p>
-  <p class="tag">decentralised exchange · chain 20226</p>
-  <p class="status" id="banner">not connected — <b>nothing is sent until you sign it</b></p>
+  <a class="mark" href="/">MOLIBRA</a>
+  <div class="hdr-right">
+    <div class="lang" role="group" aria-label="Language">
+      <button id="langPt" type="button">PT</button><button id="langEn" type="button">EN</button>
+    </div>
+    <button class="chip" id="walletChip" type="button" data-i18n="connectShort">Connect</button>
+  </div>
 </header>
 
-<div class="note bad">
-  <b>⛔ Pools here are small.</b> Slippage in a constant-product pool is the same proportion at any
-  size — trading 2% of a pool moves its price about 4% whether it holds a hundred units or a
-  million. <b>Price impact</b> is shown for every trade rather than hidden behind a tolerance.
-  A market existing says nothing about whether an asset is worth anything, or its contract honest.
+<div class="msg warn" id="walletHelp" hidden><span id="walletMsg"></span></div>
+<div class="msg bad" id="netNote" hidden></div>
+
+<div class="tabs" role="tablist">
+  <button id="tabSwap" class="on" type="button" role="tab" data-i18n="tabSwap">Swap</button>
+  <button id="tabPool" type="button" role="tab" data-i18n="tabPool">Liquidity</button>
 </div>
 
-<div class="panel">
-  <h2>01 · wallet</h2>
-  <button id="connect">Connect</button>
-  <dl>
-    <dt>account</dt><dd id="acct">—</dd>
-    <dt>network</dt><dd id="chain">—</dd>
-    <dt>MOLI</dt><dd id="balMoli">—</dd>
-  </dl>
-  <div class="log" id="walletLog"></div>
-</div>
-
-<div class="panel">
-  <h2>02 · swap</h2>
-  <div class="row">
-    <div><label>from</label><select id="fromSel"></select></div>
-    <div><label>to</label><select id="toSel"></select></div>
+<!-- ================================================================ SWAP -->
+<section class="card" id="swapCard">
+  <div class="card-head">
+    <h1 data-i18n="tabSwap">Swap</h1>
+    <button class="icon" id="gear" type="button" aria-label="Settings" title="Settings">&#9881;</button>
   </div>
-  <label>amount — <span id="fromBal">—</span></label>
-  <input id="amountIn" value="1" spellcheck="false" inputmode="decimal">
-  <div class="flip"><button id="flip" title="Reverse">&#8645;</button></div>
-  <label>you receive — quoted by the contract, not by this page</label>
-  <div class="out" id="amountOut">—</div>
-  <dl>
-    <dt>route</dt><dd id="route">—</dd>
-    <dt>rate</dt><dd id="rate">—</dd>
-    <dt>impact</dt><dd id="impact">—</dd>
-    <dt>fee</dt><dd id="fee">—</dd>
-    <dt>min received</dt><dd id="minOut">—</dd>
-  </dl>
-  <label>slippage tolerance %</label>
-  <input id="slippage" value="0.5" spellcheck="false" inputmode="decimal">
-  <div class="note" id="impactNote"></div>
-  <button id="approve" class="ghost" style="display:none">Approve</button>
-  <button id="swap" disabled>Execute</button>
-  <div class="log" id="swapLog"></div>
-</div>
 
-<div class="panel">
-  <h2>03 · markets</h2>
-  <dl id="marketList"><dt>loading</dt><dd>—</dd></dl>
-  <div class="note">
-    ⛔ Spot price is a <b>reserve ratio read right now</b>, not an oracle. Anybody with funds can
-    move it inside one block, and a contract trusting it as a feed would be manipulable.
+  <div class="settings" id="settings" hidden>
+    <p><b data-i18n="slipTitle">Slippage tolerance</b><br><span data-i18n="slipHelp"></span></p>
+    <div class="seg" id="slipSeg">
+      <button type="button" data-slip="0.1">0.1%</button>
+      <button type="button" data-slip="0.5">0.5%</button>
+      <button type="button" data-slip="1">1%</button>
+      <span class="pct"><input id="slippage" value="0.5" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="%">%</span>
+    </div>
   </div>
-  <label>add a token by address — permissionless, nothing is vetted</label>
-  <input id="addToken" placeholder="0x…" spellcheck="false">
-  <button id="add" class="ghost">Add token</button>
-  <button id="refresh" class="ghost">Refresh</button>
-  <div class="log" id="poolLog"></div>
-</div>
 
-<div class="panel">
-  <h2>04 · factory</h2>
-  <p class="hint">One pool per token, created by anyone, once. Every pool has MOLI on one side,
-  which is what makes any pair reachable in two hops.</p>
-  <label>factory address — leave blank to deploy a new one</label>
-  <input id="factoryAddr" placeholder="0x… (or deploy below)" spellcheck="false">
-  <div class="note">
-    ⛔⛔ <b>An expression token can never get a market.</b> GIZ and anything declaring a social,
-    purchase or electoral purpose live in the chain's registry and are <b>not contracts</b> —
-    there is no bytecode to pool. The factory refuses them structurally, not by a rule it could
-    forget.
+  <div class="box">
+    <div class="box-top" data-i18n="pay">You pay</div>
+    <div class="box-mid">
+      <input id="amountIn" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="amount">
+      <select id="fromSel" class="tok" aria-label="from"></select>
+    </div>
+    <div class="box-bot"><span><span data-i18n="balance">Balance</span>: <span id="fromBal">—</span></span>
+      <button class="max" id="maxBtn" type="button" hidden>MAX</button></div>
   </div>
-  <button id="deployFactory">Deploy factory</button>
-  <label>create a market for a token</label>
-  <input id="createToken" placeholder="0x…" spellcheck="false">
-  <button id="createPool" class="ghost">Create market</button>
+
+  <div class="flip-wrap"><button class="flip" id="flip" type="button" aria-label="Reverse" title="Reverse">&#8645;</button></div>
+
+  <div class="box">
+    <div class="box-top" data-i18n="receive">You receive</div>
+    <div class="box-mid">
+      <div id="amountOut" class="amt out empty">0</div>
+      <select id="toSel" class="tok" aria-label="to"></select>
+    </div>
+    <div class="box-bot"><span><span data-i18n="balance">Balance</span>: <span id="toBal">—</span></span></div>
+  </div>
+
+  <div class="details" id="details" hidden>
+    <div class="drow"><span data-i18n="rate">Rate</span><span id="rate">—</span></div>
+    <div class="drow"><span data-i18n="impact">Price impact</span><span id="impact">—</span></div>
+    <div class="drow"><span data-i18n="fee">Fee</span><span id="fee">—</span></div>
+    <div class="drow"><span data-i18n="minReceived">Minimum received</span><span id="minOut">—</span></div>
+    <div class="drow"><span data-i18n="slipShort">Slippage</span><span id="slipShow">—</span></div>
+    <div class="drow" id="routeRow" hidden><span data-i18n="route">Route</span><span id="route">—</span></div>
+  </div>
+  <div class="msg warn" id="impactNote" hidden></div>
+
+  <button class="primary" id="action" type="button" disabled>…</button>
+  <div class="msg" id="swapMsg" hidden></div>
+</section>
+
+<!-- ================================================================ POOL -->
+<section class="card" id="poolCard" hidden>
+  <div class="card-head"><h1 data-i18n="tabPool">Liquidity</h1></div>
+  <div class="box-mid" style="margin:0 0 10px">
+    <span style="color:var(--dim)" data-i18n="market">Market</span>
+    <select id="poolSel" class="tok" aria-label="market" style="margin-left:auto;max-width:60%"></select>
+  </div>
+  <p class="hint" id="poolIntro" style="margin:0 0 10px"></p>
+  <div class="stat"><span data-i18n="inMarket">In the market</span><span id="poolRes">—</span></div>
+  <div class="stat"><span data-i18n="price">Current price</span><span id="poolPrice">—</span></div>
+  <div class="stat"><span data-i18n="yourPosition">Your position</span><span id="poolMine">—</span></div>
+  <div class="stat"><span data-i18n="yourShare">Your share of the market</span><span id="poolShare">—</span></div>
+
+  <div class="sub" role="tablist">
+    <button id="modeAdd" class="on" type="button" data-i18n="addTab">Add</button>
+    <button id="modeRem" type="button" data-i18n="removeTab">Withdraw</button>
+  </div>
+
+  <div id="addPane">
+    <div class="box">
+      <div class="box-top" data-i18n="youDeposit">You deposit</div>
+      <div class="box-mid">
+        <input id="addMoli" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="MOLI">
+        <span class="tok static">MOLI</span>
+      </div>
+      <div class="box-bot"><span><span data-i18n="balance">Balance</span>: <span id="addMoliBal">—</span></span>
+        <button class="max" id="addMax" type="button" hidden>MAX</button></div>
+    </div>
+    <div class="plus">+</div>
+    <div class="box">
+      <div class="box-top"><span data-i18n="andDeposit">And</span> <small id="addTokNote" style="color:var(--dimmer)"></small></div>
+      <div class="box-mid">
+        <div id="addTokOut" class="amt out empty">0</div>
+        <input id="addTok" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" hidden aria-label="token">
+        <span class="tok static" id="addTokSym">—</span>
+      </div>
+      <div class="box-bot"><span><span data-i18n="balance">Balance</span>: <span id="addTokBal">—</span></span></div>
+    </div>
+    <div class="stat" style="margin-top:8px"><span data-i18n="shareAfter">Your share after</span><span id="addShare">—</span></div>
+    <button class="primary" id="addBtn" type="button" disabled>…</button>
+  </div>
+
+  <div id="remPane" hidden>
+    <div class="box">
+      <div class="box-top" data-i18n="howMuch">How much to withdraw</div>
+      <div class="seg" style="margin-top:6px">
+        <button type="button" data-pct="25">25%</button>
+        <button type="button" data-pct="50">50%</button>
+        <button type="button" data-pct="75">75%</button>
+        <button type="button" data-pct="100">100%</button>
+        <span class="pct"><input id="remPct" placeholder="0" inputmode="numeric" autocomplete="off" aria-label="%">%</span>
+      </div>
+    </div>
+    <div class="stat" style="margin-top:10px"><span data-i18n="receive">You receive</span><span id="remOut">—</span></div>
+    <div class="stat"><span data-i18n="minReceived">Minimum received</span><span id="remMin">—</span></div>
+    <button class="primary" id="remBtn" type="button" disabled>…</button>
+  </div>
+  <div class="msg" id="poolMsg" hidden></div>
+</section>
+
+<!-- ========================================================== OTHER WAYS -->
+<section class="card">
+  <h2 data-i18n="otherTitle" style="margin-bottom:6px">Other ways</h2>
+  <ul class="ways">
+    <li><a href="https://app.uniswap.org/swap?chain=mainnet&amp;inputCurrency=ETH&amp;outputCurrency=0xa302877efb74f567f3605851194b46f1d5746822" target="_blank" rel="noopener">
+      <span><span data-i18n="uniTitle">Buy or sell MOLI with ETH on Ethereum</span><small data-i18n="uniSub">bMOLI on Uniswap</small></span><span class="go">&#8599;</span></a></li>
+    <li><a href="/molibra/bridgedmoli">
+      <span><span data-i18n="outTitle">Send MOLI to Ethereum</span><small data-i18n="outSub">It arrives as bMOLI</small></span><span class="go">&#8594;</span></a></li>
+    <li><a href="/molibra/return">
+      <span><span data-i18n="backTitle">Bring bMOLI back</span><small data-i18n="backSub">It arrives here as MOLI</small></span><span class="go">&#8594;</span></a></li>
+    <li><a href="/molibra/pay">
+      <span><span data-i18n="payTitle">Pay or charge with a QR code</span><small data-i18n="paySub">For shops: show a QR, get paid in MOLI</small></span><span class="go">&#8594;</span></a></li>
+    <li><a href="/molibra/connect">
+      <span><span data-i18n="connTitle">Add Molibra to your wallet</span><small data-i18n="connSub">Network setup, step by step</small></span><span class="go">&#8594;</span></a></li>
+  </ul>
+</section>
+
+<!-- ============================================================ ADVANCED -->
+<details class="card" id="advanced">
+  <summary data-i18n="advTitle">Advanced — list a new token</summary>
+  <p class="hint" data-i18n="advHelp"></p>
+  <div class="mkts" id="marketList"></div>
+
+  <label for="addToken" data-i18n="addTokenLabel">Add a token by address</label>
+  <input class="field" id="addToken" placeholder="0x…" spellcheck="false" autocomplete="off">
+  <button class="secondary" id="add" type="button" data-i18n="addTokenBtn">Add token</button>
+  <button class="secondary" id="refresh" type="button" data-i18n="refresh">Refresh</button>
+  <div class="log" id="advLog"></div>
+
+  <label for="factoryAddr" data-i18n="factoryLabel">Factory address</label>
+  <input class="field" id="factoryAddr" placeholder="0x…" spellcheck="false" autocomplete="off">
+  <p class="hint" data-i18n="gizNote"></p>
+  <button class="secondary" id="deployFactory" type="button" data-i18n="deployFactory">Deploy factory</button>
+  <label for="createToken" data-i18n="createLabel">Create a market for a token</label>
+  <input class="field" id="createToken" placeholder="0x…" spellcheck="false" autocomplete="off">
+  <button class="secondary" id="createPool" type="button" data-i18n="createBtn">Create market</button>
   <div class="log" id="factoryLog"></div>
-</div>
+</details>
+
+<footer>
+  <span data-i18n="signNote">Nothing is sent until you sign it in your wallet.</span><br>
+  <a href="/molibra/moliscan" data-i18n="explorer">Explorer</a> · <a href="/">molibra.org</a>
+</footer>
 
 </div>
 
@@ -214,6 +394,8 @@ const NODE = location.protocol.startsWith('http')
 const MOLIBRA_CHAIN_ID = '0x4f02';   // 20226
 const POOL = '0x4f34d9bc5db2396640d8eb564667e8701528b43d';
 const TOKEN = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
+// EIP-3091 shape: Moliscan answers /tx/<hash> and /address/<addr>.
+const EXPLORER = NODE + '/molibra/moliscan';
 
 /**
  * ⛔ Selectors are checked against keccak256 of their signatures by
@@ -222,22 +404,25 @@ const TOKEN = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
  * wrong when first written by hand, which is why none is hand-written now.
  */
 const SEL = {
-  reserves:      '0x75172a8b',   // reserves()
-  quote:         '0xad615dec',   // quote(uint256,uint256,uint256)
-  swapMoliIn:    '0x6446f3fe',   // swapMoliForToken(uint256)
-  swapTokenIn:   '0xdfe1601e',   // swapTokenForMoli(uint256,uint256)
-  approve:       '0x095ea7b3',   // approve(address,uint256)
-  allowance:     '0xdd62ed3e',   // allowance(address,address)
-  balanceOf:     '0x70a08231',   // balanceOf(address)
-  token:         '0xfc0c546a',   // token()
-  addLiquidity:  '0x9cd441da',   // addLiquidity(uint256,uint256)
-  allMarkets:    '0x375a7cba',   // allMarkets()
-  poolOf:        '0x988b1fa7',   // poolOf(address)
-  createPool:    '0x9ed93318',   // create(address)
-  reservesOf:    '0x802c2ef1',   // reservesOf(address[])
-  tokenCount:    '0x9f181b5e',   // tokenCount()
-  symbol:        '0x95d89b41',   // symbol()
-  decimals:      '0x313ce567',   // decimals()
+  reserves:        '0x75172a8b',   // reserves()
+  quote:           '0xad615dec',   // quote(uint256,uint256,uint256)
+  swapMoliIn:      '0x6446f3fe',   // swapMoliForToken(uint256)
+  swapTokenIn:     '0xdfe1601e',   // swapTokenForMoli(uint256,uint256)
+  approve:         '0x095ea7b3',   // approve(address,uint256)
+  allowance:       '0xdd62ed3e',   // allowance(address,address)
+  balanceOf:       '0x70a08231',   // balanceOf(address)
+  token:           '0xfc0c546a',   // token()
+  addLiquidity:    '0x9cd441da',   // addLiquidity(uint256,uint256)
+  removeLiquidity: '0x857620e1',   // removeLiquidity(uint256,uint256,uint256)
+  totalShares:     '0x3a98ef39',   // totalShares()
+  shares:          '0xce7c2ac2',   // shares(address)
+  allMarkets:      '0x375a7cba',   // allMarkets()
+  poolOf:          '0x988b1fa7',   // poolOf(address)
+  createPool:      '0x9ed93318',   // create(address)
+  reservesOf:      '0x802c2ef1',   // reservesOf(address[])
+  tokenCount:      '0x9f181b5e',   // tokenCount()
+  symbol:          '0x95d89b41',   // symbol()
+  decimals:        '0x313ce567',   // decimals()
 };
 
 /**
@@ -248,12 +433,177 @@ const SEL = {
  * market that actually has liquidity today, so seeds and discovery are merged.
  */
 const SEED_MARKETS = [
-  { token: '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a',
-    pool: '0x4f34d9bc5db2396640d8eb564667e8701528b43d', symbol: 'WSRO' },
+  { token: TOKEN, pool: POOL, symbol: 'WSRO' },
 ];
+
+/**
+ * The network as handed to the wallet. wallet_addEthereumChain first (a no-op
+ * prompt-free success when the wallet already knows it), then
+ * wallet_switchEthereumChain - so a person who has never heard of Molibra gets
+ * there from one button.
+ */
+const CHAIN_PARAMS = {
+  chainId: MOLIBRA_CHAIN_ID,
+  chainName: 'Molibra',
+  nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 },
+  rpcUrls: [NODE + '/molibra'],
+  blockExplorerUrls: [EXPLORER],
+  iconUrls: [NODE + '/icon.png'],
+};
 
 /** Deploy bytecode, injected from the built artifact — never pasted by hand. */
 const FACTORY_BYTECODE = '0x60808060405234601557611234908161001b8239f35b600080fdfe6080604052600436101561001257600080fd5b60003560e01c8063375a7cba146104435780634f64b2be14610401578063802c2ef114610282578063988b1fa71461023c5780639ed933181461008157639f181b5e1461005e57600080fd5b3461007c57600036600319011261007c576020600154604051908152f35b600080fd5b3461007c57602036600319011261007c576004356001600160a01b0381169081810361007c57811561022b576000828152602081905260409020546001600160a01b0316610200573b156101ef57604051610bdb8082019082821067ffffffffffffffff8311176101cd57602091839161062483398481520301906000f080156101e35760018060a01b03168160005260006020526040600020816bffffffffffffffffffffffff60a01b825416179055600154680100000000000000008110156101cd57806001610156920160015561053e565b81546001600160a01b0360039290921b91821b19169084901b17905560015460001981019081116101b7576020927ff8a0462f666b427ea753848be7e91f9ce413975906f6f39950be296ca9a4d524848493604051908152a3604051908152f35b634e487b7160e01b600052601160045260246000fd5b634e487b7160e01b600052604160045260246000fd5b6040513d6000823e3d90fd5b6309ee12d560e01b60005260046000fd5b5060009081526020819052604081205463fcdc5dc560e01b82526001600160a01b0316600452602490fd5b63d92e233d60e01b60005260046000fd5b3461007c57602036600319011261007c576004356001600160a01b0381169081900361007c576000526000602052602060018060a01b0360406000205416604051908152f35b3461007c57602036600319011261007c5760043567ffffffffffffffff811161007c573660238201121561007c57806004013567ffffffffffffffff811161007c573660248260051b8401011161007c576102dc816105dd565b916102e6826105dd565b9260005b838110156103d3576000906024600582901b850101356001600160a01b038116908190036103cf578252602082905260408220546001600160a01b031680156103c557604080516375172a8b60e01b815291829060049082905afa9081156103ba57838092610376575b5050600192610363838661060f565b5261036e828861060f565b525b016102ea565b91509192506040823d82116103b2575b81610393604093836105a3565b810103126103af57509081602060019351910151909288610354565b80fd5b3d9150610386565b6040513d85823e3d90fd5b5060019150610370565b8280fd5b6103ef826103fd8760405193849360408552604085019061056f565b90838203602085015261056f565b0390f35b3461007c57602036600319011261007c5760043560015481101561007c5761042a60209161053e565b905460405160039290921b1c6001600160a01b03168152f35b3461007c57600036600319011261007c57600154610460816105dd565b9061046a816105dd565b9060005b81811061049f57610491846103fd85604051938493604085526040850190610501565b908382036020850152610501565b806104ab60019261053e565b838060a01b0391549060031b1c166104c3828761060f565b526104cd8161053e565b838060a01b0391549060031b1c166000526000602052818060a01b03604060002054166104fa828661060f565b520161046e565b906020808351928381520192019060005b81811061051f5750505090565b82516001600160a01b0316845260209384019390920191600101610512565b60015481101561055957600160005260206000200190600090565b634e487b7160e01b600052603260045260246000fd5b906020808351928381520192019060005b81811061058d5750505090565b8251845260209384019390920191600101610580565b90601f8019910116810190811067ffffffffffffffff8211176101cd57604052565b67ffffffffffffffff81116101cd5760051b60200190565b906105e7826105c5565b6105f460405191826105a3565b8281528092610605601f19916105c5565b0190602036910137565b80518210156105595760209160051b01019056fe60a034608457601f610bdb38819003918201601f19168301916001600160401b03831184841017608957808492602094604052833981010312608457516001600160a01b03811690819003608457608052604051610b3b90816100a08239608051818181610101015281816101c90152818161040e015281816106dc01526108980152f35b600080fd5b634e487b7160e01b600052604160045260246000fdfe6080604052600436101561002a575b361561001957600080fd5b631dc930eb60e01b60005260046000fd5b60003560e01c80631605b17f146109645780633a98ef39146109465780636446f3fe1461080b57806375172a8b146107e657806378f954c6146107c8578063857620e1146105f85780639cd441da1461034d578063ad615dec1461032c578063ba9a7a5614610327578063ce7c2ac2146102e9578063dfe1601e1461014e578063f4325d6714610130578063fc0c546a146100eb5763fe08b58c0361000e57346100e65760003660031901126100e65760206040516103e58152f35b600080fd5b346100e65760003660031901126100e6576040517f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03168152602090f35b346100e65760003660031901126100e6576020600154604051908152f35b346100e65761015c3661099b565b60045460ff81166102d85760ff19166001176004558115610019576101876001546000549084610a8e565b9081159081156102ce575b50610019576040516323b872dd60e01b81523360048201523060248201526044810183905260208160648160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c257600091610293575b50156102825761020c826001546109b1565b60015561021b816000546109be565b600055600080808084335af161022f610a4e565b5015610282576020916040519060008252838201528160408201527ff067e8ca829f67e4f9be38e977ceedd503b4602e190ac8c71415bc72d2b8663a60603392a260ff1960045416600455604051908152f35b6312171d8360e31b60005260046000fd5b6102b5915060203d6020116102bb575b6102ad81836109cb565b810190610a03565b836101fa565b503d6102a3565b6040513d6000823e3d90fd5b9050811083610192565b63769dd35360e11b60005260046000fd5b346100e65760203660031901126100e6576004356001600160a01b038116908190036100e65760005260036020526020604060002054604051908152f35b610964565b346100e657602061034561033f36610981565b91610a8e565b604051908152f35b6103563661099b565b60045460ff81166102d85760ff19166001176004556000341580156105f0575b6105e157600254908161054957505061038f8234610a1b565b6000600382111561053b5750808060011c6001810180911161050657905b82821061051c5750505b6103e8811115610019576103e719810190811161050657906103e86002555b8110610019576040516323b872dd60e01b81523360048201523060248201526044810183905260208160648160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c2576000916104e7575b501561028257602091610454346000546109b1565b600055610463816001546109b1565b600155610472826002546109b1565b6002553360005260038352604060002061048d8382546109b1565b90557f5a3358a3d27a5373c0df2604662088d37894d56b7cfd27f315770440f4e0d919604051806104d285339534846040919493926060820195825260208201520152565b0390a260ff1960045416600455604051908152f35b610500915060203d6020116102bb576102ad81836109cb565b8361043f565b634e487b7160e01b600052601160045260246000fd5b9091506105328261052d8184610a2e565b6109b1565b60011c906103ad565b90156103b7575060016103b7565b61057461056b61056461055c8534610a1b565b845490610a2e565b9386610a1b565b60015490610a2e565b908183036105a7575b508082101561059f5750905b816103d657631dc930eb60e01b60005260046000fd5b905090610589565b818311156105d05760016105bb83856109be565b111561057d57639698399d60e01b8152600490fd5b60016105dc84846109be565b6105bb565b631dc930eb60e01b8152600490fd5b508215610376565b346100e65761060636610981565b9060045460ff81166102d85760ff1916600117600455821580156107b1575b6100195761063560005484610a1b565b916106586106466002548095610a2e565b9361065360015487610a1b565b610a2e565b9183109081156107a7575b506100195733600052600360205260406000206106818482546109be565b905561068f836002546109be565b60025561069e826000546109be565b6000556106ad816001546109be565b60015560405163a9059cbb60e01b81523360048201526024810182905260208160448160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c257600091610788575b501561028257600080808085335af1610724610a4e565b5015610282576040927f4c60206a5c1de41f3376d1d60f0949d96cb682033c90b1c2d9d9a62d4c4120c084518061076f33948688846040919493926060820195825260208201520152565b0390a260ff196004541660045582519182526020820152f35b6107a1915060203d6020116102bb576102ad81836109cb565b8461070d565b9050811084610663565b503360005260036020528260406000205410610625565b346100e65760003660031901126100e6576020600054604051908152f35b346100e65760003660031901126100e657604060005460015482519182526020820152f35b60203660031901126100e65760045460ff81166102d85760ff1916600117600455341561001957600054600154610843818334610a8e565b918215801561093b575b6100195761086991610861849234906109b1565b6000556109be565b60015560405163a9059cbb60e01b81523360048201526024810182905260208160448160006001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000165af19081156102c25760009161091c575b5015610282576020906040516001815234838201528160408201527ff067e8ca829f67e4f9be38e977ceedd503b4602e190ac8c71415bc72d2b8663a60603392a260ff1960045416600455604051908152f35b610935915060203d6020116102bb576102ad81836109cb565b826108c9565b50600435831061084d565b346100e65760003660031901126100e6576020600254604051908152f35b346100e65760003660031901126100e65760206040516103e88152f35b60609060031901126100e657600435906024359060443590565b60409060031901126100e6576004359060243590565b9190820180921161050657565b9190820391821161050657565b90601f8019910116810190811067ffffffffffffffff8211176109ed57604052565b634e487b7160e01b600052604160045260246000fd5b908160209103126100e6575180151581036100e65790565b8181029291811591840414171561050657565b8115610a38570490565b634e487b7160e01b600052601260045260246000fd5b3d15610a89573d9067ffffffffffffffff82116109ed5760405191610a7d601f8201601f1916602001846109cb565b82523d6000602084013e565b606090565b918215808015610afd575b8015610af5575b610aec576103e584029384046103e514171561050657610ac09083610a1b565b906103e88102908082046103e8149015171561050657610ae992610ae3916109b1565b90610a2e565b90565b50505050600090565b508115610aa0565b508215610a9956fea26469706673582212201ba45e4efc5bb216f2fb87bc81042b33c975aa7a27809c040e9ebfac9254dbac64736f6c634300081a0033a2646970667358221220d338c6c6874ae1aeb60932c19b1870de9eb3a6bb99223463b6905cbe6709804c64736f6c634300081a0033';
+
+/* ============================================================ language */
+
+const T = {
+  pt: {
+    connectShort: 'Conectar', wrongNet: 'Rede errada',
+    tabSwap: 'Trocar', tabPool: 'Liquidez',
+    pay: 'Você paga', receive: 'Você recebe', balance: 'Saldo',
+    connect: 'Conectar carteira', switchNet: 'Mudar para a rede Molibra',
+    loading: 'Carregando…', pickTwo: 'Escolha duas moedas diferentes',
+    noMarket: 'Ainda não há mercado para este par', enterAmount: 'Digite um valor',
+    quoting: 'Calculando o preço…', tooLarge: 'Valor maior do que o mercado comporta',
+    insufficient: 'Saldo de {0} insuficiente', approve: 'Aprovar {0}', swap: 'Trocar',
+    setSlippage: 'Ajuste a tolerância de preço (⚙)',
+    confirmWallet: 'Confirme na sua carteira…', waiting: 'Aguardando a rede…', checking: 'Conferindo…',
+    rate: 'Cotação', impact: 'Impacto no preço', fee: 'Taxa', minReceived: 'Mínimo garantido',
+    slipShort: 'Tolerância', route: 'Rota', twoHops: '0,3% em cada passo',
+    impactWarn: 'Impacto no preço de {0}: nesta quantidade, cada unidade sai mais cara. Um valor menor tem impacto menor.',
+    slipTitle: 'Tolerância de preço',
+    slipHelp: 'Se o preço mudar mais do que isso antes da confirmação, a troca é cancelada automaticamente.',
+    sent: 'Transação enviada. Aguardando confirmação…',
+    swapDone: 'Troca concluída! Você trocou {0} por cerca de {1}.',
+    approved: '{0} aprovado. Agora é só tocar no botão de novo.',
+    needApprove: 'Primeiro é preciso aprovar {0}.',
+    rejected: 'Cancelado na carteira. Nada foi enviado.',
+    wouldRevert: 'O preço mudou desde a cotação. Confira os valores e tente de novo.',
+    reverted: 'A transação não foi concluída na rede (o preço provavelmente mudou). Confira e tente de novo.',
+    timeout: 'Ainda sem confirmação depois de 3 minutos. Acompanhe pelo link.',
+    viewTx: 'Ver a transação',
+    stillWrong: 'A carteira ainda não está na rede Molibra. Escolha a rede Molibra na carteira e tente de novo.',
+    noAccount: 'A carteira não informou nenhuma conta.',
+    nodeDown: 'Não foi possível falar com a rede agora. Tente atualizar a página.',
+    market: 'Mercado',
+    poolIntro: 'Deposite MOLI e {0} na proporção do preço atual. Quem fornece liquidez recebe uma parte da taxa de 0,3% de cada troca, e pode retirar quando quiser.',
+    inMarket: 'No mercado', price: 'Preço atual', yourPosition: 'Sua posição', yourShare: 'Sua parte do mercado',
+    noPosition: 'nenhuma ainda',
+    addTab: 'Adicionar', removeTab: 'Retirar', youDeposit: 'Você deposita', andDeposit: 'E também',
+    computed: '(calculado pelo preço atual)', firstNote: '(mercado vazio: você define o preço)',
+    shareAfter: 'Sua parte depois',
+    addBtn: 'Adicionar liquidez', remBtn: 'Retirar liquidez', howMuch: 'Quanto retirar',
+    noShares: 'Você não tem liquidez neste mercado', choosePct: 'Escolha quanto retirar',
+    imbalanced: 'Não deu para casar as quantidades com o preço atual. Ajuste o valor de MOLI.',
+    addDone: 'Liquidez adicionada! Sua parte do mercado agora é {0}.',
+    remDone: 'Liquidez retirada! Você recebeu cerca de {0}.',
+    otherTitle: 'Outras formas',
+    uniTitle: 'Comprar ou vender MOLI com ETH na Ethereum', uniSub: 'bMOLI na Uniswap',
+    outTitle: 'Enviar MOLI para a Ethereum', outSub: 'Chega lá como bMOLI',
+    backTitle: 'Trazer bMOLI de volta', backSub: 'Chega aqui como MOLI',
+    payTitle: 'Pagar ou cobrar com QR code', paySub: 'Para lojas: mostre um QR e receba em MOLI',
+    connTitle: 'Adicionar a Molibra à carteira', connSub: 'Configuração da rede, passo a passo',
+    advTitle: 'Avançado — listar um novo token',
+    advHelp: 'Cada mercado tem MOLI de um lado, então qualquer token troca por qualquer outro em até dois passos, via MOLI.',
+    addTokenLabel: 'Adicionar um token pelo endereço do contrato', addTokenBtn: 'Adicionar token', refresh: 'Atualizar',
+    factoryLabel: 'Endereço da fábrica de mercados (em branco para criar uma)',
+    gizNote: 'Tokens de expressão, como o GIZ, não são contratos — por isso nunca podem ter mercado.',
+    deployFactory: 'Criar fábrica', createLabel: 'Criar o mercado de um token', createBtn: 'Criar mercado',
+    noLiquidity: 'sem liquidez', notAddress: 'Isso não é um endereço.',
+    marketsCount: '{0} mercado(s), lidos da rede agora.',
+    factoryRead: 'Não foi possível ler a fábrica: {0}',
+    deploying: 'Criando a fábrica — confirme na carteira…',
+    factoryAt: 'Fábrica criada em {0}. Adicione ?factory={0} ao endereço desta página para guardá-la.',
+    needFactory: 'Crie ou cole o endereço de uma fábrica primeiro.',
+    seeded: '{0} já tem um mercado em {1}, criado antes desta fábrica. A fábrica não o enxerga e criaria um SEGUNDO, dividindo a liquidez. Nada foi enviado.',
+    creating: 'Criando o mercado — confirme na carteira…', created: 'Mercado criado. Já aparece na lista.',
+    createFail: 'A criação falhou: esse token já tem mercado, ou o endereço não é um contrato (como um token de expressão).',
+    signNote: 'Nada é enviado sem a sua assinatura na carteira.', explorer: 'Explorador',
+  },
+  en: {
+    connectShort: 'Connect', wrongNet: 'Wrong network',
+    tabSwap: 'Swap', tabPool: 'Liquidity',
+    pay: 'You pay', receive: 'You receive', balance: 'Balance',
+    connect: 'Connect wallet', switchNet: 'Switch to Molibra',
+    loading: 'Loading…', pickTwo: 'Pick two different assets',
+    noMarket: 'No market for this pair yet', enterAmount: 'Enter an amount',
+    quoting: 'Getting a price…', tooLarge: 'Amount larger than the market can fill',
+    insufficient: 'Not enough {0}', approve: 'Approve {0}', swap: 'Swap',
+    setSlippage: 'Set the slippage tolerance (⚙)',
+    confirmWallet: 'Confirm in your wallet…', waiting: 'Waiting for the network…', checking: 'Checking…',
+    rate: 'Rate', impact: 'Price impact', fee: 'Fee', minReceived: 'Minimum received',
+    slipShort: 'Slippage', route: 'Route', twoHops: '0.3% on each step',
+    impactWarn: 'Price impact {0}: at this size each unit costs more. A smaller amount has less impact.',
+    slipTitle: 'Slippage tolerance',
+    slipHelp: 'If the price moves more than this before your trade is confirmed, it is cancelled automatically.',
+    sent: 'Transaction sent. Waiting for confirmation…',
+    swapDone: 'Swap complete! You swapped {0} for about {1}.',
+    approved: '{0} approved. Now tap the button again.',
+    needApprove: '{0} needs to be approved first.',
+    rejected: 'Cancelled in the wallet. Nothing was sent.',
+    wouldRevert: 'The price moved since the quote. Check the amounts and try again.',
+    reverted: 'The transaction did not complete on the network (the price probably moved). Check and try again.',
+    timeout: 'Still not confirmed after 3 minutes. Follow it with the link.',
+    viewTx: 'View transaction',
+    stillWrong: 'Your wallet is still not on Molibra. Pick the Molibra network in the wallet and try again.',
+    noAccount: 'The wallet returned no account.',
+    nodeDown: 'Could not reach the network just now. Try reloading the page.',
+    market: 'Market',
+    poolIntro: 'Deposit MOLI and {0} at the current price ratio. Liquidity providers receive a share of the 0.3% fee on every swap, and can withdraw at any time.',
+    inMarket: 'In the market', price: 'Current price', yourPosition: 'Your position', yourShare: 'Your share of the market',
+    noPosition: 'none yet',
+    addTab: 'Add', removeTab: 'Withdraw', youDeposit: 'You deposit', andDeposit: 'And',
+    computed: '(set by the current price)', firstNote: '(empty market: you set the price)',
+    shareAfter: 'Your share after',
+    addBtn: 'Add liquidity', remBtn: 'Withdraw liquidity', howMuch: 'How much to withdraw',
+    noShares: 'You have no liquidity in this market', choosePct: 'Choose how much to withdraw',
+    imbalanced: 'Could not match the amounts to the current price. Adjust the MOLI amount.',
+    addDone: 'Liquidity added! Your share of the market is now {0}.',
+    remDone: 'Liquidity withdrawn! You received about {0}.',
+    otherTitle: 'Other ways',
+    uniTitle: 'Buy or sell MOLI with ETH on Ethereum', uniSub: 'bMOLI on Uniswap',
+    outTitle: 'Send MOLI to Ethereum', outSub: 'It arrives as bMOLI',
+    backTitle: 'Bring bMOLI back', backSub: 'It arrives here as MOLI',
+    payTitle: 'Pay or charge with a QR code', paySub: 'For shops: show a QR, get paid in MOLI',
+    connTitle: 'Add Molibra to your wallet', connSub: 'Network setup, step by step',
+    advTitle: 'Advanced — list a new token',
+    advHelp: 'Every market has MOLI on one side, so any token trades for any other in at most two steps, via MOLI.',
+    addTokenLabel: 'Add a token by its contract address', addTokenBtn: 'Add token', refresh: 'Refresh',
+    factoryLabel: 'Market factory address (leave blank to deploy one)',
+    gizNote: 'Expression tokens such as GIZ are not contracts, so they can never have a market.',
+    deployFactory: 'Deploy factory', createLabel: 'Create the market for a token', createBtn: 'Create market',
+    noLiquidity: 'no liquidity', notAddress: 'That is not an address.',
+    marketsCount: '{0} market(s), read from the chain just now.',
+    factoryRead: 'Could not read the factory: {0}',
+    deploying: 'Deploying the factory — confirm in your wallet…',
+    factoryAt: 'Factory at {0}. Add ?factory={0} to this page address to keep it.',
+    needFactory: 'Deploy or paste a factory address first.',
+    seeded: '{0} already has a pool at {1}, created before this factory existed. The factory cannot see it and would deploy a SECOND one, splitting the liquidity. Nothing was sent.',
+    creating: 'Creating the market — confirm in your wallet…', created: 'Market created. It is in the list now.',
+    createFail: 'Creation failed: that token already has a market, or the address is not a contract (as an expression token is not).',
+    signNote: 'Nothing is sent until you sign it in your wallet.', explorer: 'Explorer',
+  },
+};
+
+let LANG = /^pt/i.test(document.documentElement.lang) ? 'pt' : 'en';
+
+function t(key) {
+  let s = (T[LANG] && T[LANG][key]) || T.en[key] || key;
+  for (let i = 1; i < arguments.length; i++) s = s.split('{' + (i - 1) + '}').join(String(arguments[i]));
+  return s;
+}
+
+function setLang(l) {
+  LANG = l === 'pt' ? 'pt' : 'en';
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  try { localStorage.setItem('molibra.lang', LANG); } catch (e) {}
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  $('langPt').className = LANG === 'pt' ? 'on' : '';
+  $('langEn').className = LANG === 'en' ? 'on' : '';
+  render();
+}
+
+/* ============================================================= helpers */
 
 const $ = (id) => document.getElementById(id);
 const say = (id, m, bad) => { const e = $(id); e.textContent = m; e.className = 'log' + (bad ? ' bad' : ''); };
@@ -261,12 +611,16 @@ const word = (v) => BigInt(v).toString(16).padStart(64, '0');
 const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
 const hex = (v) => '0x' + BigInt(v).toString(16);
 const isAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a || '').trim());
+const toBig = (h) => (h && h !== '0x' ? BigInt(h) : 0n);
 const UNIT = 10n ** 18n;
 const MOLI = 'MOLI';
+// MAX on MOLI leaves this much behind, because the swap itself needs gas.
+const GAS_RESERVE = UNIT / 100n;   // 0.01 MOLI
 
 /** Decimal string -> wei. ⛔ No floating point anywhere near an amount. */
 function toWei(s) {
-  const t = String(s ?? '').trim();
+  // A comma is the decimal separator in Portuguese; "1,5" means one and a half.
+  const t = String(s ?? '').trim().replace(',', '.');
   if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return null;
   const parts = t.split('.');
   const w = parts[0];
@@ -275,6 +629,7 @@ function toWei(s) {
   const v = BigInt(w || '0') * UNIT + BigInt(frac || '0');
   return v > 0n ? v : null;
 }
+
 function fromWei(v, places) {
   const p = places === undefined ? 6 : places;
   const n = BigInt(v);
@@ -283,11 +638,47 @@ function fromWei(v, places) {
   return f ? whole + '.' + f : String(whole);
 }
 
+function ceilDiv(a, b) {
+  return a === 0n ? 0n : (a - 1n) / b + 1n;
+}
+
+/** Wei -> what a person reads: grouped, localised, BigInt all the way. */
+function fmt(v, places) {
+  const n = BigInt(v);
+  const p = places !== undefined ? places : (n >= 1000n * UNIT ? 2 : n >= UNIT ? 4 : 6);
+  const s = fromWei(n, p);
+  const pt = LANG === 'pt';
+  if (s === '0' && n > 0n) return pt ? '< 0,000001' : '< 0.000001';
+  const parts = s.split('.');
+  const g = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, pt ? '.' : ',');
+  return parts[1] ? g + (pt ? ',' : '.') + parts[1] : g;
+}
+
+/** num/den as a percentage with two decimals, from integers. */
+function pctOf(num, den) {
+  if (den === 0n) return '0%';
+  const q = num * 10000n / den;
+  if (q === 0n && num > 0n) return LANG === 'pt' ? '< 0,01%' : '< 0.01%';
+  return (q / 100n).toString() + (LANG === 'pt' ? ',' : '.') + (q % 100n).toString().padStart(2, '0') + '%';
+}
+const dec = (s) => (LANG === 'pt' ? String(s).replace('.', ',') : String(s));
+
+/* ============================================================== state */
+
 let account = null;
+let chainOk = false;
 let markets = [];
 let lastPlan = null;
+let loaded = false;
+let busy = null;            // a dictionary KEY while a wallet step is in flight, so a language switch relabels it
+let quoteSeq = 0;
+let balMoli = null;
+const tokBal = {};
+let pool = null;            // { m, ts, my, allowance } for the market in the Liquidity tab
+let poolMode = 'add';
+let slipStr = '0.5';
 
-const eth = () => window.molibraWallet.require();
+const eth = () => window.molibraWallet.require($('walletHelp'));
 
 async function rpc(method, params) {
   const r = await fetch(NODE + '/molibra', {
@@ -311,38 +702,54 @@ function decodeString(hexStr) {
   } catch (e) { return null; }
 }
 
-async function requireMolibra() {
-  if (!account) throw new Error('connect the wallet first');
-  const id = await eth().request({ method: 'eth_chainId' });
-  if (BigInt(id) === BigInt(MOLIBRA_CHAIN_ID)) return;
+/* ============================================================= wallet */
+
+const isRejection = (e) => Boolean(e) && (e.code === 4001 || /user (rejected|denied|cancel)/i.test(String(e.message || '')));
+
+async function readChain() {
   try {
-    await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MOLIBRA_CHAIN_ID }] });
-  } catch (e) {
-    if (e.code === 4902) {
-      await eth().request({ method: 'wallet_addEthereumChain', params: [{
-        chainId: MOLIBRA_CHAIN_ID, chainName: 'Molibra',
-        nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 },
-        rpcUrls: [NODE + '/molibra'],
-      }] });
-    } else throw e;
-  }
-  if (BigInt(await eth().request({ method: 'eth_chainId' })) !== BigInt(MOLIBRA_CHAIN_ID)) {
-    throw new Error('still not on Molibra');
-  }
+    chainOk = BigInt(await eth().request({ method: 'eth_chainId' })) === BigInt(MOLIBRA_CHAIN_ID);
+  } catch (e) { chainOk = false; }
 }
 
-$('connect').onclick = async () => {
-  try {
-    const accs = await eth().request({ method: 'eth_requestAccounts' });
-    account = accs[0];
-    $('acct').textContent = account.slice(0, 10) + '…' + account.slice(-6);
-    await requireMolibra();
-    $('banner').innerHTML = 'connected — <b>nothing is sent until you sign it</b>';
-    await refresh();
-  } catch (e) { say('walletLog', e.message, true); }
-};
+async function connect() {
+  const accs = await eth().request({ method: 'eth_requestAccounts' });
+  account = accs && accs[0] ? String(accs[0]).toLowerCase() : null;
+  if (!account) throw new Error(t('noAccount'));
+  $('walletHelp').hidden = true;
+  await readChain();
+  render();
+  // One less tap: a person who just connected wants to trade, so the network
+  // switch is offered straight away. Declining leaves the button on "Switch".
+  // Balances are read from the node, not the wallet, so they load even if the
+  // switch is declined.
+  try { if (!chainOk) await switchChain(); }
+  finally { await refresh(); }
+}
 
-/* ----------------------------------------------------------- discovery */
+/**
+ * Add the network, then switch to it. The add is what makes a wallet that has
+ * never seen Molibra able to switch at all; the switch is what moves a wallet
+ * that already knew it. Only a rejection by the person stops the sequence.
+ */
+async function switchChain() {
+  const w = eth();
+  try { await w.request({ method: 'wallet_addEthereumChain', params: [CHAIN_PARAMS] }); }
+  catch (e) { if (isRejection(e)) throw e; }
+  try { await w.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MOLIBRA_CHAIN_ID }] }); }
+  catch (e) { if (isRejection(e)) throw e; }
+  await readChain();
+  render();
+  if (!chainOk) throw new Error(t('stillWrong'));
+}
+
+async function requireMolibra() {
+  if (!account) await connect();
+  await readChain();
+  if (!chainOk) await switchChain();
+}
+
+/* ======================================================== discovery */
 
 async function discover() {
   const seen = new Map();
@@ -354,92 +761,120 @@ async function discover() {
       // allMarkets() returns both arrays in one call, so a list of n tokens
       // costs one request rather than n.
       const raw = (await call(f, SEL.allMarkets)).replace(/^0x/, '');
-      const count = parseInt(raw.slice(128, 192), 16);
+      const count = parseInt(raw.slice(128, 192), 16) || 0;
       const poolOff = 192 + count * 64 + 64;
       for (let i = 0; i < count; i++) {
         const tok = '0x' + raw.slice(192 + i * 64 + 24, 192 + i * 64 + 64);
         const pool = '0x' + raw.slice(poolOff + i * 64 + 24, poolOff + i * 64 + 64);
         if (!seen.has(tok)) seen.set(tok, { token: tok, pool: pool, symbol: null });
       }
-    } catch (e) { say('poolLog', 'factory read failed: ' + e.message, true); }
+    } catch (e) { say('advLog', t('factoryRead', e.message), true); }
   }
 
   let extras = [];
   try { extras = JSON.parse(localStorage.getItem('molibra.tokens') || '[]'); } catch (e) { extras = []; }
-  for (const t of extras) {
-    if (isAddr(t) && !seen.has(t.toLowerCase())) {
-      seen.set(t.toLowerCase(), { token: t.toLowerCase(), pool: null, symbol: null });
+  for (const x of extras) {
+    if (isAddr(x) && !seen.has(x.toLowerCase())) {
+      seen.set(x.toLowerCase(), { token: x.toLowerCase(), pool: null, symbol: null });
     }
   }
   return Array.from(seen.values());
 }
 
+async function loadMarket(m) {
+  if (!m.symbol) {
+    const s = await call(m.token, SEL.symbol).catch(() => null);
+    m.symbol = (s && decodeString(s)) || m.token.slice(0, 8);
+  }
+  if (!m.pool) {
+    const f = $('factoryAddr').value.trim();
+    if (isAddr(f)) {
+      const p = '0x' + (await call(f, SEL.poolOf + addr32(m.token)).catch(() => '0x' + '0'.repeat(64))).slice(-40);
+      if (/^0x0{40}$/.test(p) === false) m.pool = p;
+    }
+  }
+  m.rMoli = 0n; m.rTok = 0n;
+  if (m.pool) {
+    try {
+      const raw = (await call(m.pool, SEL.reserves)).replace(/^0x/, '');
+      m.rMoli = BigInt('0x' + raw.slice(0, 64));
+      m.rTok = BigInt('0x' + raw.slice(64, 128));
+    } catch (e) { m.rMoli = 0n; m.rTok = 0n; }
+  }
+  if (account) tokBal[m.token] = toBig(await call(m.token, SEL.balanceOf + addr32(account)).catch(() => '0x'));
+}
+
+/** Everything the page shows, read from the chain again. */
 async function refresh() {
   try {
-    markets = await discover();
-    for (const m of markets) {
-      if (!m.symbol) {
-        const s = await call(m.token, SEL.symbol).catch(() => null);
-        m.symbol = (s && decodeString(s)) || m.token.slice(0, 8);
-      }
-      if (!m.pool) {
-        const f = $('factoryAddr').value.trim();
-        if (isAddr(f)) {
-          const p = '0x' + (await call(f, SEL.poolOf + addr32(m.token)).catch(() => '0x' + '0'.repeat(64))).slice(-40);
-          if (/^0x0{40}$/.test(p) === false) m.pool = p;
-        }
-      }
-      if (m.pool) {
-        try {
-          const raw = (await call(m.pool, SEL.reserves)).replace(/^0x/, '');
-          m.rMoli = BigInt('0x' + raw.slice(0, 64));
-          m.rTok = BigInt('0x' + raw.slice(64, 128));
-        } catch (e) { m.rMoli = 0n; m.rTok = 0n; }
-      } else { m.rMoli = 0n; m.rTok = 0n; }
-    }
-
-    const dl = $('marketList');
-    dl.innerHTML = '';
-    for (const m of markets) {
-      const price = m.rMoli > 0n ? fromWei(m.rTok * UNIT / m.rMoli, 6) + ' per MOLI' : 'no liquidity';
-      const depth = m.rMoli > 0n ? fromWei(m.rMoli, 2) + ' MOLI · ' : '';
-      dl.insertAdjacentHTML('beforeend', '<dt>' + m.symbol + '</dt><dd>' + depth + price + '</dd>');
-    }
-    if (!markets.length) dl.innerHTML = '<dt>none</dt><dd>deploy a factory or add a token</dd>';
-
+    const found = await discover();
+    await Promise.all(found.map(loadMarket));
+    markets = found;
+    balMoli = account ? BigInt(await rpc('eth_getBalance', [account, 'latest'])) : null;
+    loaded = true;
+    $('netNote').hidden = true;
     fillSelectors();
-    if (account) {
-      $('balMoli').textContent = fromWei(BigInt(await rpc('eth_getBalance', [account, 'latest']))) + ' MOLI';
-      const id = await eth().request({ method: 'eth_chainId' });
-      $('chain').textContent = BigInt(id) === BigInt(MOLIBRA_CHAIN_ID) ? 'Molibra 20226' : 'chain ' + BigInt(id);
-    }
-    say('poolLog', markets.length + ' market(s), read from the chain just now');
+    renderMarkets();
+    say('advLog', t('marketsCount', markets.length));
+    await refreshPool();
     await requote();
-  } catch (e) { say('poolLog', e.message, true); }
+  } catch (e) {
+    $('netNote').textContent = t('nodeDown') + ' (' + e.message + ')';
+    $('netNote').hidden = false;
+    render();
+  }
 }
-$('refresh').onclick = () => refresh();
+
+function option(value, label) {
+  const o = document.createElement('option');
+  o.value = value; o.textContent = label;
+  return o;
+}
 
 function fillSelectors() {
-  let opts = '<option value="' + MOLI + '">MOLI</option>';
-  for (const m of markets) opts += '<option value="' + m.token + '">' + m.symbol + '</option>';
   for (const id of ['fromSel', 'toSel']) {
-    const cur = $(id).value;
-    $(id).innerHTML = opts;
-    if (cur) $(id).value = cur;
+    const el = $(id); const cur = el.value;
+    el.textContent = '';
+    el.appendChild(option(MOLI, 'MOLI'));
+    for (const m of markets) el.appendChild(option(m.token, m.symbol));
+    if (cur && Array.from(el.options).some((o) => o.value === cur)) el.value = cur;
   }
   if (!$('fromSel').value) $('fromSel').value = MOLI;
   if (!$('toSel').value || $('toSel').value === $('fromSel').value) {
-    $('toSel').value = markets.length ? markets[0].token : MOLI;
+    $('toSel').value = $('fromSel').value === MOLI ? (markets.length ? markets[0].token : MOLI) : MOLI;
+  }
+  const ps = $('poolSel'); const curP = ps.value;
+  ps.textContent = '';
+  for (const m of markets) if (m.pool) ps.appendChild(option(m.token, 'MOLI / ' + m.symbol));
+  if (curP && Array.from(ps.options).some((o) => o.value === curP)) ps.value = curP;
+}
+
+function renderMarkets() {
+  const box = $('marketList');
+  box.textContent = '';
+  for (const m of markets) {
+    const row = document.createElement('div');
+    row.className = 'stat';
+    const a = document.createElement('span'); a.textContent = m.symbol;
+    const b = document.createElement('span');
+    // Spot price here is a reserve ratio read right now — not an oracle.
+    // Anything building on it should read the pool itself and know that one
+    // trade moves it.
+    b.textContent = m.rMoli > 0n
+      ? fmt(m.rMoli) + ' MOLI + ' + fmt(m.rTok) + ' ' + m.symbol
+      : t('noLiquidity');
+    row.appendChild(a); row.appendChild(b);
+    box.appendChild(row);
   }
 }
 
-/* -------------------------------------------------------------- routing */
+/* ============================================================ routing */
 
-const marketFor = (t) => markets.find((m) => m.token.toLowerCase() === String(t).toLowerCase());
-const symbolOf = (t) => {
-  if (t === MOLI) return MOLI;
-  const m = marketFor(t);
-  return m ? m.symbol : String(t).slice(0, 8);
+const marketFor = (x) => markets.find((m) => m.token.toLowerCase() === String(x).toLowerCase());
+const symbolOf = (x) => {
+  if (x === MOLI) return MOLI;
+  const m = marketFor(x);
+  return m ? m.symbol : String(x).slice(0, 8);
 };
 
 /**
@@ -480,152 +915,467 @@ function spotOf(plan, amount) {
   return amt;
 }
 
+/** Tolerance in basis points, parsed without floats; null when unusable. */
+function slippageBp() {
+  const s = String(slipStr).trim().replace(',', '.');
+  if (!/^\d{1,2}(\.\d{1,2})?$/.test(s)) return null;
+  const parts = s.split('.');
+  const bp = Number(parts[0]) * 100 + Number(((parts[1] || '') + '00').slice(0, 2));
+  return bp >= 1 && bp <= 5000 ? bp : null;
+}
+
 async function requote() {
+  const seq = ++quoteSeq;
   const from = $('fromSel').value; const to = $('toSel').value;
   const amount = toWei($('amountIn').value);
-  const reset = (msg) => {
-    $('amountOut').textContent = '—';
-    for (const k of ['route', 'rate', 'impact', 'fee', 'minOut']) $(k).textContent = '—';
-    $('impactNote').className = 'note';
-    $('impactNote').textContent = msg || '';
-    $('swap').disabled = true; lastPlan = null;
-  };
-  if (!from || !to || from === to) return reset('pick two different assets');
-  const plan = planRoute(from, to);
-  if (!plan) return reset('no route — one of these has no pool yet. Create a market in 04.');
-  if (!amount) return reset('');
+  const key = from + '|' + to + '|' + String(amount);
+  if (lastPlan && lastPlan.key !== key) lastPlan = null;
+  const plan = from && to && from !== to ? planRoute(from, to) : null;
+  if (!plan || !amount) { lastPlan = null; renderSwap(); return; }
+  renderSwap();
 
   const out = await quoteRoute(plan, amount);
-  lastPlan = { plan: plan, amount: amount, out: out, from: from, to: to };
-  if (out === 0n) return reset('this pool cannot fill that amount');
-
-  $('route').textContent = plan.length === 1
-    ? symbolOf(from) + ' → ' + symbolOf(to)
-    : symbolOf(from) + ' → MOLI → ' + symbolOf(to);
-  $('amountOut').textContent = fromWei(out) + ' ' + symbolOf(to);
-  $('rate').textContent = '1 ' + symbolOf(from) + ' = ' + fromWei(out * UNIT / amount) + ' ' + symbolOf(to);
-
-  const spot = spotOf(plan, amount);
-  const impactBp = spot > 0n ? Number((spot - out) * 10000n / spot) / 100 : 0;
-  $('impact').textContent = impactBp.toFixed(2) + '%';
-  $('fee').textContent = plan.length === 1 ? '0.30% (inside the quote)' : '0.60% — two hops';
-
-  const slip = Number($('slippage').value);
-  const ok = Number.isFinite(slip) && slip >= 0 && slip < 100;
-  const minOut = ok ? out * BigInt(Math.round((100 - slip) * 100)) / 10000n : 0n;
-  $('minOut').textContent = ok ? fromWei(minOut) + ' ' + symbolOf(to) : 'set a tolerance';
-
-  const note = $('impactNote');
-  if (impactBp >= 10) {
-    note.className = 'note bad';
-    note.innerHTML = '⛔⛔ <b>Impact ' + impactBp.toFixed(2) + '%.</b> You are trading a large '
-      + 'fraction of this pool and will receive far less than spot. A smaller amount reduces it '
-      + 'roughly in proportion.';
-  } else if (impactBp >= 2) {
-    note.className = 'note warn';
-    note.innerHTML = '⚠ <b>Impact ' + impactBp.toFixed(2) + '%.</b> Thin pool — the rate is '
-      + 'meaningfully worse than spot.';
-  } else {
-    note.className = 'note';
-    note.innerHTML = 'Impact ' + impactBp.toFixed(2) + '%. The figure above is what the contract '
-      + 'itself returns for this amount.';
-  }
-
+  let allowance = null;
   if (account && from !== MOLI) {
-    const bal = BigInt(await call(from, SEL.balanceOf + addr32(account)));
-    $('fromBal').textContent = 'balance ' + fromWei(bal) + ' ' + symbolOf(from);
-  } else if (account) {
-    $('fromBal').textContent = 'balance ' + $('balMoli').textContent;
+    allowance = toBig(await call(from, SEL.allowance + addr32(account) + addr32(plan[0].pool)));
+  }
+  if (seq !== quoteSeq) return;      // a newer keystroke owns the screen now
+  lastPlan = { key: key, plan: plan, amount: amount, out: out, from: from, to: to, allowance: allowance };
+  renderSwap();
+}
+
+/* ============================================================ drawing */
+
+function balOf(x) {
+  if (!account) return null;
+  if (x === MOLI) return balMoli;
+  return tokBal[x] === undefined ? null : tokBal[x];
+}
+const balText = (x) => { const b = balOf(x); return b === null ? '—' : fmt(b); };
+
+function setBtn(btn, st) {
+  btn.textContent = st.label;
+  btn.disabled = Boolean(st.disabled);
+  btn._act = st.act || null;
+}
+
+function swapState() {
+  if (busy) return { label: t(busy), disabled: true };
+  if (!account) return { label: t('connect'), act: connect };
+  if (!chainOk) return { label: t('switchNet'), act: switchChain };
+  if (!loaded) return { label: t('loading'), disabled: true };
+  const from = $('fromSel').value; const to = $('toSel').value;
+  if (!from || !to || from === to) return { label: t('pickTwo'), disabled: true };
+  if (!planRoute(from, to)) return { label: t('noMarket'), disabled: true };
+  const amount = toWei($('amountIn').value);
+  if (!amount) return { label: t('enterAmount'), disabled: true };
+  const p = lastPlan;
+  if (!p) return { label: t('quoting'), disabled: true };
+  if (p.out === 0n) return { label: t('tooLarge'), disabled: true };
+  const bal = balOf(from);
+  if (bal !== null && amount > bal) return { label: t('insufficient', symbolOf(from)), disabled: true };
+  if (slippageBp() === null) return { label: t('setSlippage'), disabled: true };
+  if (from !== MOLI && (p.allowance === null || p.allowance < p.amount)) {
+    return { label: t('approve', symbolOf(from)), act: doApprove };
+  }
+  return { label: t('swap'), act: doSwap };
+}
+
+function renderSwap() {
+  const from = $('fromSel').value; const to = $('toSel').value;
+  $('fromBal').textContent = balText(from);
+  $('toBal').textContent = balText(to);
+  $('maxBtn').hidden = balOf(from) === null;
+  const slipBp = slippageBp();
+  $('slipShow').textContent = slipBp === null ? '—' : dec(slipStr.replace(',', '.')) + '%';
+  for (const b of document.querySelectorAll('#slipSeg button')) {
+    b.className = b.dataset.slip === slipStr ? 'on' : '';
   }
 
-  $('swap').disabled = !account || !ok;
-  await refreshAllowance();
+  const p = lastPlan;
+  const outEl = $('amountOut');
+  if (p && p.out > 0n) {
+    const symF = symbolOf(p.from); const symT = symbolOf(p.to);
+    outEl.textContent = fmt(p.out);
+    outEl.classList.remove('empty');
+    $('rate').textContent = '1 ' + symF + ' = ' + fmt(p.out * UNIT / p.amount) + ' ' + symT;
+
+    // The fee has its own line, so impact is measured against spot AFTER the
+    // fee: what the size of the trade costs, not what the fee costs.
+    const spot = spotOf(p.plan, p.amount);
+    let net = spot;
+    for (let i = 0; i < p.plan.length; i++) net = net * 997n / 1000n;
+    const impactBp = net > p.out ? Number((net - p.out) * 10000n / net) / 100 : 0;
+    $('impact').textContent = impactBp < 0.01 ? (LANG === 'pt' ? '< 0,01%' : '< 0.01%') : dec(impactBp.toFixed(2)) + '%';
+    $('fee').textContent = p.plan.length === 1
+      ? dec('0.3') + '% · ' + fmt(p.amount * 3n / 1000n) + ' ' + symF
+      : t('twoHops');
+    const minOut = slipBp === null ? null : p.out * BigInt(10000 - slipBp) / 10000n;
+    $('minOut').textContent = minOut === null ? '—' : fmt(minOut) + ' ' + symT;
+    $('routeRow').hidden = p.plan.length === 1;
+    $('route').textContent = symF + ' → MOLI → ' + symT;
+    $('details').hidden = false;
+
+    // Shown as a plain number on every trade; a gentle note only above 5%.
+    const note = $('impactNote');
+    if (impactBp > 5) {
+      note.textContent = t('impactWarn', dec(impactBp.toFixed(2)) + '%');
+      note.hidden = false;
+    } else note.hidden = true;
+  } else {
+    outEl.textContent = '0';
+    outEl.classList.add('empty');
+    $('details').hidden = true;
+    $('impactNote').hidden = true;
+  }
+  setBtn($('action'), swapState());
 }
 
-for (const id of ['amountIn', 'slippage']) $(id).oninput = () => requote().catch((e) => say('swapLog', e.message, true));
-for (const id of ['fromSel', 'toSel']) $(id).onchange = () => requote().catch((e) => say('swapLog', e.message, true));
-$('flip').onclick = () => {
-  const a = $('fromSel').value; $('fromSel').value = $('toSel').value; $('toSel').value = a;
-  requote().catch(() => {});
-};
-
-/* ------------------------------------------------------------ approval */
-
-async function refreshAllowance() {
-  const btn = $('approve');
-  if (!lastPlan || !account || lastPlan.from === MOLI) { btn.style.display = 'none'; return; }
-  const spender = lastPlan.plan[0].pool;
-  const a = BigInt(await call(lastPlan.from, SEL.allowance + addr32(account) + addr32(spender)));
-  btn.style.display = a >= lastPlan.amount ? 'none' : 'inline-block';
-  btn.textContent = 'Approve ' + symbolOf(lastPlan.from);
+function renderHeader() {
+  const chip = $('walletChip');
+  chip.classList.toggle('warn', Boolean(account) && !chainOk);
+  if (!account) chip.textContent = t('connectShort');
+  else if (!chainOk) chip.textContent = t('wrongNet');
+  else chip.textContent = account.slice(0, 6) + '…' + account.slice(-4);
 }
 
-$('approve').onclick = async () => {
-  try {
-    await requireMolibra();
-    if (!lastPlan) throw new Error('nothing to approve');
-    // ⛔ Exactly this trade, never an unlimited allowance. Infinite approval is
-    // convenient once and permanent afterwards.
-    const data = SEL.approve + addr32(lastPlan.plan[0].pool) + word(lastPlan.amount);
-    const h = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: lastPlan.from, data: data }] });
-    await waitFor(h, 'approve');
-    say('swapLog', 'approved for exactly this amount.');
-    await requote();
-  } catch (e) { say('swapLog', e.message, true); }
-};
+function render() {
+  renderHeader();
+  renderSwap();
+  renderPool();
+}
 
-/* ---------------------------------------------------------------- swap */
+/* ============================================================ messages */
 
-async function waitFor(hash, label) {
-  say('swapLog', label + ': ' + hash + '\nwaiting…');
+function showMsg(id, kind, text, hash) {
+  const el = $(id);
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+  el.textContent = text;
+  if (hash) {
+    el.appendChild(document.createElement('br'));
+    const a = document.createElement('a');
+    a.href = EXPLORER + '/tx/' + hash;
+    a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = t('viewTx') + ' ↗';
+    el.appendChild(a);
+  }
+  el.hidden = false;
+}
+
+function showErr(id, e) {
+  if (!window.ethereum) {
+    // mobilewallet.js has already put the "open in MetaMask" link in walletHelp.
+    $('walletMsg').textContent = String((e && e.message) || e);
+    $('walletHelp').hidden = false;
+    return;
+  }
+  if (isRejection(e)) return showMsg(id, 'warn', t('rejected'));
+  showMsg(id, 'bad', String((e && e.message) || e), e && e.hash);
+}
+
+async function run(fn, msgId) {
+  if (!fn || busy) return;
+  $(msgId).hidden = true;
+  try { await fn(); }
+  catch (e) { showErr(msgId, e); }
+  finally { busy = null; render(); }
+}
+
+/* ======================================================= transactions */
+
+async function waitFor(hash) {
   for (let i = 0; i < 60; i++) {
     const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
-    if (r) { if (r.status !== '0x1') throw new Error(label + ' reverted'); return r; }
+    if (r) {
+      if (r.status !== '0x1') { const e = new Error(t('reverted')); e.hash = hash; throw e; }
+      return r;
+    }
     await new Promise((res) => setTimeout(res, 3000));
   }
-  throw new Error('not mined within three minutes');
+  const e = new Error(t('timeout')); e.hash = hash; throw e;
 }
 
-$('swap').onclick = async () => {
-  try {
-    await requireMolibra();
-    // ⛔ Re-quote immediately before signing: reserves may have moved since the
-    // number on screen was fetched, and minOut must come from what is true now.
-    await refresh();
-    const out = lastPlan ? lastPlan.out : 0n;
-    if (!lastPlan || out === 0n) throw new Error('no fillable route');
-    const plan = lastPlan.plan;
-    const slip = Number($('slippage').value);
-    let carried = lastPlan.amount;
+/**
+ * Run the EXACT transaction as an eth_call before the wallet is asked to sign
+ * it. A trade that would revert is caught here, with a plain explanation,
+ * instead of costing the person gas and showing them "failed".
+ */
+async function preflight(tx, msgKey) {
+  busy = 'checking'; render();
+  const c = { from: tx.from, to: tx.to, data: tx.data };
+  if (tx.value) c.value = tx.value;
+  try { await rpc('eth_call', [c, 'latest']); }
+  catch (e) { throw new Error(t(msgKey)); }
+}
 
-    for (let i = 0; i < plan.length; i++) {
-      const hop = plan[i];
-      const last = i === plan.length - 1;
-      const hopOut = await quoteRoute([hop], carried);
-      // ⛔ Only the FINAL hop carries the tolerance. An intermediate hop bounded
-      // by a guess would revert on ordinary movement halfway through a route,
-      // leaving the trader holding MOLI they did not ask for.
-      const minOut = last ? out * BigInt(Math.round((100 - slip) * 100)) / 10000n : 0n;
-      const tx = hop.moliIn
-        ? { from: account, to: hop.pool, value: hex(carried), data: SEL.swapMoliIn + word(minOut) }
-        : { from: account, to: hop.pool, data: SEL.swapTokenIn + word(carried) + word(minOut) };
-      say('swapLog', 'hop ' + (i + 1) + '/' + plan.length + ': awaiting signature…');
-      const h = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
-      await waitFor(h, 'hop ' + (i + 1));
-      carried = hopOut;
-    }
-    say('swapLog', 'done. The pool paid at least your minimum, or it would have reverted.');
-    await refresh();
-  } catch (e) {
-    const m = String(e.message || '');
-    say('swapLog', /Insufficient|revert/i.test(m)
-      ? m + '\n\n⛔ A revert here usually means the price moved past your tolerance between '
-        + 'quoting and mining — the tolerance doing its job. Re-quote and try again.'
-      : m, true);
+async function sendTx(tx, msgId) {
+  busy = 'confirmWallet'; render();
+  const h = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
+  busy = 'waiting'; render();
+  showMsg(msgId, '', t('sent'), h);
+  const r = await waitFor(h);
+  return { h: h, r: r };
+}
+
+/* ---------------------------------------------------------- approval */
+
+async function doApprove() {
+  await requireMolibra();
+  if (!lastPlan) throw new Error(t('quoting'));
+  // ⛔ Exactly this trade, never an unlimited allowance. Infinite approval is
+  // convenient once and permanent afterwards.
+  const data = SEL.approve + addr32(lastPlan.plan[0].pool) + word(lastPlan.amount);
+  const sym = symbolOf(lastPlan.from);
+  const res = await sendTx({ from: account, to: lastPlan.from, data: data }, 'swapMsg');
+  await refresh();
+  showMsg('swapMsg', 'ok', t('approved', sym), res.h);
+}
+
+/* --------------------------------------------------------------- swap */
+
+async function doSwap() {
+  await requireMolibra();
+  // ⛔ Re-quote immediately before signing: reserves may have moved since the
+  // number on screen was fetched, and minOut must come from what is true now.
+  await refresh();
+  const out = lastPlan ? lastPlan.out : 0n;
+  if (!lastPlan || out === 0n) throw new Error(t('tooLarge'));
+  const p = lastPlan;
+  if (p.from !== MOLI && (p.allowance === null || p.allowance < p.amount)) {
+    throw new Error(t('needApprove', symbolOf(p.from)));
   }
-};
+  const slipBp = slippageBp();
+  if (slipBp === null) throw new Error(t('setSlippage'));
+  const plan = p.plan;
+  let carried = p.amount;
+  let h = null;
 
-/* ------------------------------------------------------------- factory */
+  for (let i = 0; i < plan.length; i++) {
+    const hop = plan[i];
+    const last = i === plan.length - 1;
+    const hopOut = await quoteRoute([hop], carried);
+    // ⛔ Only the FINAL hop carries the tolerance. An intermediate hop bounded
+    // by a guess would revert on ordinary movement halfway through a route,
+    // leaving the trader holding MOLI they did not ask for.
+    const minOut = last ? out * BigInt(10000 - slipBp) / 10000n : 0n;
+    const tx = hop.moliIn
+      ? { from: account, to: hop.pool, value: hex(carried), data: SEL.swapMoliIn + word(minOut) }
+      : { from: account, to: hop.pool, data: SEL.swapTokenIn + word(carried) + word(minOut) };
+    await preflight(tx, 'wouldRevert');
+    h = (await sendTx(tx, 'swapMsg')).h;
+    carried = hopOut;
+  }
+  const paid = fmt(p.amount) + ' ' + symbolOf(p.from);
+  const got = fmt(out) + ' ' + symbolOf(p.to);
+  $('amountIn').value = '';
+  lastPlan = null;
+  await refresh();
+  showMsg('swapMsg', 'ok', t('swapDone', paid, got), h);
+}
+
+/* ========================================================== liquidity */
+
+async function refreshPool() {
+  const sel = $('poolSel').value;
+  const m = markets.find((x) => x.pool && x.token === sel) || markets.find((x) => x.pool);
+  if (!m) { pool = null; renderPool(); return; }
+  const ts = toBig(await call(m.pool, SEL.totalShares));
+  let my = 0n; let allowance = 0n;
+  if (account) {
+    const r = await Promise.all([
+      call(m.pool, SEL.shares + addr32(account)),
+      call(m.token, SEL.allowance + addr32(account) + addr32(m.pool)),
+    ]);
+    my = toBig(r[0]); allowance = toBig(r[1]);
+  }
+  pool = { m: m, ts: ts, my: my, allowance: allowance };
+  renderPool();
+}
+
+/**
+ * The token side of a deposit, matched to the MOLI side by the pool's OWN rule.
+ *
+ * addLiquidity mints min(byMoli, byToken), where byX = amountX * totalShares /
+ * reserveX in integer division, and reverts Imbalanced when the two differ by
+ * more than one. So the token amount is reserveToken * moli / reserveMoli
+ * rounded UP - rounding down would leave byToken one short - and every
+ * candidate is checked against exactly that rule before it is offered. The
+ * second candidate is the fewest tokens that mint the same shares, for pools
+ * whose share count has drifted from their token reserve.
+ */
+function matchTokens(v, rM, rT, ts) {
+  if (v <= 0n || rM === 0n || rT === 0n || ts === 0n) return null;
+  const byMoli = v * ts / rM;
+  const cands = [ceilDiv(v * rT, rM), ceilDiv(byMoli * rT, ts)];
+  for (const tok of cands) {
+    if (tok === 0n) continue;
+    const byToken = tok * ts / rT;
+    const gap = byMoli > byToken ? byMoli - byToken : byToken - byMoli;
+    const minted = byMoli < byToken ? byMoli : byToken;
+    if (gap <= 1n && minted > 0n) return { tok: tok, minted: minted };
+  }
+  return null;
+}
+
+function addPlan() {
+  if (!pool) return null;
+  const v = toWei($('addMoli').value);
+  if (!v) return null;
+  const m = pool.m;
+  if (pool.ts === 0n || m.rMoli === 0n || m.rTok === 0n) {
+    // An empty pool: the first deposit sets the price, so both sides are typed.
+    const tok = toWei($('addTok').value);
+    return tok ? { v: v, tok: tok, minted: null, minShares: 0n, first: true } : null;
+  }
+  const r = matchTokens(v, m.rMoli, m.rTok, pool.ts);
+  if (!r) return { v: v, tok: null, bad: true };
+  const slipBp = slippageBp() === null ? 50 : slippageBp();
+  return { v: v, tok: r.tok, minted: r.minted, minShares: r.minted * BigInt(10000 - slipBp) / 10000n };
+}
+
+function removePlan() {
+  if (!pool || pool.my === 0n || pool.ts === 0n) return null;
+  const s = String($('remPct').value).trim();
+  if (!/^\d{1,3}$/.test(s)) return null;
+  const pct = BigInt(s);
+  if (pct < 1n || pct > 100n) return null;
+  const amount = pct === 100n ? pool.my : pool.my * pct / 100n;
+  if (amount === 0n) return null;
+  const m = pool.m;
+  const moliOut = amount * m.rMoli / pool.ts;
+  const tokOut = amount * m.rTok / pool.ts;
+  const slipBp = slippageBp() === null ? 50 : slippageBp();
+  return {
+    amount: amount, moliOut: moliOut, tokOut: tokOut,
+    minMoli: moliOut * BigInt(10000 - slipBp) / 10000n,
+    minTokens: tokOut * BigInt(10000 - slipBp) / 10000n,
+  };
+}
+
+function addState(a) {
+  if (busy) return { label: t(busy), disabled: true };
+  if (!account) return { label: t('connect'), act: connect };
+  if (!chainOk) return { label: t('switchNet'), act: switchChain };
+  if (!pool) return { label: loaded ? t('noMarket') : t('loading'), disabled: true };
+  if (!a) return { label: t('enterAmount'), disabled: true };
+  if (a.bad) return { label: t('imbalanced'), disabled: true };
+  const sym = pool.m.symbol;
+  if (balMoli !== null && a.v > balMoli) return { label: t('insufficient', 'MOLI'), disabled: true };
+  if ((tokBal[pool.m.token] || 0n) < a.tok) return { label: t('insufficient', sym), disabled: true };
+  if (pool.allowance < a.tok) return { label: t('approve', sym), act: doApprovePool };
+  return { label: t('addBtn'), act: doAdd };
+}
+
+function remState(r) {
+  if (busy) return { label: t(busy), disabled: true };
+  if (!account) return { label: t('connect'), act: connect };
+  if (!chainOk) return { label: t('switchNet'), act: switchChain };
+  if (!pool) return { label: loaded ? t('noMarket') : t('loading'), disabled: true };
+  if (pool.my === 0n) return { label: t('noShares'), disabled: true };
+  if (!r) return { label: t('choosePct'), disabled: true };
+  return { label: t('remBtn'), act: doRemove };
+}
+
+function renderPool() {
+  $('addPane').hidden = poolMode !== 'add';
+  $('remPane').hidden = poolMode !== 'remove';
+  $('modeAdd').className = poolMode === 'add' ? 'on' : '';
+  $('modeRem').className = poolMode === 'remove' ? 'on' : '';
+  if (!pool) {
+    for (const id of ['poolRes', 'poolPrice', 'poolMine', 'poolShare', 'addShare', 'remOut', 'remMin']) $(id).textContent = '—';
+    $('poolIntro').textContent = '';
+    setBtn($('addBtn'), addState(null));
+    setBtn($('remBtn'), remState(null));
+    return;
+  }
+  const m = pool.m; const sym = m.symbol;
+  $('poolIntro').textContent = t('poolIntro', sym);
+  $('poolRes').textContent = fmt(m.rMoli) + ' MOLI + ' + fmt(m.rTok) + ' ' + sym;
+  $('poolPrice').textContent = m.rMoli > 0n ? '1 MOLI = ' + fmt(m.rTok * UNIT / m.rMoli) + ' ' + sym : '—';
+  if (account && pool.my > 0n && pool.ts > 0n) {
+    $('poolMine').textContent = fmt(pool.my * m.rMoli / pool.ts) + ' MOLI + ' + fmt(pool.my * m.rTok / pool.ts) + ' ' + sym;
+    $('poolShare').textContent = pctOf(pool.my, pool.ts);
+  } else {
+    $('poolMine').textContent = account ? t('noPosition') : '—';
+    $('poolShare').textContent = account ? '0%' : '—';
+  }
+
+  // Add
+  const first = pool.ts === 0n || m.rMoli === 0n;
+  $('addTok').hidden = !first;
+  $('addTokOut').hidden = first;
+  $('addTokNote').textContent = first ? t('firstNote') : t('computed');
+  $('addTokSym').textContent = sym;
+  $('addMoliBal').textContent = balText(MOLI);
+  $('addTokBal').textContent = balText(m.token);
+  $('addMax').hidden = balOf(MOLI) === null;
+  const a = addPlan();
+  if (a && a.tok && !first) {
+    $('addTokOut').textContent = fmt(a.tok);
+    $('addTokOut').classList.remove('empty');
+  } else if (!first) {
+    $('addTokOut').textContent = '0';
+    $('addTokOut').classList.add('empty');
+  }
+  $('addShare').textContent = a && a.minted ? pctOf(pool.my + a.minted, pool.ts + a.minted) : '—';
+  setBtn($('addBtn'), addState(a));
+
+  // Remove
+  const r = removePlan();
+  $('remOut').textContent = r ? fmt(r.moliOut) + ' MOLI + ' + fmt(r.tokOut) + ' ' + sym : '—';
+  $('remMin').textContent = r ? fmt(r.minMoli) + ' MOLI + ' + fmt(r.minTokens) + ' ' + sym : '—';
+  for (const b of document.querySelectorAll('#remPane button[data-pct]')) {
+    b.className = b.dataset.pct === String($('remPct').value).trim() ? 'on' : '';
+  }
+  setBtn($('remBtn'), remState(r));
+}
+
+async function doApprovePool() {
+  await requireMolibra();
+  const a = addPlan();
+  if (!pool || !a || !a.tok) throw new Error(t('enterAmount'));
+  // ⛔ Exactly this deposit, never an unlimited allowance.
+  const data = SEL.approve + addr32(pool.m.pool) + word(a.tok);
+  const sym = pool.m.symbol;
+  const res = await sendTx({ from: account, to: pool.m.token, data: data }, 'poolMsg');
+  await refresh();
+  showMsg('poolMsg', 'ok', t('approved', sym), res.h);
+}
+
+async function doAdd() {
+  await requireMolibra();
+  // Recomputed from reserves read NOW: a swap since the screen was drawn moves
+  // the ratio, and a stale token amount is exactly what reverts Imbalanced.
+  await refresh();
+  const a = addPlan();
+  if (!pool || !a) throw new Error(t('enterAmount'));
+  if (a.bad || !a.tok) throw new Error(t('imbalanced'));
+  if (pool.allowance < a.tok) throw new Error(t('needApprove', pool.m.symbol));
+  const tx = { from: account, to: pool.m.pool, value: hex(a.v),
+    data: SEL.addLiquidity + word(a.tok) + word(a.minShares) };
+  await preflight(tx, 'imbalanced');
+  const res = await sendTx(tx, 'poolMsg');
+  $('addMoli').value = ''; $('addTok').value = '';
+  await refresh();
+  showMsg('poolMsg', 'ok', t('addDone', pool ? pctOf(pool.my, pool.ts) : '—'), res.h);
+}
+
+async function doRemove() {
+  await requireMolibra();
+  await refresh();
+  const r = removePlan();
+  if (!pool || !r) throw new Error(t('choosePct'));
+  const sym = pool.m.symbol;
+  const tx = { from: account, to: pool.m.pool,
+    data: SEL.removeLiquidity + word(r.amount) + word(r.minMoli) + word(r.minTokens) };
+  await preflight(tx, 'wouldRevert');
+  const res = await sendTx(tx, 'poolMsg');
+  $('remPct').value = '';
+  await refresh();
+  showMsg('poolMsg', 'ok', t('remDone', fmt(r.moliOut) + ' MOLI + ' + fmt(r.tokOut) + ' ' + sym), res.h);
+}
+
+/* ============================================================ factory */
 
 $('deployFactory').onclick = async () => {
   try {
@@ -636,24 +1386,24 @@ $('deployFactory').onclick = async () => {
     // the calldata cost alone - which is what made the first attempt run out of
     // gas and report "reverted". The node is fixed too, but a page that only
     // works against a fixed node is a page that breaks on someone else's.
-    say('factoryLog', 'deploying MolibraPoolFactory — awaiting signature…');
+    say('factoryLog', t('deploying'));
     const h = await eth().request({ method: 'eth_sendTransaction', params: [{
       from: account, data: FACTORY_BYTECODE, gas: '0x1E8480' }] });   // 2,000,000
-    const r = await waitFor(h, 'deploy');
+    say('factoryLog', t('waiting') + '\n' + h);
+    const r = await waitFor(h);
     $('factoryAddr').value = r.contractAddress;
-    say('factoryLog', 'factory at ' + r.contractAddress + '\nGas used: ' + BigInt(r.gasUsed).toLocaleString()
-      + '\nAdd ?factory=' + r.contractAddress + ' to the URL to keep it.');
+    say('factoryLog', t('factoryAt', r.contractAddress));
     await refresh();
-  } catch (e) { say('factoryLog', e.message, true); }
+  } catch (e) { say('factoryLog', isRejection(e) ? t('rejected') : e.message, true); }
 };
 
 $('createPool').onclick = async () => {
   try {
     await requireMolibra();
     const f = $('factoryAddr').value.trim();
-    const t = $('createToken').value.trim();
-    if (!isAddr(f)) throw new Error('deploy or paste a factory address first');
-    if (!isAddr(t)) throw new Error('that is not a token address');
+    const x = $('createToken').value.trim();
+    if (!isAddr(f)) throw new Error(t('needFactory'));
+    if (!isAddr(x)) throw new Error(t('notAddress'));
 
     /**
      * ⛔⛔ Refuse a token that ALREADY has a pool the factory cannot see.
@@ -665,48 +1415,157 @@ $('createPool').onclick = async () => {
      * not assumed. The seed list is exactly the set of pools the factory is
      * blind to, so it is the right thing to check against.
      */
-    const seeded = SEED_MARKETS.find((m) => m.token.toLowerCase() === t.toLowerCase());
-    if (seeded) {
-      throw new Error(seeded.symbol + ' already has a pool at ' + seeded.pool
-        + ', created before this factory existed. The factory cannot see it and would deploy a '
-        + 'SECOND one, splitting the liquidity and giving the asset two prices. Nothing was sent.');
-    }
+    const seeded = SEED_MARKETS.find((m) => m.token.toLowerCase() === x.toLowerCase());
+    if (seeded) throw new Error(t('seeded', seeded.symbol, seeded.pool));
 
-    say('factoryLog', 'creating the market — awaiting signature…');
+    say('factoryLog', t('creating'));
     // ⛔ create() DEPLOYS a pool, so it costs far more than an ordinary call -
-    // same explicit-gas reasoning as the factory deploy above.
-    const h = await eth().request({ method: 'eth_sendTransaction', params: [{
-      from: account, to: f, data: SEL.createPool + addr32(t), gas: '0x16E360' }] });   // 1,500,000
-    await waitFor(h, 'create');
-    say('factoryLog', 'market created. It is listed in 03 now.');
+    // same explicit-gas reasoning as the factory deploy above. (`t` here is the
+    // token address, shadowing the translator inside this arrow only.)
+    const createTx = (t) => ({
+      from: account, to: f, data: SEL.createPool + addr32(t), gas: '0x16E360' });   // 1,500,000
+    const h = await eth().request({ method: 'eth_sendTransaction', params: [createTx(x)] });
+    say('factoryLog', t('waiting') + '\n' + h);
+    await waitFor(h);
+    say('factoryLog', t('created'));
     await refresh();
   } catch (e) {
-    const m = String(e.message || '');
-    say('factoryLog', /revert/i.test(m)
-      ? m + '\n\n⛔ A revert usually means that token already has a market, or it is not a contract '
-        + 'at all — which is exactly what an expression token looks like, and why one can never be pooled.'
-      : m, true);
+    say('factoryLog', isRejection(e) ? t('rejected')
+      : /revert|não foi concluída|did not complete/i.test(String(e.message || '')) ? t('createFail') : e.message, true);
   }
 };
 
 $('add').onclick = () => {
-  const t = $('addToken').value.trim();
-  if (!isAddr(t)) return say('poolLog', 'that is not an address', true);
+  const x = $('addToken').value.trim();
+  if (!isAddr(x)) return say('advLog', t('notAddress'), true);
   let list = [];
   try { list = JSON.parse(localStorage.getItem('molibra.tokens') || '[]'); } catch (e) { list = []; }
-  if (list.indexOf(t) === -1) list.push(t);
+  if (list.indexOf(x) === -1) list.push(x);
   try { localStorage.setItem('molibra.tokens', JSON.stringify(list)); } catch (e) {}
   $('addToken').value = '';
   refresh();
 };
+$('refresh').onclick = () => refresh();
+
+/* ============================================================== wiring */
+
+const cleanAmount = (el) => {
+  // Digits and ONE separator; anything else a keyboard offers is dropped.
+  const v = el.value.replace(/[^\d.,]/g, '');
+  const i = v.search(/[.,]/);
+  el.value = i === -1 ? v : v.slice(0, i + 1) + v.slice(i + 1).replace(/[.,]/g, '');
+};
+
+$('action').onclick = () => run($('action')._act, 'swapMsg');
+$('addBtn').onclick = () => run($('addBtn')._act, 'poolMsg');
+$('remBtn').onclick = () => run($('remBtn')._act, 'poolMsg');
+$('walletChip').onclick = () => {
+  if (account && chainOk) { window.open(EXPLORER + '/address/' + account, '_blank', 'noopener'); return; }
+  run(account ? switchChain : connect, 'swapMsg');
+};
+
+$('amountIn').oninput = () => { cleanAmount($('amountIn')); $('swapMsg').hidden = true; requote().catch((e) => showErr('swapMsg', e)); };
+for (const id of ['fromSel', 'toSel']) {
+  $(id).onchange = () => {
+    // Picking the asset already on the other side swaps the two, as people expect.
+    const other = id === 'fromSel' ? 'toSel' : 'fromSel';
+    if ($(id).value === $(other).value) {
+      $(other).value = Array.from($(other).options).map((o) => o.value).find((v) => v !== $(id).value) || MOLI;
+    }
+    requote().catch((e) => showErr('swapMsg', e));
+  };
+}
+$('flip').onclick = () => {
+  const a = $('fromSel').value; $('fromSel').value = $('toSel').value; $('toSel').value = a;
+  if (lastPlan && lastPlan.out > 0n) $('amountIn').value = fromWei(lastPlan.out, 18);
+  requote().catch((e) => showErr('swapMsg', e));
+};
+$('maxBtn').onclick = () => {
+  const from = $('fromSel').value;
+  let b = balOf(from);
+  if (b === null) return;
+  if (from === MOLI) b = b > GAS_RESERVE ? b - GAS_RESERVE : 0n;
+  $('amountIn').value = b > 0n ? fromWei(b, 18) : '';
+  requote().catch((e) => showErr('swapMsg', e));
+};
+
+$('gear').onclick = () => { $('settings').hidden = !$('settings').hidden; };
+const setSlip = (s) => {
+  slipStr = s;
+  $('slippage').value = s;
+  try { localStorage.setItem('molibra.slippage', s); } catch (e) {}
+  render();
+};
+for (const b of document.querySelectorAll('#slipSeg button')) b.onclick = () => setSlip(b.dataset.slip);
+$('slippage').oninput = () => { slipStr = $('slippage').value.trim(); try { localStorage.setItem('molibra.slippage', slipStr); } catch (e) {} render(); };
+
+function showTab(name) {
+  const pool_ = name === 'pool';
+  $('swapCard').hidden = pool_;
+  $('poolCard').hidden = !pool_;
+  $('tabSwap').className = pool_ ? '' : 'on';
+  $('tabPool').className = pool_ ? 'on' : '';
+  try { history.replaceState(null, '', pool_ ? '#pool' : location.pathname + location.search); } catch (e) {}
+}
+$('tabSwap').onclick = () => showTab('swap');
+$('tabPool').onclick = () => showTab('pool');
+$('modeAdd').onclick = () => { poolMode = 'add'; renderPool(); };
+$('modeRem').onclick = () => { poolMode = 'remove'; renderPool(); };
+$('poolSel').onchange = () => refreshPool().catch((e) => showErr('poolMsg', e));
+$('addMoli').oninput = () => { cleanAmount($('addMoli')); renderPool(); };
+$('addTok').oninput = () => { cleanAmount($('addTok')); renderPool(); };
+$('addMax').onclick = () => {
+  let b = balOf(MOLI);
+  if (b === null || !pool) return;
+  b = b > GAS_RESERVE ? b - GAS_RESERVE : 0n;
+  // Never more MOLI than the token balance can be matched against.
+  const m = pool.m; const tb = tokBal[m.token] || 0n;
+  if (pool.ts > 0n && m.rTok > 0n) { const cap = tb * m.rMoli / m.rTok; if (cap < b) b = cap; }
+  $('addMoli').value = b > 0n ? fromWei(b, 18) : '';
+  renderPool();
+};
+for (const b of document.querySelectorAll('#remPane button[data-pct]')) {
+  b.onclick = () => { $('remPct').value = b.dataset.pct; renderPool(); };
+}
+$('remPct').oninput = () => { $('remPct').value = $('remPct').value.replace(/\D/g, '').slice(0, 3); renderPool(); };
+$('langPt').onclick = () => setLang('pt');
+$('langEn').onclick = () => setLang('en');
+
+if (window.ethereum && typeof window.ethereum.on === 'function') {
+  window.ethereum.on('accountsChanged', (accs) => {
+    account = accs && accs[0] ? String(accs[0]).toLowerCase() : null;
+    readChain().then(refresh);
+  });
+  window.ethereum.on('chainChanged', () => { readChain().then(refresh); });
+}
 
 /* Everything specific to one run comes from the URL, never a hand-edit. */
 const params = new URLSearchParams(location.search);
+try { const s = localStorage.getItem('molibra.slippage'); if (s) slipStr = s; } catch (e) {}
 if (params.get('factory')) $('factoryAddr').value = params.get('factory');
 if (params.get('amount')) $('amountIn').value = params.get('amount');
-if (params.get('slippage')) $('slippage').value = params.get('slippage');
+if (params.get('slippage')) slipStr = params.get('slippage');
+$('slippage').value = slipStr;
+if (location.hash === '#pool') showTab('pool');
 
-refresh().catch((e) => say('poolLog', 'could not reach the node: ' + e.message, true));
+setLang(LANG);
+
+(async () => {
+  // A wallet that already trusts this site answers eth_accounts without a
+  // prompt, so a returning visitor lands connected.
+  if (window.ethereum) {
+    try {
+      const accs = await window.ethereum.request({ method: 'eth_accounts' });
+      if (accs && accs[0]) { account = String(accs[0]).toLowerCase(); await readChain(); }
+    } catch (e) {}
+  }
+  await refresh();
+})();
+
+// Prices move while a page sits open; read them again every half minute.
+setInterval(() => {
+  if (!busy && document.visibilityState === 'visible') refresh();
+}, 30000);
 </script>
 </body>
 </html>

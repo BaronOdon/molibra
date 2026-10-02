@@ -856,6 +856,28 @@ async function handleAudit(node, req, res) {
   }
 
   /**
+   * Point of sale. A merchant shows a QR with an amount and the page watches
+   * the chain for the payment; a customer who scans it pays in MOLI, or in any
+   * token with a MOLI pool. Like swap, it holds no key and custodies nothing.
+   */
+  if (path === '/molibra/pay') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'pay.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  // The QR encoder the pay page draws with (Kazuhiko Arase, MIT), vendored and
+  // served from this node for the same reason as wallet.js: a page that tells
+  // a customer where to send money must not fetch its maths from a CDN.
+  if (path === '/molibra/qr.js') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'qr.js');
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
    * Moliscan - the explorer.
    *
    * It adds no index and no cache: every view is assembled in the browser from

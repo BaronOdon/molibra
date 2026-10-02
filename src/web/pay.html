@@ -1,0 +1,1436 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
+<title>MOLIBRA · Pagar / Pay</title>
+<!--
+  Point of sale. A PUBLIC page; it holds no key and custodies nothing.
+
+  MERCHANT (no ?to=): type an amount, show a big QR, and the page watches the
+  chain for the payment. Also a printable fixed sign, and "Vender MOLI" -
+  sending MOLI to a customer who paid at the counter.
+
+  CUSTOMER (?to=<address>&amount=<MOLI>&memo=…): pay in MOLI with one plain
+  transfer, or in any token that has a MOLI pool: approve (exact) -> swap the
+  token for MOLI -> transfer exactly the amount to the merchant.
+
+  ⛔⛔ A payment to the merchant is a plain value transfer with NO calldata.
+  The node routes some data payloads specially, and a merchant's address is an
+  ordinary account - there is nothing for data to call.
+
+  ⛔⛔ Every quote comes from the POOL's own quote() by eth_call. The page works
+  out the token input with the inverse of the pool's formula, but only offers
+  it once the pool itself has confirmed that input yields the amount.
+
+  ⛔ No merchant's address is written in this file. The merchant types it, or
+  takes it from the connected wallet, and it is remembered in that browser
+  only. The QR carries it to the customer.
+
+  There is no eth_getLogs on this node, so the watcher reads decoded blocks from
+  /molibra/blocks and confirms each candidate with its receipt.
+-->
+<script>
+  (function () {
+    var l = null;
+    try { l = localStorage.getItem('molibra.lang'); } catch (e) { l = null; }
+    // Portuguese by default: the counter this page is for is in Brazil.
+    document.documentElement.lang = l === 'en' ? 'en' : 'pt-BR';
+  })();
+</script>
+<style>
+  :root{
+    --void:#07070a; --card:#121210; --box:#1b1a16; --box-hi:#24221c;
+    --ink:#f5f3ea; --dim:#b3ae9c; --dimmer:#858170; --line:#2e2c24;
+    --gold:#FFD100; --gold-glow:rgba(255,209,0,.30); --edge:rgba(255,209,0,.20);
+    --bad:#ff7a7a; --ok:#6dffa6; --ok-dk:#0f8a43; --warn:#ffbe55;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;color:var(--ink);background:var(--void);font:16px/1.5 var(--sans);
+       padding:16px 16px 64px;overflow-x:hidden;min-height:100vh}
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(120% 70% at 50% -10%, rgba(255,209,0,.12), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px), var(--void)}
+  .wrap{max-width:520px;margin:0 auto}
+  a{color:var(--gold)}
+  button,input,select{font:inherit;color:inherit}
+  button{cursor:pointer}
+  button:disabled{cursor:not-allowed}
+  [hidden]{display:none !important}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 18px}
+  .mark{font:700 20px/1 var(--mono);letter-spacing:.2em;color:var(--gold);text-decoration:none;text-shadow:0 0 16px var(--gold-glow)}
+  .hdr-right{display:flex;align-items:center;gap:8px;min-width:0}
+  .lang{display:flex;border:1px solid var(--edge);border-radius:999px;overflow:hidden;flex:none}
+  .lang button{background:transparent;border:0;color:var(--dim);padding:7px 10px;font:600 13px/1 var(--sans)}
+  .lang button.on{background:var(--gold);color:#0a0a0a}
+  .chip{background:var(--box);border:1px solid var(--edge);color:var(--ink);border-radius:999px;padding:8px 12px;
+        font:600 14px/1 var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+  .chip.warn{border-color:var(--warn);color:var(--warn)}
+
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:20px;padding:16px;margin:0 0 14px;
+        box-shadow:0 20px 60px -30px rgba(0,0,0,.9)}
+  h1,h2,h3{margin:0;font:700 20px/1.25 var(--sans)}
+  h2{font-size:18px} h3{font-size:16px}
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;margin:0 0 12px}
+  .tabs button{flex:1;background:transparent;border:0;border-radius:10px;padding:11px 6px;font:600 15px/1.1 var(--sans);color:var(--dim)}
+  .tabs button.on{background:var(--box-hi);color:var(--gold)}
+
+  .box{background:var(--box);border:1px solid transparent;border-radius:16px;padding:14px;margin:10px 0 0}
+  .box:focus-within{border-color:var(--edge)}
+  .box-top{color:var(--dim);font-size:15px;margin:0 0 6px}
+  .box-mid{display:flex;align-items:center;gap:10px}
+  .amt{flex:1;min-width:0;width:100%;background:transparent;border:0;outline:none;color:var(--ink);font:600 28px/1.2 var(--mono);padding:2px 0}
+  .amt::placeholder{color:var(--dimmer)}
+  .unit{flex:none;color:var(--gold);font:700 16px/1 var(--sans);background:var(--box-hi);border:1px solid var(--edge);border-radius:999px;padding:10px 14px}
+  select.unit{appearance:none;-webkit-appearance:none;padding-right:34px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23FFD100' stroke-width='2'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 12px center}
+  .field{width:100%;background:transparent;border:0;outline:none;color:var(--ink);font:400 16px/1.3 var(--sans);padding:4px 0}
+  .field.mono{font-family:var(--mono);font-size:15px}
+  .box-bot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 0;color:var(--dim);font-size:15px;flex-wrap:wrap}
+  .small{background:transparent;border:1px solid var(--edge);color:var(--gold);border-radius:8px;padding:6px 10px;font:700 14px/1.2 var(--sans)}
+
+  .primary{display:block;width:100%;margin:14px 0 0;background:var(--gold);color:#0a0a0a;border:0;border-radius:16px;
+           padding:17px 16px;font:700 18px/1.2 var(--sans)}
+  .primary:hover:not(:disabled){box-shadow:0 0 24px var(--gold-glow)}
+  .primary:disabled{background:var(--box-hi);color:var(--dimmer)}
+  .ghost{display:block;width:100%;margin:10px 0 0;background:transparent;color:var(--gold);border:1px solid var(--edge);
+         border-radius:14px;padding:14px;font:600 16px/1.2 var(--sans);text-align:center;text-decoration:none}
+
+  .msg{margin:12px 0 0;padding:12px 14px;border-radius:12px;font-size:15px;line-height:1.5;background:var(--box);
+       border-left:3px solid var(--gold);word-break:break-word}
+  .msg.ok{border-left-color:var(--ok)} .msg.bad{border-left-color:var(--bad)} .msg.warn{border-left-color:var(--warn)}
+  .msg a{display:inline-block;margin-top:4px;font-weight:600}
+  .hint{color:var(--dim);font-size:14px;margin:8px 2px 0}
+  .stat{display:flex;justify-content:space-between;gap:12px;padding:5px 0;font-size:15px}
+  .stat span:first-child{color:var(--dim)}
+  .stat span:last-child{text-align:right;word-break:break-word}
+  .addr{font:400 13px/1.4 var(--mono);color:var(--dim);word-break:break-all}
+  .big{font:700 40px/1.1 var(--mono);color:var(--gold);word-break:break-word;margin:6px 0 0}
+  .seg{display:flex;gap:8px;margin:12px 0 0}
+  .seg button{flex:1;background:var(--box);border:1px solid var(--line);border-radius:12px;padding:12px 8px;font:600 15px/1.2 var(--sans);color:var(--dim)}
+  .seg button.on{border-color:var(--gold);color:var(--gold)}
+  ol.steps{margin:8px 0 0;padding-left:22px;color:var(--dim);font-size:15px}
+  ol.steps li.done{color:var(--ok)} ol.steps li.now{color:var(--ink);font-weight:600}
+  .ways{list-style:none;margin:6px 0 0;padding:0}
+  .ways li + li{border-top:1px solid var(--line)}
+  .ways a,.ways button{display:flex;width:100%;justify-content:space-between;align-items:center;gap:12px;padding:13px 2px;
+    text-decoration:none;color:var(--ink);background:transparent;border:0;text-align:left;font:inherit}
+  .ways small{display:block;color:var(--dim);font-size:14px;margin-top:2px}
+  .ways .go{color:var(--gold);font-size:20px;flex:none}
+  .qrbox{background:#fff;border-radius:14px;padding:10px;margin:12px auto 0;max-width:280px}
+  .qrbox svg{display:block;width:100%;height:auto}
+  .list .stat{border-top:1px solid var(--line)}
+  video{width:100%;border-radius:12px;margin-top:10px;background:#000}
+
+  /* ------------------------------------------------ the QR, held up */
+  .screen{position:fixed;inset:0;z-index:50;background:#07070a;overflow:auto;padding:16px;display:flex;flex-direction:column;align-items:center}
+  .screen .panel{width:100%;max-width:560px;margin:auto;background:#fff;color:#0a0a0a;border-radius:24px;padding:20px 18px;text-align:center}
+  .screen .panel.paid{background:#0f8a43;color:#fff}
+  .screen .qr{width:min(78vw,56vh,460px);margin:10px auto 0}
+  .screen .qr svg{display:block;width:100%;height:auto}
+  .screen .amount{font:800 44px/1.1 var(--mono);margin:6px 0 0;word-break:break-word}
+  .screen .memo{font-size:18px;margin:4px 0 0}
+  .screen .status{font:700 20px/1.3 var(--sans);margin:12px 0 0}
+  .screen .tick{font:900 96px/1 var(--sans);margin:10px 0 0}
+  .screen .who{font:400 14px/1.4 var(--mono);word-break:break-all;margin:8px 0 0}
+  .screen .panel a{color:inherit;font-weight:700}
+  .screen .row{display:flex;gap:10px;width:100%;max-width:560px;margin:14px auto 0}
+  .screen .row button{flex:1;border-radius:14px;padding:15px 10px;font:700 17px/1.2 var(--sans);border:0;background:var(--gold);color:#0a0a0a}
+  .screen .row button.alt{background:transparent;color:var(--gold);border:1px solid var(--edge)}
+  .pulse{display:inline-block;width:10px;height:10px;border-radius:50%;background:#c9a600;margin-right:8px;vertical-align:middle}
+  @media (prefers-reduced-motion:no-preference){ .pulse{animation:p 1.2s ease-in-out infinite} @keyframes p{50%{opacity:.25}} }
+
+  /* --------------------------------------------- printable fixed sign */
+  .sign{background:#fff;color:#0a0a0a;border-radius:16px;padding:22px 18px;text-align:center;margin:12px 0 0}
+  .sign h1{font:800 30px/1.15 var(--sans);margin:0}
+  .sign .brand{font:700 14px/1 var(--mono);letter-spacing:.3em;margin:0 0 10px}
+  .sign .qr{width:min(70vw,300px);margin:12px auto}
+  .sign .qr svg{display:block;width:100%;height:auto}
+  .sign ol{text-align:left;margin:8px auto 0;max-width:420px;font-size:16px;padding-left:22px}
+  .sign .addr{color:#333;margin-top:10px}
+  @media print{
+    @page{size:A5;margin:10mm}
+    body{background:#fff;padding:0}
+    body::before{display:none}
+    body *{visibility:hidden}
+    .sign,.sign *{visibility:visible}
+    .sign{position:absolute;left:0;top:0;width:100%;margin:0;border-radius:0}
+    .sign .qr{width:95mm}
+  }
+  @media (min-width:700px){ body{padding-top:32px} .card{padding:20px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <a class="mark" href="/">MOLIBRA</a>
+  <div class="hdr-right">
+    <div class="lang" role="group" aria-label="Language">
+      <button id="langPt" type="button">PT</button><button id="langEn" type="button">EN</button>
+    </div>
+    <button class="chip" id="walletChip" type="button" data-i18n="connectShort">Conectar</button>
+  </div>
+</header>
+
+<div class="msg warn" id="walletHelp" hidden><span id="walletMsg"></span></div>
+<div class="msg bad" id="netNote" hidden></div>
+
+<!-- ============================================================ CUSTOMER -->
+<section id="customer" hidden>
+  <div class="card">
+    <div class="box-top" data-i18n="payTo">Pagamento para</div>
+    <h1 id="cMerchant">—</h1>
+    <div class="addr" id="cMerchantFull"></div>
+    <div id="cAmountFixed">
+      <div class="big" id="cAmount">—</div>
+      <div class="hint" id="cMemo" hidden></div>
+    </div>
+    <div class="box" id="cAmountBox" hidden>
+      <div class="box-top" data-i18n="typeAmount">Digite o valor</div>
+      <div class="box-mid">
+        <input id="cAmountIn" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="amount">
+        <span class="unit">MOLI</span>
+      </div>
+    </div>
+    <div class="msg bad" id="cBad" hidden></div>
+  </div>
+
+  <div class="card" id="noWallet" hidden>
+    <h2 data-i18n="openInWallet">Abra esta página na sua carteira</h2>
+    <p class="hint" data-i18n="openInWalletWhy">Para pagar, a página precisa abrir dentro de um app de carteira.</p>
+    <a class="primary" id="mmLink" style="text-align:center;text-decoration:none" href="#" data-i18n="openMM">Abrir na MetaMask</a>
+    <a class="ghost" id="twLink" href="#" data-i18n="openTW">Abrir na Trust Wallet</a>
+    <ol class="steps">
+      <li data-i18n="inst1">Instale a MetaMask ou a Trust Wallet (App Store ou Google Play).</li>
+      <li data-i18n="inst2">Crie a carteira e anote as palavras de recuperação em papel.</li>
+      <li data-i18n="inst3">Volte aqui e toque em um dos botões acima.</li>
+    </ol>
+    <a class="ghost" href="/molibra/connect" data-i18n="howNetwork">Como adicionar a rede Molibra</a>
+  </div>
+
+  <div class="card" id="payCard">
+    <h2 data-i18n="howPay">Como você quer pagar?</h2>
+    <div class="seg">
+      <button id="mMoli" class="on" type="button" data-i18n="withMoli">Com MOLI</button>
+      <button id="mToken" type="button" data-i18n="withOther">Com outra moeda</button>
+    </div>
+    <div id="tokenPane" hidden>
+      <div class="box">
+        <div class="box-top" data-i18n="youPayApprox">Você paga ≈</div>
+        <div class="box-mid">
+          <div class="amt" id="tNeed">—</div>
+          <select id="tokSel" class="unit" aria-label="token"></select>
+        </div>
+        <div class="box-bot"><span><span data-i18n="balance">Saldo</span>: <span id="tBal">—</span></span></div>
+      </div>
+      <p class="hint" data-i18n="tokenSteps">São 2 ou 3 confirmações na carteira: aprovar a moeda (se preciso), trocar por MOLI e pagar. O que sobrar da margem de preço fica com você, em MOLI.</p>
+      <ol class="steps" id="steps" hidden>
+        <li id="st1" data-i18n="step1">Aprovar</li>
+        <li id="st2" data-i18n="step2">Trocar por MOLI</li>
+        <li id="st3" data-i18n="step3">Pagar</li>
+      </ol>
+    </div>
+    <div class="stat" style="margin-top:10px"><span data-i18n="yourMoli">Seu saldo de MOLI</span><span id="cBalMoli">—</span></div>
+    <button class="primary" id="payBtn" type="button" disabled>…</button>
+    <div class="msg" id="payMsg" hidden></div>
+    <button class="ghost" id="showBuy" type="button" data-i18n="buyMoli">Comprar MOLI</button>
+  </div>
+
+  <div class="card" id="buyCard" hidden>
+    <h2 data-i18n="buyMoli">Comprar MOLI</h2>
+    <div class="msg warn" id="gasNote" hidden></div>
+    <ul class="ways">
+      <li><button type="button" id="buyCounter"><span><span data-i18n="buyCounter">No balcão, em dinheiro ou PIX</span><small data-i18n="buyCounterSub">Mostre o seu endereço ao lojista</small></span><span class="go">&#8595;</span></button></li>
+      <li><a href="/molibra/swap"><span><span data-i18n="haveWsro">Tenho WSRO</span><small data-i18n="haveWsroSub">Troque na página de trocas</small></span><span class="go">&#8594;</span></a></li>
+      <li><a href="https://app.uniswap.org/swap?chain=mainnet&amp;inputCurrency=ETH&amp;outputCurrency=0xa302877efb74f567f3605851194b46f1d5746822" target="_blank" rel="noopener"><span><span data-i18n="haveEth">Tenho ETH</span><small data-i18n="haveEthSub">Compre bMOLI na Uniswap</small></span><span class="go">&#8599;</span></a></li>
+      <li><a href="/molibra/return"><span><span data-i18n="bringBack">Trazer bMOLI para cá</span><small data-i18n="bringBackSub">Chega como MOLI</small></span><span class="go">&#8594;</span></a></li>
+    </ul>
+    <div id="myAddrBox" hidden>
+      <p class="hint" data-i18n="showThis">Mostre este código ao lojista. Ele envia o MOLI para você.</p>
+      <div class="qrbox" id="myQr"></div>
+      <div class="addr" id="myAddr" style="text-align:center;margin-top:8px"></div>
+      <button class="ghost" id="copyMine" type="button" data-i18n="copy">Copiar endereço</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ MERCHANT -->
+<section id="merchant" hidden>
+  <div class="card">
+    <h1 data-i18n="merchantTitle">Receber com MOLI</h1>
+    <div class="box">
+      <div class="box-top" data-i18n="receiveAt">Receber em</div>
+      <input id="mAddr" class="field mono" placeholder="0x…" spellcheck="false" autocomplete="off" aria-label="address">
+      <div class="box-bot"><button class="small" id="useWallet" type="button" data-i18n="useWallet">Usar minha carteira</button></div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button id="tCharge" class="on" type="button" data-i18n="tabCharge">Cobrar</button>
+    <button id="tSign" type="button" data-i18n="tabSign">Placa fixa</button>
+    <button id="tSell" type="button" data-i18n="tabSell">Vender MOLI</button>
+  </div>
+
+  <div id="chargePane">
+    <div class="card">
+      <div class="box" style="margin-top:0">
+        <div class="box-top" data-i18n="amount">Valor</div>
+        <div class="box-mid">
+          <input id="mAmount" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="amount">
+          <span class="unit">MOLI</span>
+        </div>
+      </div>
+      <div class="box">
+        <div class="box-top" data-i18n="memo">Descrição (opcional)</div>
+        <input id="mMemo" class="field" maxlength="80" autocomplete="off" aria-label="memo">
+      </div>
+      <button class="primary" id="genQr" type="button" disabled data-i18n="genQr">Gerar QR</button>
+      <div class="msg bad" id="mBad" hidden></div>
+    </div>
+    <div class="card list">
+      <div class="stat" style="border:0"><h2 data-i18n="today">Recebidos hoje</h2><span id="todayTotal"></span></div>
+      <div id="todayList"><p class="hint" data-i18n="noneYet">Nenhum ainda.</p></div>
+    </div>
+  </div>
+
+  <div id="signPane" hidden>
+    <div class="card">
+      <p class="hint" style="margin-top:0" data-i18n="signHelp">Imprima e deixe no caixa. O cliente escaneia e digita o valor.</p>
+      <div class="sign" id="sign">
+        <p class="brand">MOLIBRA</p>
+        <h1 data-i18n="signTitle">Pague com MOLI</h1>
+        <div class="qr" id="signQr"></div>
+        <ol>
+          <li data-i18n="sign1">Aponte a câmera do celular para o código.</li>
+          <li data-i18n="sign2">Abra na sua carteira (MetaMask ou Trust Wallet).</li>
+          <li data-i18n="sign3">Digite o valor e toque em Pagar.</li>
+        </ol>
+        <div class="addr" id="signAddr"></div>
+      </div>
+      <button class="primary" id="printSign" type="button" data-i18n="print">Imprimir</button>
+    </div>
+  </div>
+
+  <div id="sellPane" hidden>
+    <div class="card">
+      <p class="hint" style="margin-top:0" data-i18n="sellHelp">O cliente pagou em dinheiro ou PIX: envie o MOLI para o endereço dele, da sua carteira conectada.</p>
+      <div class="box">
+        <div class="box-top" data-i18n="custAddr">Endereço do cliente</div>
+        <input id="sAddr" class="field mono" placeholder="0x…" spellcheck="false" autocomplete="off" aria-label="customer address">
+        <div class="box-bot"><button class="small" id="scanBtn" type="button" data-i18n="scan">Escanear QR</button></div>
+        <video id="scanVideo" playsinline muted hidden></video>
+      </div>
+      <div class="box">
+        <div class="box-top" data-i18n="amount">Valor</div>
+        <div class="box-mid">
+          <input id="sAmount" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="amount">
+          <span class="unit">MOLI</span>
+        </div>
+        <div class="box-bot"><span><span data-i18n="balance">Saldo</span>: <span id="sBal">—</span></span></div>
+      </div>
+      <button class="primary" id="sellBtn" type="button" disabled>…</button>
+      <div class="msg" id="sellMsg" hidden></div>
+    </div>
+  </div>
+</section>
+
+<footer style="text-align:center;color:var(--dimmer);font-size:14px;margin:18px 0 0">
+  <span data-i18n="signNote">Nada é enviado sem a sua assinatura na carteira.</span><br>
+  <a href="/molibra/swap" style="color:var(--dim)" data-i18n="exchange">Trocar</a> ·
+  <a href="/molibra/moliscan" style="color:var(--dim)" data-i18n="explorer">Explorador</a> ·
+  <a href="/" style="color:var(--dim)">molibra.org</a>
+</footer>
+</div>
+
+<!-- ======================================================= QR, full screen -->
+<div class="screen" id="qrScreen" hidden>
+  <div class="panel" id="qrPanel">
+    <div id="qrWaiting">
+      <div class="amount" id="sAmountBig">—</div>
+      <div class="memo" id="sMemo"></div>
+      <div class="qr" id="bigQr"></div>
+      <div class="status"><span class="pulse"></span><span data-i18n="waitingPay">Aguardando pagamento…</span></div>
+      <div style="font-size:15px;margin-top:6px" data-i18n="scanHint">Escaneie com a câmera do celular</div>
+    </div>
+    <div id="qrPaid" hidden>
+      <div class="tick">&#10003;</div>
+      <div class="amount" data-i18n="paid">PAGO</div>
+      <div class="memo" id="paidAmount"></div>
+      <div class="who" id="paidFrom"></div>
+      <div style="margin-top:8px"><a id="paidLink" href="#" target="_blank" rel="noopener" data-i18n="viewTx">Ver a transação</a></div>
+    </div>
+  </div>
+  <div class="row">
+    <button class="alt" id="closeQr" type="button" data-i18n="close">Fechar</button>
+    <button id="newCharge" type="button" data-i18n="newCharge">Nova cobrança</button>
+  </div>
+</div>
+
+<script src="/molibra/mobilewallet.js"></script>
+<script src="/molibra/qr.js"></script>
+<script>
+// ⛔⛔ The origin that SERVED this page, not a hardcoded host - see swap.html.
+// The literal is only the fallback for opening the file from disk.
+const NODE = location.protocol.startsWith('http')
+  ? location.origin
+  : 'http://193.123.191.142:8545';
+const MOLIBRA_CHAIN_ID = '0x4f02';   // 20226
+const POOL = '0x4f34d9bc5db2396640d8eb564667e8701528b43d';
+const TOKEN = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
+const EXPLORER = NODE + '/molibra/moliscan';
+const PAY_PATH = '/molibra/pay';
+
+/**
+ * ⛔ Checked against keccak256 of each signature by test/pay-page.mjs. A wrong
+ * selector does not throw; it builds a transaction that calls nothing.
+ */
+const SEL = {
+  reserves:    '0x75172a8b',   // reserves()
+  quote:       '0xad615dec',   // quote(uint256,uint256,uint256)
+  swapTokenIn: '0xdfe1601e',   // swapTokenForMoli(uint256,uint256)
+  approve:     '0x095ea7b3',   // approve(address,uint256)
+  allowance:   '0xdd62ed3e',   // allowance(address,address)
+  balanceOf:   '0x70a08231',   // balanceOf(address)
+  allMarkets:  '0x375a7cba',   // allMarkets()
+  poolOf:      '0x988b1fa7',   // poolOf(address)
+  symbol:      '0x95d89b41',   // symbol()
+};
+
+/** The MOLI/WSRO pool predates the factory, so it is seeded, as in swap.html. */
+const SEED_MARKETS = [
+  { token: TOKEN, pool: POOL, symbol: 'WSRO' },
+];
+
+const CHAIN_PARAMS = {
+  chainId: MOLIBRA_CHAIN_ID,
+  chainName: 'Molibra',
+  nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 },
+  rpcUrls: [NODE + '/molibra'],
+  blockExplorerUrls: [EXPLORER],
+  iconUrls: [NODE + '/icon.png'],
+};
+
+/** A plain transfer is 21,000 gas on this chain (src/tx.js GAS_TRANSFER). */
+const TRANSFER_GAS = 21000n;
+/** Approve + swap + transfer, generously, for "do you have MOLI for the fee?". */
+const TOKEN_ROUTE_GAS = 400000n;
+/** The extra token offered over the exact input, so a small price move between
+ *  quote and mining does not fail the payment. Unused MOLI stays with the payer. */
+const PAY_MARGIN_BP = 50n;
+
+/* ============================================================ language */
+
+const T = {
+  pt: {
+    connectShort: 'Conectar', wrongNet: 'Rede errada',
+    payTo: 'Pagamento para', typeAmount: 'Digite o valor',
+    openInWallet: 'Abra esta página na sua carteira',
+    openInWalletWhy: 'Para pagar, a página precisa abrir dentro de um app de carteira.',
+    openMM: 'Abrir na MetaMask', openTW: 'Abrir na Trust Wallet',
+    inst1: 'Instale a MetaMask ou a Trust Wallet (App Store ou Google Play).',
+    inst2: 'Crie a carteira e anote as palavras de recuperação em papel.',
+    inst3: 'Volte aqui e toque em um dos botões acima.',
+    howNetwork: 'Como adicionar a rede Molibra',
+    howPay: 'Como você quer pagar?', withMoli: 'Com MOLI', withOther: 'Com outra moeda',
+    youPayApprox: 'Você paga ≈', balance: 'Saldo',
+    tokenSteps: 'São 2 ou 3 confirmações na carteira: aprovar a moeda (se preciso), trocar por MOLI e pagar. O que sobrar da margem de preço fica com você, em MOLI.',
+    step1: 'Aprovar', step2: 'Trocar por MOLI', step3: 'Pagar',
+    yourMoli: 'Seu saldo de MOLI', buyMoli: 'Comprar MOLI',
+    buyCounter: 'No balcão, em dinheiro ou PIX', buyCounterSub: 'Mostre o seu endereço ao lojista',
+    haveWsro: 'Tenho WSRO', haveWsroSub: 'Troque na página de trocas',
+    haveEth: 'Tenho ETH', haveEthSub: 'Compre bMOLI na Uniswap',
+    bringBack: 'Trazer bMOLI para cá', bringBackSub: 'Chega como MOLI',
+    showThis: 'Mostre este código ao lojista. Ele envia o MOLI para você.',
+    copy: 'Copiar endereço', copied: 'Copiado!',
+    connect: 'Conectar carteira', switchNet: 'Mudar para a rede Molibra',
+    enterAmount: 'Digite o valor', loading: 'Carregando…',
+    payMoli: 'Pagar {0} MOLI', payToken: 'Pagar com {0}',
+    insufficient: 'Saldo de {0} insuficiente', tooLarge: 'Valor maior do que o mercado comporta',
+    noMarketTok: 'Nenhuma outra moeda tem mercado agora',
+    needGas: 'Você precisa de um pouco de MOLI para a taxa da rede',
+    gasNote: 'Na rede Molibra a taxa é paga em MOLI (cerca de {0} MOLI por pagamento). Com saldo zero de MOLI não dá para aprovar nem trocar outra moeda. Compre um pouco de MOLI abaixo — no balcão é o mais rápido.',
+    confirmWallet: 'Confirme na sua carteira…', waiting: 'Aguardando a rede…', checking: 'Conferindo…',
+    stepOf: 'Passo {0} de {1}: confirme na carteira…',
+    sent: 'Transação enviada. Aguardando confirmação…',
+    paidOk: 'Pago! {0} MOLI enviados para {1}.',
+    rejected: 'Cancelado na carteira. Nada foi enviado.',
+    wouldRevert: 'O preço mudou desde a cotação. Confira e tente de novo.',
+    reverted: 'A transação não foi concluída na rede. Confira e tente de novo.',
+    timeout: 'Ainda sem confirmação depois de 3 minutos. Acompanhe pelo link.',
+    viewTx: 'Ver a transação', stillWrong: 'A carteira ainda não está na rede Molibra. Escolha a rede Molibra na carteira e tente de novo.',
+    noAccount: 'A carteira não informou nenhuma conta.',
+    nodeDown: 'Não foi possível falar com a rede agora. Tente atualizar a página.',
+    badLink: 'Este código de pagamento não é válido: falta o endereço de quem recebe.',
+    merchantTitle: 'Receber com MOLI', receiveAt: 'Receber em', useWallet: 'Usar minha carteira',
+    tabCharge: 'Cobrar', tabSign: 'Placa fixa', tabSell: 'Vender MOLI',
+    amount: 'Valor', memo: 'Descrição (opcional)', genQr: 'Gerar QR',
+    needAddr: 'Informe o endereço que vai receber (ou toque em Usar minha carteira).',
+    today: 'Recebidos hoje', noneYet: 'Nenhum ainda.', total: 'Total: {0} MOLI',
+    signHelp: 'Imprima e deixe no caixa. O cliente escaneia e digita o valor.',
+    signTitle: 'Pague com MOLI', sign1: 'Aponte a câmera do celular para o código.',
+    sign2: 'Abra na sua carteira (MetaMask ou Trust Wallet).', sign3: 'Digite o valor e toque em Pagar.',
+    print: 'Imprimir',
+    sellHelp: 'O cliente pagou em dinheiro ou PIX: envie o MOLI para o endereço dele, da sua carteira conectada.',
+    custAddr: 'Endereço do cliente', scan: 'Escanear QR', stopScan: 'Parar câmera',
+    noScanner: 'Este navegador não lê QR pela câmera. Cole o endereço no campo.',
+    scanned: 'Endereço lido.', sellBtn: 'Enviar {0} MOLI', sold: 'Enviado! {0} MOLI para {1}.',
+    badCustAddr: 'Digite ou escaneie o endereço do cliente',
+    waitingPay: 'Aguardando pagamento…', scanHint: 'Escaneie com a câmera do celular',
+    paid: 'PAGO', paidFrom: 'de {0}', close: 'Fechar', newCharge: 'Nova cobrança',
+    signNote: 'Nada é enviado sem a sua assinatura na carteira.', exchange: 'Trocar', explorer: 'Explorador',
+  },
+  en: {
+    connectShort: 'Connect', wrongNet: 'Wrong network',
+    payTo: 'Payment to', typeAmount: 'Enter the amount',
+    openInWallet: 'Open this page in your wallet',
+    openInWalletWhy: 'To pay, this page has to open inside a wallet app.',
+    openMM: 'Open in MetaMask', openTW: 'Open in Trust Wallet',
+    inst1: 'Install MetaMask or Trust Wallet (App Store or Google Play).',
+    inst2: 'Create the wallet and write the recovery words down on paper.',
+    inst3: 'Come back here and tap one of the buttons above.',
+    howNetwork: 'How to add the Molibra network',
+    howPay: 'How do you want to pay?', withMoli: 'With MOLI', withOther: 'With another coin',
+    youPayApprox: 'You pay ≈', balance: 'Balance',
+    tokenSteps: 'This takes 2 or 3 confirmations in your wallet: approve the coin (if needed), swap it for MOLI, and pay. Whatever is left from the price margin stays with you, in MOLI.',
+    step1: 'Approve', step2: 'Swap for MOLI', step3: 'Pay',
+    yourMoli: 'Your MOLI balance', buyMoli: 'Buy MOLI',
+    buyCounter: 'At the counter, cash or PIX', buyCounterSub: 'Show your address to the merchant',
+    haveWsro: 'I have WSRO', haveWsroSub: 'Swap it on the exchange page',
+    haveEth: 'I have ETH', haveEthSub: 'Buy bMOLI on Uniswap',
+    bringBack: 'Bring bMOLI here', bringBackSub: 'It arrives as MOLI',
+    showThis: 'Show this code to the merchant. They send the MOLI to you.',
+    copy: 'Copy address', copied: 'Copied!',
+    connect: 'Connect wallet', switchNet: 'Switch to Molibra',
+    enterAmount: 'Enter the amount', loading: 'Loading…',
+    payMoli: 'Pay {0} MOLI', payToken: 'Pay with {0}',
+    insufficient: 'Not enough {0}', tooLarge: 'Amount larger than the market can fill',
+    noMarketTok: 'No other coin has a market right now',
+    needGas: 'You need a little MOLI for the network fee',
+    gasNote: 'On Molibra the network fee is paid in MOLI (about {0} MOLI per payment). With no MOLI at all you cannot approve or swap another coin. Buy a little MOLI below — at the counter is quickest.',
+    confirmWallet: 'Confirm in your wallet…', waiting: 'Waiting for the network…', checking: 'Checking…',
+    stepOf: 'Step {0} of {1}: confirm in your wallet…',
+    sent: 'Transaction sent. Waiting for confirmation…',
+    paidOk: 'Paid! {0} MOLI sent to {1}.',
+    rejected: 'Cancelled in the wallet. Nothing was sent.',
+    wouldRevert: 'The price moved since the quote. Check and try again.',
+    reverted: 'The transaction did not complete on the network. Check and try again.',
+    timeout: 'Still not confirmed after 3 minutes. Follow it with the link.',
+    viewTx: 'View transaction', stillWrong: 'Your wallet is still not on Molibra. Pick the Molibra network in the wallet and try again.',
+    noAccount: 'The wallet returned no account.',
+    nodeDown: 'Could not reach the network just now. Try reloading the page.',
+    badLink: 'This payment code is not valid: the receiving address is missing.',
+    merchantTitle: 'Get paid in MOLI', receiveAt: 'Receive at', useWallet: 'Use my wallet',
+    tabCharge: 'Charge', tabSign: 'Fixed sign', tabSell: 'Sell MOLI',
+    amount: 'Amount', memo: 'Description (optional)', genQr: 'Create QR',
+    needAddr: 'Enter the receiving address (or tap Use my wallet).',
+    today: 'Received today', noneYet: 'None yet.', total: 'Total: {0} MOLI',
+    signHelp: 'Print it and keep it at the till. The customer scans it and types the amount.',
+    signTitle: 'Pay with MOLI', sign1: 'Point your phone camera at the code.',
+    sign2: 'Open it in your wallet (MetaMask or Trust Wallet).', sign3: 'Type the amount and tap Pay.',
+    print: 'Print',
+    sellHelp: 'The customer paid in cash or PIX: send the MOLI to their address from your connected wallet.',
+    custAddr: 'Customer address', scan: 'Scan QR', stopScan: 'Stop camera',
+    noScanner: 'This browser cannot read QR codes from the camera. Paste the address instead.',
+    scanned: 'Address read.', sellBtn: 'Send {0} MOLI', sold: 'Sent! {0} MOLI to {1}.',
+    badCustAddr: 'Type or scan the customer address',
+    waitingPay: 'Waiting for payment…', scanHint: 'Scan it with the phone camera',
+    paid: 'PAID', paidFrom: 'from {0}', close: 'Close', newCharge: 'New charge',
+    signNote: 'Nothing is sent until you sign it in your wallet.', exchange: 'Swap', explorer: 'Explorer',
+  },
+};
+
+let LANG = /^pt/i.test(document.documentElement.lang) ? 'pt' : 'en';
+
+function t(key) {
+  let s = (T[LANG] && T[LANG][key]) || T.en[key] || key;
+  for (let i = 1; i < arguments.length; i++) s = s.split('{' + (i - 1) + '}').join(String(arguments[i]));
+  return s;
+}
+
+function setLang(l) {
+  LANG = l === 'en' ? 'en' : 'pt';
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  try { localStorage.setItem('molibra.lang', LANG); } catch (e) {}
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  $('langPt').className = LANG === 'pt' ? 'on' : '';
+  $('langEn').className = LANG === 'en' ? 'on' : '';
+  render();
+}
+
+/* ============================================================= helpers */
+
+const $ = (id) => document.getElementById(id);
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const hex = (v) => '0x' + BigInt(v).toString(16);
+const isAddr = (a) => /^0x[0-9a-fA-F]{40}$/.test(String(a || '').trim());
+const toBig = (h) => (h && h !== '0x' ? BigInt(h) : 0n);
+const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+const UNIT = 10n ** 18n;
+const MOLI = 'MOLI';
+
+/** Decimal string -> wei. ⛔ No floating point anywhere near an amount. */
+function toWei(s) {
+  const t = String(s ?? '').trim().replace(',', '.');
+  if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return null;
+  const parts = t.split('.');
+  const w = parts[0];
+  const f = parts[1] || '';
+  if (f.length > 18) return null;
+  const frac = (f + '0'.repeat(18)).slice(0, 18);
+  const v = BigInt(w || '0') * UNIT + BigInt(frac || '0');
+  return v > 0n ? v : null;
+}
+
+function fromWei(v, places) {
+  const p = places === undefined ? 6 : places;
+  const n = BigInt(v);
+  const whole = n / UNIT;
+  const f = (n % UNIT).toString().padStart(18, '0').slice(0, p).replace(/0+$/, '');
+  return f ? whole + '.' + f : String(whole);
+}
+
+function ceilDiv(a, b) {
+  return a === 0n ? 0n : (a - 1n) / b + 1n;
+}
+
+function fmt(v, places) {
+  const n = BigInt(v);
+  const p = places !== undefined ? places : (n >= 1000n * UNIT ? 2 : n >= UNIT ? 4 : 6);
+  const s = fromWei(n, p);
+  const pt = LANG === 'pt';
+  if (s === '0' && n > 0n) return pt ? '< 0,000001' : '< 0.000001';
+  const parts = s.split('.');
+  const g = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, pt ? '.' : ',');
+  return parts[1] ? g + (pt ? ',' : '.') + parts[1] : g;
+}
+/** An amount exactly as charged: every significant decimal, localised. */
+const fmtExact = (v) => fmt(v, 18);
+
+/* ================================================== QR and payment URL */
+
+/**
+ * The URL a merchant's QR carries. location.origin, never a literal host, so a
+ * QR made on any node points back at that node. `r` makes every charge's QR
+ * distinct, so a customer's phone never reuses a cached page for a new sale.
+ */
+function payUrl(origin, to, amountWei, memo, r) {
+  let u = origin + PAY_PATH + '?to=' + to.toLowerCase();
+  if (amountWei !== null && amountWei !== undefined) {
+    u += '&amount=' + fromWei(amountWei, 18) + '&memo=' + encodeURIComponent(memo || '') + '&r=' + r;
+  }
+  return u;
+}
+
+function randomTag() {
+  const b = new Uint8Array(4);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+/** Dark modules with a 4-module quiet zone, error correction M. */
+function qrMatrix(text) {
+  const q = qrcode(0, 'M');
+  q.addData(text);
+  q.make();
+  const n = q.getModuleCount();
+  const Z = 4;
+  const rows = [];
+  for (let r = 0; r < n + 2 * Z; r++) {
+    const row = [];
+    for (let c = 0; c < n + 2 * Z; c++) {
+      const rr = r - Z; const cc = c - Z;
+      row.push(rr >= 0 && cc >= 0 && rr < n && cc < n && q.isDark(rr, cc));
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Black on white, always: a scanner needs the contrast whatever the theme. */
+function qrSvg(text) {
+  const m = qrMatrix(text);
+  const s = m.length;
+  let d = '';
+  for (let r = 0; r < s; r++) for (let c = 0; c < s; c++) if (m[r][c]) d += 'M' + c + ' ' + r + 'h1v1h-1z';
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + s + ' ' + s + '" shape-rendering="crispEdges">'
+    + '<rect width="' + s + '" height="' + s + '" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+}
+
+/* ============================================================== state */
+
+const params = new URLSearchParams(location.search);
+const MODE = params.get('to') && params.get('mode') !== 'merchant' ? 'customer' : 'merchant';
+
+let account = null;
+let chainOk = false;
+let busy = null;
+let balMoli = null;
+let gasPrice = 10n ** 9n;
+let markets = [];
+const tokBal = {};
+const allowances = {};
+let method = 'moli';
+let plan = null;            // the token route for the current amount
+let planSeq = 0;
+let loaded = false;
+
+const eth = () => window.molibraWallet.require($('walletHelp'));
+
+async function rpc(method_, params_) {
+  const r = await fetch(NODE + '/molibra', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method_, params: params_ }),
+  });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+const call = (to, data) => rpc('eth_call', [{ to: to, data: data }, 'latest']);
+
+/** ⛔ symbol() is OPTIONAL on real tokens, so a failure must degrade, not refuse. */
+function decodeString(hexStr) {
+  try {
+    const b = hexStr.replace(/^0x/, '');
+    const len = parseInt(b.slice(64, 128), 16);
+    if (!len || len > 64) return null;
+    const bytes = b.slice(128, 128 + len * 2).match(/../g).map((x) => parseInt(x, 16));
+    return String.fromCharCode.apply(null, bytes).replace(/[^\x20-\x7e]/g, '') || null;
+  } catch (e) { return null; }
+}
+
+/* ============================================================= wallet */
+
+const isRejection = (e) => Boolean(e) && (e.code === 4001 || /user (rejected|denied|cancel)/i.test(String(e.message || '')));
+
+async function readChain() {
+  try { chainOk = BigInt(await eth().request({ method: 'eth_chainId' })) === BigInt(MOLIBRA_CHAIN_ID); }
+  catch (e) { chainOk = false; }
+}
+
+async function connect() {
+  const accs = await eth().request({ method: 'eth_requestAccounts' });
+  account = accs && accs[0] ? String(accs[0]).toLowerCase() : null;
+  if (!account) throw new Error(t('noAccount'));
+  $('walletHelp').hidden = true;
+  await readChain();
+  render();
+  try { if (!chainOk) await switchChain(); }
+  finally { await refresh(); }
+}
+
+/** Add the network, then switch to it; only the person's refusal stops it. */
+async function switchChain() {
+  const w = eth();
+  try { await w.request({ method: 'wallet_addEthereumChain', params: [CHAIN_PARAMS] }); }
+  catch (e) { if (isRejection(e)) throw e; }
+  try { await w.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MOLIBRA_CHAIN_ID }] }); }
+  catch (e) { if (isRejection(e)) throw e; }
+  await readChain();
+  render();
+  if (!chainOk) throw new Error(t('stillWrong'));
+}
+
+async function requireMolibra() {
+  if (!account) await connect();
+  await readChain();
+  if (!chainOk) await switchChain();
+}
+
+/* ======================================================== markets */
+
+/** Same discovery as swap.html: the seeded pool, plus a factory's if one is named. */
+async function discover() {
+  const seen = new Map();
+  for (const m of SEED_MARKETS) seen.set(m.token.toLowerCase(), Object.assign({}, m));
+  const f = String(params.get('factory') || '').trim();
+  if (isAddr(f)) {
+    try {
+      const raw = (await call(f, SEL.allMarkets)).replace(/^0x/, '');
+      const count = parseInt(raw.slice(128, 192), 16) || 0;
+      const poolOff = 192 + count * 64 + 64;
+      for (let i = 0; i < count; i++) {
+        const tok = '0x' + raw.slice(192 + i * 64 + 24, 192 + i * 64 + 64);
+        const pool = '0x' + raw.slice(poolOff + i * 64 + 24, poolOff + i * 64 + 64);
+        if (!seen.has(tok)) seen.set(tok, { token: tok, pool: pool, symbol: null });
+      }
+    } catch (e) { /* the seeded market still works */ }
+  }
+  const out = Array.from(seen.values());
+  await Promise.all(out.map(async (m) => {
+    if (!m.symbol) {
+      const s = await call(m.token, SEL.symbol).catch(() => null);
+      m.symbol = (s && decodeString(s)) || m.token.slice(0, 8);
+    }
+    m.rMoli = 0n; m.rTok = 0n;
+    try {
+      const raw = (await call(m.pool, SEL.reserves)).replace(/^0x/, '');
+      m.rMoli = BigInt('0x' + raw.slice(0, 64));
+      m.rTok = BigInt('0x' + raw.slice(64, 128));
+    } catch (e) { /* no liquidity reads as zero */ }
+  }));
+  return out.filter((m) => m.rMoli > 0n && m.rTok > 0n);
+}
+
+/**
+ * The fewest tokens IN for at least `want` MOLI OUT, by the inverse of the
+ * pool's own rule:
+ *
+ *   quote(a) = floor(a*997*rOut / (rIn*1000 + a*997)) >= want
+ *   <=>  a*997*(rOut - want) >= want*rIn*1000          (want is an integer)
+ *
+ * so a = ceil(want*rIn*1000 / (997*(rOut - want))), and a - 1 falls short.
+ * The pool can only be asked exact-IN, so this is the only way to charge an
+ * exact amount OUT - and the page still asks the pool to confirm it (below).
+ */
+function amountInFor(want, rIn, rOut) {
+  if (want <= 0n || rIn <= 0n || rOut <= want) return null;
+  return ceilDiv(want * rIn * 1000n, 997n * (rOut - want));
+}
+
+/** ⛔⛔ The POOL's answer, by eth_call. The inverse above is checked against it. */
+async function poolQuote(m, amountIn) {
+  return BigInt(await call(m.pool, SEL.quote + word(amountIn) + word(m.rTok) + word(m.rMoli)));
+}
+
+async function tokenPlan(m, want) {
+  let a = amountInFor(want, m.rTok, m.rMoli);
+  if (a === null) return { tooLarge: true };
+  let ok = false;
+  for (let i = 0; i < 3 && !ok; i++) {
+    if ((await poolQuote(m, a)) >= want) ok = true; else a += 1n;
+  }
+  if (!ok) return { tooLarge: true };
+  const amountIn = ceilDiv(a * (10000n + PAY_MARGIN_BP), 10000n);
+  return { m: m, exact: a, amountIn: amountIn, minOut: want };
+}
+
+/* ======================================================== reading */
+
+async function refresh() {
+  try {
+    gasPrice = toBig(await rpc('eth_gasPrice', []).catch(() => '0x3b9aca00')) || 10n ** 9n;
+    if (MODE === 'customer') {
+      markets = await discover();
+      fillTokens();
+      if (account) {
+        balMoli = BigInt(await rpc('eth_getBalance', [account, 'latest']));
+        await Promise.all(markets.map(async (m) => {
+          tokBal[m.token] = toBig(await call(m.token, SEL.balanceOf + addr32(account)).catch(() => '0x'));
+          allowances[m.token] = toBig(await call(m.token, SEL.allowance + addr32(account) + addr32(m.pool)).catch(() => '0x'));
+        }));
+      }
+      loaded = true;
+      await replan();
+    } else {
+      if (account) balMoli = BigInt(await rpc('eth_getBalance', [account, 'latest']));
+      loaded = true;
+    }
+    $('netNote').hidden = true;
+    render();
+  } catch (e) {
+    $('netNote').textContent = t('nodeDown') + ' (' + e.message + ')';
+    $('netNote').hidden = false;
+    render();
+  }
+}
+
+function fillTokens() {
+  const el = $('tokSel'); const cur = el.value;
+  el.textContent = '';
+  for (const m of markets) {
+    const o = document.createElement('option');
+    o.value = m.token; o.textContent = m.symbol;
+    el.appendChild(o);
+  }
+  if (cur && markets.some((m) => m.token === cur)) el.value = cur;
+}
+
+/* ===================================================== customer side */
+
+const merchant = () => String(params.get('to') || '').trim().toLowerCase();
+
+function wantWei() {
+  const fixed = params.get('amount');
+  if (fixed !== null && fixed !== '') return toWei(fixed.replace(',', '.'));
+  return toWei($('cAmountIn').value);
+}
+
+async function replan() {
+  const seq = ++planSeq;
+  const want = wantWei();
+  const m = markets.find((x) => x.token === $('tokSel').value) || markets[0];
+  if (!want || !m) { plan = null; render(); return; }
+  const p = await tokenPlan(m, want);
+  if (seq !== planSeq) return;
+  plan = p;
+  render();
+}
+
+function customerState() {
+  if (busy) return { label: busy, disabled: true };
+  if (!isAddr(merchant())) return { label: t('badLink'), disabled: true };
+  if (!account) return { label: t('connect'), act: connect };
+  if (!chainOk) return { label: t('switchNet'), act: switchChain };
+  if (!loaded) return { label: t('loading'), disabled: true };
+  const want = wantWei();
+  if (!want) return { label: t('enterAmount'), disabled: true };
+  const fee = gasPrice * TRANSFER_GAS;
+  if (method === 'moli') {
+    if (balMoli !== null && balMoli < want + fee) return { label: t('insufficient', 'MOLI'), disabled: true, buy: true };
+    return { label: t('payMoli', fmtExact(want)), act: payWithMoli };
+  }
+  if (!markets.length) return { label: t('noMarketTok'), disabled: true };
+  if (!plan) return { label: t('loading'), disabled: true };
+  if (plan.tooLarge) return { label: t('tooLarge'), disabled: true };
+  if (balMoli !== null && balMoli < gasPrice * TOKEN_ROUTE_GAS) return { label: t('needGas'), disabled: true, buy: true, gas: true };
+  const sym = plan.m.symbol;
+  if ((tokBal[plan.m.token] || 0n) < plan.amountIn) return { label: t('insufficient', sym), disabled: true, buy: true };
+  return { label: t('payToken', sym), act: payWithToken };
+}
+
+function renderCustomer() {
+  const to = merchant();
+  const want = wantWei();
+  $('cMerchant').textContent = isAddr(to) ? short(to) : '—';
+  $('cMerchantFull').textContent = isAddr(to) ? to : '';
+  $('cBad').hidden = isAddr(to);
+  $('cBad').textContent = t('badLink');
+  const fixed = params.get('amount');
+  const hasFixed = fixed !== null && fixed !== '';
+  $('cAmountFixed').hidden = !hasFixed;
+  $('cAmountBox').hidden = hasFixed;
+  $('cAmount').textContent = want ? fmtExact(want) + ' MOLI' : '—';
+  const memo = String(params.get('memo') || '').slice(0, 140);
+  $('cMemo').textContent = memo;
+  $('cMemo').hidden = !memo;
+  $('noWallet').hidden = Boolean(window.ethereum);
+  $('mMoli').className = method === 'moli' ? 'on' : '';
+  $('mToken').className = method === 'token' ? 'on' : '';
+  $('tokenPane').hidden = method !== 'token';
+  $('tNeed').textContent = plan && plan.amountIn ? fmt(plan.amountIn) : '—';
+  const m = markets.find((x) => x.token === $('tokSel').value);
+  $('tBal').textContent = account && m ? fmt(tokBal[m.token] || 0n) : '—';
+  $('cBalMoli').textContent = account && balMoli !== null ? fmt(balMoli) : '—';
+  const st = customerState();
+  setBtn($('payBtn'), st);
+  if (st.buy) $('buyCard').hidden = false;
+  $('gasNote').hidden = !st.gas;
+  $('gasNote').textContent = t('gasNote', fmt(gasPrice * TOKEN_ROUTE_GAS));
+  if (account && !$('myAddrBox').hidden) {
+    $('myAddr').textContent = account;
+  }
+}
+
+function setStep(n) {
+  $('steps').hidden = n === 0;
+  for (let i = 1; i <= 3; i++) {
+    $('st' + i).className = i < n ? 'done' : i === n ? 'now' : '';
+  }
+}
+
+async function payWithMoli() {
+  await requireMolibra();
+  await refresh();
+  const want = wantWei();
+  if (!want) throw new Error(t('enterAmount'));
+  if (balMoli < want + gasPrice * TRANSFER_GAS) throw new Error(t('insufficient', 'MOLI'));
+  // ⛔⛔ A plain transfer: value only, NO data field at all.
+  const tx = { from: account, to: merchant(), value: hex(want), gas: hex(TRANSFER_GAS) };
+  const res = await sendTx(tx, 'payMsg');
+  await refresh();
+  showMsg('payMsg', 'ok', t('paidOk', fmtExact(want), short(merchant())), res.h);
+}
+
+async function payWithToken() {
+  await requireMolibra();
+  await refresh();
+  const p = plan;
+  const want = wantWei();
+  if (!p || p.tooLarge || !want || p.minOut !== want) throw new Error(t('tooLarge'));
+  const m = p.m;
+  const total = (allowances[m.token] || 0n) < p.amountIn ? 3 : 2;
+  let step = 0;
+
+  if (total === 3) {
+    step++; setStep(1);
+    // ⛔ Exactly this payment, never an unlimited allowance.
+    const data = SEL.approve + addr32(m.pool) + word(p.amountIn);
+    busy = t('stepOf', step, total);
+    await sendTx({ from: account, to: m.token, data: data }, 'payMsg', true);
+  }
+
+  step++; setStep(2);
+  // minOut is the charged amount itself: the swap either yields enough to pay
+  // or reverts, and never leaves the customer half-way with too little MOLI.
+  const swap = { from: account, to: m.pool, data: SEL.swapTokenIn + word(p.amountIn) + word(p.minOut) };
+  await preflight(swap, 'wouldRevert');
+  busy = t('stepOf', step, total);
+  await sendTx(swap, 'payMsg', true);
+
+  step++; setStep(3);
+  // ⛔⛔ A plain transfer: value only, NO data field at all.
+  const pay = { from: account, to: merchant(), value: hex(want), gas: hex(TRANSFER_GAS) };
+  busy = t('stepOf', step, total);
+  const res = await sendTx(pay, 'payMsg', true);
+  setStep(4);
+  await refresh();
+  showMsg('payMsg', 'ok', t('paidOk', fmtExact(want), short(merchant())), res.h);
+}
+
+/* ===================================================== merchant side */
+
+const MERCHANT_KEY = 'molibra.pay.merchant';
+const LOG_KEY = 'molibra.pay.log';
+
+function merchantAddr() {
+  const a = $('mAddr').value.trim();
+  return isAddr(a) ? a.toLowerCase() : null;
+}
+
+function readLog() {
+  try { const l = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(l) ? l : []; }
+  catch (e) { return []; }
+}
+function writeLog(l) {
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(l.slice(-200))); } catch (e) {}
+}
+const dayOf = (ms) => { const d = new Date(ms); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
+
+function renderToday() {
+  const me = merchantAddr();
+  const today = dayOf(Date.now());
+  const rows = readLog().filter((x) => dayOf(x.t) === today && (!me || x.to === me)).reverse();
+  const box = $('todayList');
+  box.textContent = '';
+  let total = 0n;
+  for (const x of rows) {
+    total += BigInt(x.value);
+    const row = document.createElement('div'); row.className = 'stat';
+    const a = document.createElement('span');
+    const d = new Date(x.t);
+    a.textContent = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+      + (x.memo ? ' · ' + x.memo : '');
+    const b = document.createElement('a');
+    b.href = EXPLORER + '/tx/' + x.hash; b.target = '_blank'; b.rel = 'noopener';
+    b.textContent = fmt(BigInt(x.value)) + ' MOLI';
+    row.appendChild(a); row.appendChild(b); box.appendChild(row);
+  }
+  if (!rows.length) {
+    const p = document.createElement('p'); p.className = 'hint'; p.textContent = t('noneYet'); box.appendChild(p);
+  }
+  $('todayTotal').textContent = rows.length ? t('total', fmt(total)) : '';
+}
+
+function renderMerchant() {
+  const me = merchantAddr();
+  const amt = toWei($('mAmount').value);
+  $('genQr').disabled = !(me && amt);
+  $('mBad').hidden = Boolean(me) || $('mAddr').value.trim() === '';
+  $('mBad').textContent = t('needAddr');
+  if (me) {
+    $('signQr').innerHTML = qrSvg(payUrl(location.origin, me, null));
+    $('signAddr').textContent = me;
+  } else {
+    $('signQr').textContent = ''; $('signAddr').textContent = '';
+  }
+  renderToday();
+  // Sell
+  $('sBal').textContent = account && balMoli !== null ? fmt(balMoli) : '—';
+  setBtn($('sellBtn'), sellState());
+}
+
+function sellState() {
+  if (busy) return { label: busy, disabled: true };
+  if (!account) return { label: t('connect'), act: connect };
+  if (!chainOk) return { label: t('switchNet'), act: switchChain };
+  const to = $('sAddr').value.trim();
+  if (!isAddr(to)) return { label: t('badCustAddr'), disabled: true };
+  const v = toWei($('sAmount').value);
+  if (!v) return { label: t('enterAmount'), disabled: true };
+  if (balMoli !== null && balMoli < v + gasPrice * TRANSFER_GAS) return { label: t('insufficient', 'MOLI'), disabled: true };
+  return { label: t('sellBtn', fmtExact(v)), act: sellMoli };
+}
+
+async function sellMoli() {
+  await requireMolibra();
+  await refresh();
+  const to = $('sAddr').value.trim().toLowerCase();
+  const v = toWei($('sAmount').value);
+  if (!isAddr(to) || !v) throw new Error(t('badCustAddr'));
+  if (balMoli < v + gasPrice * TRANSFER_GAS) throw new Error(t('insufficient', 'MOLI'));
+  // ⛔⛔ A plain transfer: value only, NO data field at all.
+  const res = await sendTx({ from: account, to: to, value: hex(v), gas: hex(TRANSFER_GAS) }, 'sellMsg');
+  $('sAmount').value = '';
+  await refresh();
+  showMsg('sellMsg', 'ok', t('sold', fmtExact(v), short(to)), res.h);
+}
+
+/* ---------------------------------------------------- watching a charge */
+
+/**
+ * Transactions in decoded /molibra/blocks output that could be this payment:
+ * canonical, to the merchant, carrying at least the amount. Pure, so the test
+ * runs it on block data shaped exactly like the node's. Raw (non-decoded)
+ * transactions are hex strings and are skipped rather than misread.
+ */
+function matchPayment(blocks, merchantAddr_, minValue) {
+  const want = String(merchantAddr_).toLowerCase();
+  const hits = [];
+  for (const b of blocks || []) {
+    if (!b || b.canonical === false) continue;
+    for (const tx of b.transactions || []) {
+      if (!tx || typeof tx !== 'object' || !tx.to) continue;
+      if (String(tx.to).toLowerCase() !== want) continue;
+      let v;
+      try { v = BigInt(tx.value); } catch (e) { continue; }
+      if (v < minValue) continue;
+      hits.push({ hash: tx.hash, from: String(tx.from || '').toLowerCase(), value: v, block: Number(b.header.number) });
+    }
+  }
+  return hits;
+}
+
+let watch = null;      // { to, amount, memo, next, timer, done, checked:Set }
+let audio = null;
+
+function beep() {
+  try {
+    if (!audio) return;
+    const o = audio.createOscillator(); const g = audio.createGain();
+    o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.4, audio.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.35);
+    o.connect(g); g.connect(audio.destination);
+    o.start(); o.stop(audio.currentTime + 0.4);
+  } catch (e) {}
+}
+
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen');
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) {}
+}
+
+async function headHeight() {
+  const r = await fetch(NODE + '/molibra/head');
+  const j = await r.json();
+  return Number(j.header.number);
+}
+
+async function genQr() {
+  const me = merchantAddr();
+  const amt = toWei($('mAmount').value);
+  if (!me || !amt) return;
+  try { localStorage.setItem(MERCHANT_KEY, me); } catch (e) {}
+  // The tap that shows the QR is the gesture that lets the page beep later.
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {}
+  const memo = $('mMemo').value.trim().slice(0, 80);
+  let start;
+  try { start = await headHeight(); }
+  catch (e) { $('mBad').textContent = t('nodeDown'); $('mBad').hidden = false; return; }
+  const url = payUrl(location.origin, me, amt, memo, randomTag());
+  stopWatch();
+  // Only blocks AFTER the one current now: a transfer already on chain - an
+  // earlier customer's, for the same amount - must not read as this payment.
+  watch = { to: me, amount: amt, memo: memo, next: start + 1, done: false, checked: new Set(), url: url };
+  $('bigQr').innerHTML = qrSvg(url);
+  $('sAmountBig').textContent = fmtExact(amt) + ' MOLI';
+  $('sMemo').textContent = memo;
+  $('qrPanel').className = 'panel';
+  $('qrWaiting').hidden = false;
+  $('qrPaid').hidden = true;
+  $('qrScreen').hidden = false;
+  keepAwake(true);
+  pollOnce();
+  watch.timer = setInterval(pollOnce, 3000);
+}
+
+async function pollOnce() {
+  const w = watch;
+  if (!w || w.done || w.polling) return;
+  w.polling = true;
+  try {
+    const r = await fetch(NODE + '/molibra/blocks?from=' + w.next + '&to=' + (w.next + 511) + '&decoded=1');
+    const j = await r.json();
+    const blocks = j.blocks || [];
+    for (const hit of matchPayment(blocks, w.to, w.amount)) {
+      if (w.checked.has(hit.hash)) continue;
+      w.checked.add(hit.hash);
+      // Decoded blocks carry no status; the receipt does.
+      const rc = await rpc('eth_getTransactionReceipt', [hit.hash]).catch(() => null);
+      if (rc && rc.status === '0x1') { paid(w, hit); return; }
+    }
+    if (blocks.length) w.next = Number(blocks[blocks.length - 1].header.number) + 1;
+  } catch (e) { /* the next tick tries again */ }
+  finally { w.polling = false; }
+}
+
+function paid(w, hit) {
+  w.done = true;
+  clearInterval(w.timer);
+  const log = readLog();
+  if (!log.some((x) => x.hash === hit.hash)) {
+    log.push({ hash: hit.hash, from: hit.from, to: w.to, value: hit.value.toString(), memo: w.memo, t: Date.now() });
+    writeLog(log);
+  }
+  $('qrPanel').className = 'panel paid';
+  $('qrWaiting').hidden = true;
+  $('qrPaid').hidden = false;
+  $('paidAmount').textContent = fmtExact(hit.value) + ' MOLI' + (w.memo ? ' · ' + w.memo : '');
+  $('paidFrom').textContent = t('paidFrom', hit.from);
+  $('paidLink').href = EXPLORER + '/tx/' + hit.hash;
+  beep(); setTimeout(beep, 450);
+  renderToday();
+}
+
+function stopWatch() {
+  if (watch) { clearInterval(watch.timer); watch.done = true; }
+  watch = null;
+}
+
+/* ------------------------------------------------- scanning an address */
+
+let scanStream = null;
+async function startScan() {
+  if (scanStream) return stopScan();
+  if (!('BarcodeDetector' in window) || !navigator.mediaDevices) {
+    showMsg('sellMsg', 'warn', t('noScanner'));
+    return;
+  }
+  try {
+    const det = new BarcodeDetector({ formats: ['qr_code'] });
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const v = $('scanVideo');
+    v.srcObject = scanStream; v.hidden = false;
+    await v.play();
+    $('scanBtn').textContent = t('stopScan');
+    const tick = async () => {
+      if (!scanStream) return;
+      try {
+        const codes = await det.detect(v);
+        for (const c of codes) {
+          const m = String(c.rawValue || '').match(/0x[0-9a-fA-F]{40}/);
+          if (m) { $('sAddr').value = m[0]; stopScan(); showMsg('sellMsg', 'ok', t('scanned')); render(); return; }
+        }
+      } catch (e) {}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) { stopScan(); showMsg('sellMsg', 'warn', t('noScanner')); }
+}
+function stopScan() {
+  if (scanStream) for (const tr of scanStream.getTracks()) tr.stop();
+  scanStream = null;
+  $('scanVideo').hidden = true;
+  $('scanBtn').textContent = t('scan');
+}
+
+/* ========================================================= plumbing */
+
+function setBtn(btn, st) {
+  btn.textContent = st.label;
+  btn.disabled = Boolean(st.disabled);
+  btn._act = st.act || null;
+}
+
+function showMsg(id, kind, text, hash) {
+  const el = $(id);
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+  el.textContent = text;
+  if (hash) {
+    el.appendChild(document.createElement('br'));
+    const a = document.createElement('a');
+    a.href = EXPLORER + '/tx/' + hash; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = t('viewTx') + ' ↗';
+    el.appendChild(a);
+  }
+  el.hidden = false;
+}
+
+function showErr(id, e) {
+  if (!window.ethereum) {
+    $('walletMsg').textContent = String((e && e.message) || e);
+    $('walletHelp').hidden = false;
+    return;
+  }
+  if (isRejection(e)) return showMsg(id, 'warn', t('rejected'));
+  showMsg(id, 'bad', String((e && e.message) || e), e && e.hash);
+}
+
+async function run(fn, msgId) {
+  if (!fn || busy) return;
+  $(msgId).hidden = true;
+  try { await fn(); }
+  catch (e) { showErr(msgId, e); }
+  finally { busy = null; render(); }
+}
+
+async function waitFor(hash) {
+  for (let i = 0; i < 60; i++) {
+    const r = await rpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+    if (r) {
+      if (r.status !== '0x1') { const e = new Error(t('reverted')); e.hash = hash; throw e; }
+      return r;
+    }
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+  const e = new Error(t('timeout')); e.hash = hash; throw e;
+}
+
+/** Simulate the exact call first, so a failing one never costs the payer gas. */
+async function preflight(tx, msgKey) {
+  busy = busy || t('checking'); render();
+  const c = { from: tx.from, to: tx.to, data: tx.data };
+  if (tx.value) c.value = tx.value;
+  try { await rpc('eth_call', [c, 'latest']); }
+  catch (e) { throw new Error(t(msgKey)); }
+}
+
+async function sendTx(tx, msgId, keepLabel) {
+  if (!keepLabel) busy = t('confirmWallet');
+  render();
+  const h = await eth().request({ method: 'eth_sendTransaction', params: [tx] });
+  if (!keepLabel) busy = t('waiting');
+  render();
+  showMsg(msgId, '', t('sent'), h);
+  const r = await waitFor(h);
+  return { h: h, r: r };
+}
+
+function renderHeader() {
+  const chip = $('walletChip');
+  chip.classList.toggle('warn', Boolean(account) && !chainOk);
+  if (!account) chip.textContent = t('connectShort');
+  else if (!chainOk) chip.textContent = t('wrongNet');
+  else chip.textContent = short(account);
+}
+
+function render() {
+  renderHeader();
+  if (MODE === 'customer') renderCustomer(); else renderMerchant();
+}
+
+function showMerchantTab(name) {
+  $('chargePane').hidden = name !== 'charge';
+  $('signPane').hidden = name !== 'sign';
+  $('sellPane').hidden = name !== 'sell';
+  $('tCharge').className = name === 'charge' ? 'on' : '';
+  $('tSign').className = name === 'sign' ? 'on' : '';
+  $('tSell').className = name === 'sell' ? 'on' : '';
+  if (name !== 'sell') stopScan();
+}
+
+const cleanAmount = (el) => {
+  const v = el.value.replace(/[^\d.,]/g, '');
+  const i = v.search(/[.,]/);
+  el.value = i === -1 ? v : v.slice(0, i + 1) + v.slice(i + 1).replace(/[.,]/g, '');
+};
+
+/* ============================================================ wiring */
+
+$('langPt').onclick = () => setLang('pt');
+$('langEn').onclick = () => setLang('en');
+$('walletChip').onclick = () => {
+  if (account && chainOk) { window.open(EXPLORER + '/address/' + account, '_blank', 'noopener'); return; }
+  run(account ? switchChain : connect, MODE === 'customer' ? 'payMsg' : 'sellMsg');
+};
+
+// Customer
+$('payBtn').onclick = () => run($('payBtn')._act, 'payMsg');
+$('mMoli').onclick = () => { method = 'moli'; render(); };
+$('mToken').onclick = () => { method = 'token'; render(); replan().catch(() => {}); };
+$('tokSel').onchange = () => replan().catch(() => {});
+$('cAmountIn').oninput = () => { cleanAmount($('cAmountIn')); $('payMsg').hidden = true; render(); replan().catch(() => {}); };
+$('showBuy').onclick = () => { $('buyCard').hidden = false; $('buyCard').scrollIntoView({ behavior: 'smooth' }); };
+$('buyCounter').onclick = async () => {
+  if (!account) { await run(connect, 'payMsg'); if (!account) return; }
+  $('myAddrBox').hidden = false;
+  $('myQr').innerHTML = qrSvg(account);
+  $('myAddr').textContent = account;
+};
+$('copyMine').onclick = async () => {
+  try { await navigator.clipboard.writeText(account || ''); $('copyMine').textContent = t('copied'); }
+  catch (e) { /* the address is on screen to copy by hand */ }
+};
+
+// Merchant
+$('useWallet').onclick = async () => {
+  try {
+    const accs = await eth().request({ method: 'eth_requestAccounts' });
+    if (accs && accs[0]) {
+      account = String(accs[0]).toLowerCase();
+      $('mAddr').value = account;
+      try { localStorage.setItem(MERCHANT_KEY, account); } catch (e) {}
+      await readChain();
+      await refresh();
+    }
+  } catch (e) { showErr('mBad', e); }
+};
+$('mAddr').oninput = () => {
+  const a = merchantAddr();
+  if (a) { try { localStorage.setItem(MERCHANT_KEY, a); } catch (e) {} }
+  render();
+};
+$('mAmount').oninput = () => { cleanAmount($('mAmount')); render(); };
+$('genQr').onclick = () => { genQr(); };
+$('closeQr').onclick = () => { stopWatch(); keepAwake(false); $('qrScreen').hidden = true; };
+$('newCharge').onclick = () => {
+  stopWatch(); keepAwake(false); $('qrScreen').hidden = true;
+  $('mAmount').value = ''; $('mMemo').value = ''; render(); $('mAmount').focus();
+};
+$('tCharge').onclick = () => showMerchantTab('charge');
+$('tSign').onclick = () => showMerchantTab('sign');
+$('tSell').onclick = () => showMerchantTab('sell');
+$('printSign').onclick = () => window.print();
+$('sellBtn').onclick = () => run($('sellBtn')._act, 'sellMsg');
+$('sAddr').oninput = () => render();
+$('sAmount').oninput = () => { cleanAmount($('sAmount')); render(); };
+$('scanBtn').onclick = () => startScan();
+
+// Deep links for a phone that opened the QR in its plain browser.
+$('mmLink').href = 'https://metamask.app.link/dapp/' + location.host + location.pathname + location.search;
+$('twLink').href = 'https://link.trustwallet.com/open_url?coin_id=60&url=' + encodeURIComponent(location.href);
+
+if (window.ethereum && typeof window.ethereum.on === 'function') {
+  window.ethereum.on('accountsChanged', (accs) => {
+    account = accs && accs[0] ? String(accs[0]).toLowerCase() : null;
+    readChain().then(refresh);
+  });
+  window.ethereum.on('chainChanged', () => { readChain().then(refresh); });
+}
+
+$(MODE === 'customer' ? 'customer' : 'merchant').hidden = false;
+if (MODE === 'merchant') {
+  let saved = null;
+  try { saved = localStorage.getItem(MERCHANT_KEY); } catch (e) {}
+  if (isAddr(saved)) $('mAddr').value = saved;
+  if (params.get('amount')) $('mAmount').value = params.get('amount');
+}
+setLang(LANG);
+
+(async () => {
+  if (window.ethereum) {
+    try {
+      const accs = await window.ethereum.request({ method: 'eth_accounts' });
+      if (accs && accs[0]) { account = String(accs[0]).toLowerCase(); await readChain(); }
+    } catch (e) {}
+  }
+  await refresh();
+})();
+</script>
+</body>
+</html>

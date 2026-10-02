@@ -1,0 +1,256 @@
+{
+ "_note": "Shaped from a real https://molibra.org/molibra/blocks?from=138400&to=138499&decoded=1 response (blocks 138465-138489), addresses replaced and long inputs shortened. Payments to 0x...c0de are synthetic test cases for test/pay-page.mjs.",
+ "from": 138465,
+ "to": 138489,
+ "truncated": false,
+ "height": 138569,
+ "blocks": [
+  {
+   "header": {
+    "number": "138465",
+    "parentHash": "0x757aacaea5099bb61cc14bb04075307003b237a7296c8d1f2c25c141e9e4d1ff",
+    "timestamp": "1790965745",
+    "miner": "0x00000000000000000000000000000000000000a1",
+    "stateRoot": "0x50565d42a81c6ce87a165e28734be0c46d28a6de1925b7f679e7959065a7c393",
+    "txRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "difficulty": "4039023",
+    "gasLimit": "8000000",
+    "gasUsed": "0",
+    "extraData": "0x",
+    "nonce": "3732184"
+   },
+   "hash": "0xd17c15185c97cb467141a1b824b36631e6697d02953b031d469dd5056e508b61",
+   "transactions": [],
+   "totalDifficulty": "227986956215",
+   "canonical": true
+  },
+  {
+   "header": {
+    "number": "138466",
+    "parentHash": "0xd17c15185c97cb467141a1b824b36631e6697d02953b031d469dd5056e508b61",
+    "timestamp": "1790965835",
+    "miner": "0x00000000000000000000000000000000000000b2",
+    "stateRoot": "0x4124c91123f96b48088d66377ab00295340cd716d53014f2f51469e97fa9d98c",
+    "txRoot": "0x633b3a1b330a63eb21686874dd4f6d6e15ef0eb2f563ed3806ed7e1a4ed2a7dc",
+    "difficulty": "3786585",
+    "gasLimit": "8000000",
+    "gasUsed": "21892",
+    "extraData": "0x",
+    "nonce": "1607459"
+   },
+   "hash": "0x46e0da3d3efaee338578e4feb618ad2aa29dd8262d4e754e8653e18ba0fe6c49",
+   "transactions": [
+    {
+     "hash": "0x633b3a1b330a63eb21686874dd4f6d6e15ef0eb2f563ed3806ed7e1a4ed2a7dc",
+     "nonce": "0x16",
+     "blockHash": "0x46e0da3d3efaee338578e4feb618ad2aa29dd8262d4e754e8653e18ba0fe6c49",
+     "blockNumber": "0x21ce2",
+     "transactionIndex": "0x0",
+     "from": "0x00000000000000000000000000000000000000a1",
+     "to": "0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a",
+     "value": "0x0",
+     "gas": "0x7a120",
+     "gasPrice": "0x3b9aca00",
+     "input": "0x5923f6da000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000018e59f92e5a6e6c3668976af7818729bac18346322694261bcc243f707ecad86e8bd2",
+     "v": "0x9e27",
+     "r": "0x63787498173f88c625f5ef1c5bd909acb96a7876fe2698915ef08b733ef8e329",
+     "s": "0x7d95934e273e4b865b4dd60da7e2b54f0b85469973a0dac1df91c0af1e58dfa7",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    }
+   ],
+   "totalDifficulty": "227990742800",
+   "canonical": true
+  },
+  {
+   "header": {
+    "number": "138472",
+    "parentHash": "0x94b7c3cb775b14bdd2c630182983b7054935706bc20b15a830f8033a2a84da45",
+    "timestamp": "1790966014",
+    "miner": "0x00000000000000000000000000000000000000b2",
+    "stateRoot": "0xe99e7ab0421a0f7abecebcc3ebd117250c2e3e20d314bc06f9c572ceb2b9cf5a",
+    "txRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "difficulty": "2913623",
+    "gasLimit": "8000000",
+    "gasUsed": "0",
+    "extraData": "0x",
+    "nonce": "5233773"
+   },
+   "hash": "0xcfc41d7ce882d021de798173a4ea4133e29b1ce4222c2c1b9834d097c64f6788",
+   "transactions": [],
+   "totalDifficulty": "228011410438",
+   "canonical": true
+  },
+  {
+   "header": {
+    "number": "138473",
+    "parentHash": "0xcfc41d7ce882d021de798173a4ea4133e29b1ce4222c2c1b9834d097c64f6788",
+    "timestamp": "1790966127",
+    "miner": "0x00000000000000000000000000000000000000b2",
+    "stateRoot": "0x5aecf7b8b8d5698c92d8d799ea4d213adb222a820c1f5aaf8a060f69b5a65e6d",
+    "txRoot": "0x10a51dee0df7afb8914f7d0307bfe1b504a7ab969808a3cb815c21f9f0201fc7",
+    "difficulty": "2731522",
+    "gasLimit": "8000000",
+    "gasUsed": "75563",
+    "extraData": "0x",
+    "nonce": "281140"
+   },
+   "hash": "0x654c2d76b9b924b87e5cc3c04903811898c9ab7978bbfe7b43e08d5c0bd666ee",
+   "transactions": [
+    {
+     "hash": "0x10a51dee0df7afb8914f7d0307bfe1b504a7ab969808a3cb815c21f9f0201fc7",
+     "nonce": "0x17",
+     "blockHash": "0x654c2d76b9b924b87e5cc3c04903811898c9ab7978bbfe7b43e08d5c0bd666ee",
+     "blockNumber": "0x21ce9",
+     "transactionIndex": "0x0",
+     "from": "0x00000000000000000000000000000000000000a1",
+     "to": "0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a",
+     "value": "0x0",
+     "gas": "0x7a120",
+     "gasPrice": "0x3b9aca00",
+     "input": "0xdd1d60803f95fe48b15b54152f96490e8a1b7d12c3bc5a10e95b3e7491e5ad83748a33c100000000000000000000000000000000000000000000000000000000018e59f900000000000000000000000000000000000000000000000000000000000001",
+     "v": "0x9e28",
+     "r": "0x4ef3a3b1b894e36661fc70e5a6d5007f8d73cf89ec53d35b0c95002a1b5485ad",
+     "s": "0x5e7b9b4418aff343afc4a60ccb2538ec02212ce6dca8b2f5ef673880fc8aee2b",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    },
+    {
+     "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+     "nonce": "0x0",
+     "blockHash": "0x46e0da3d3efaee338578e4feb618ad2aa29dd8262d4e754e8653e18ba0fe6c49",
+     "blockNumber": "0x21ce2",
+     "transactionIndex": "0x1",
+     "from": "0x00000000000000000000000000000000000000d1",
+     "to": "0x000000000000000000000000000000000000c0de",
+     "value": "0xad78ebc5ac61ffff",
+     "gas": "0x5208",
+     "gasPrice": "0x3b9aca00",
+     "input": "0x",
+     "v": "0x9e27",
+     "r": "0x63787498173f88c625f5ef1c5bd909acb96a7876fe2698915ef08b733ef8e329",
+     "s": "0x7d95934e273e4b865b4dd60da7e2b54f0b85469973a0dac1df91c0af1e58dfa7",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    },
+    {
+     "hash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+     "nonce": "0x0",
+     "blockHash": "0x46e0da3d3efaee338578e4feb618ad2aa29dd8262d4e754e8653e18ba0fe6c49",
+     "blockNumber": "0x21ce2",
+     "transactionIndex": "0x2",
+     "from": "0x00000000000000000000000000000000000000d2",
+     "to": "0x000000000000000000000000000000000000C0DE",
+     "value": "0xad78ebc5ac620000",
+     "gas": "0x5208",
+     "gasPrice": "0x3b9aca00",
+     "input": "0x",
+     "v": "0x9e27",
+     "r": "0x63787498173f88c625f5ef1c5bd909acb96a7876fe2698915ef08b733ef8e329",
+     "s": "0x7d95934e273e4b865b4dd60da7e2b54f0b85469973a0dac1df91c0af1e58dfa7",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    }
+   ],
+   "totalDifficulty": "228014141960",
+   "canonical": true
+  },
+  {
+   "header": {
+    "number": "138489",
+    "parentHash": "0x2c93c218c4a84dff80ce9ee6e5da6eede6e1b2133e1c7d35aa2302f634707229",
+    "timestamp": "1790966432",
+    "miner": "0x00000000000000000000000000000000000000a1",
+    "stateRoot": "0x8929ebce0b8965c63486338555a48ea3a4dd7412f64e8020e4fb1444951db8ad",
+    "txRoot": "0xe80c791ccebdaa603c52200344d97d64698cc253e426676f64fcb2b0b5289e94",
+    "difficulty": "3853710",
+    "gasLimit": "8000000",
+    "gasUsed": "46163",
+    "extraData": "0x",
+    "nonce": "1752955"
+   },
+   "hash": "0xc9e2652ab83caef0807f84a40805135993d107fdb299c318ce78cc591fba2bbe",
+   "transactions": [
+    {
+     "hash": "0xe80c791ccebdaa603c52200344d97d64698cc253e426676f64fcb2b0b5289e94",
+     "nonce": "0x18",
+     "blockHash": "0xc9e2652ab83caef0807f84a40805135993d107fdb299c318ce78cc591fba2bbe",
+     "blockNumber": "0x21cf9",
+     "transactionIndex": "0x0",
+     "from": "0x00000000000000000000000000000000000000a1",
+     "to": "0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a",
+     "value": "0x0",
+     "gas": "0x30d40",
+     "gasPrice": "0x3b9aca00",
+     "input": "0x095ea7b30000000000000000000000004f34d9bc5db2396640d8eb564667e8701528b43d000000000000000000000000000000000000000000000a2a15d09519be000000",
+     "v": "0x9e28",
+     "r": "0x6456a224b957e75834c916b207bd2cc0d355404f1f6ffca6bf5a444531cf0ccb",
+     "s": "0x5c84f7bb286854f8800dfe0581d5f34b318b04067a42c49f2f9a9771801ed487",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    },
+    {
+     "hash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+     "nonce": "0x16",
+     "blockHash": "0x46e0da3d3efaee338578e4feb618ad2aa29dd8262d4e754e8653e18ba0fe6c49",
+     "blockNumber": "0x21ce2",
+     "transactionIndex": "0x1",
+     "from": "0x00000000000000000000000000000000000000d4",
+     "to": "0x000000000000000000000000000000000000c0de",
+     "value": "0xad78ebc5ac620001",
+     "gas": "0x5208",
+     "gasPrice": "0x3b9aca00",
+     "input": "0x",
+     "v": "0x9e27",
+     "r": "0x63787498173f88c625f5ef1c5bd909acb96a7876fe2698915ef08b733ef8e329",
+     "s": "0x7d95934e273e4b865b4dd60da7e2b54f0b85469973a0dac1df91c0af1e58dfa7",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    },
+    "0xf86c0a843b9aca0082520894000000000000000000000000000000000000c0de88ad78ebc5ac620000801ca0"
+   ],
+   "totalDifficulty": "228066751047",
+   "canonical": true
+  },
+  {
+   "header": {
+    "number": "138489",
+    "parentHash": "0x2c93c218c4a84dff80ce9ee6e5da6eede6e1b2133e1c7d35aa2302f634707229",
+    "timestamp": "1790966432",
+    "miner": "0x00000000000000000000000000000000000000a1",
+    "stateRoot": "0x8929ebce0b8965c63486338555a48ea3a4dd7412f64e8020e4fb1444951db8ad",
+    "txRoot": "0xe80c791ccebdaa603c52200344d97d64698cc253e426676f64fcb2b0b5289e94",
+    "difficulty": "3853710",
+    "gasLimit": "8000000",
+    "gasUsed": "46163",
+    "extraData": "0x",
+    "nonce": "1752955"
+   },
+   "hash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+   "transactions": [
+    {
+     "hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+     "nonce": "0x16",
+     "blockHash": "0x46e0da3d3efaee338578e4feb618ad2aa29dd8262d4e754e8653e18ba0fe6c49",
+     "blockNumber": "0x21ce2",
+     "transactionIndex": "0x0",
+     "from": "0x00000000000000000000000000000000000000d3",
+     "to": "0x000000000000000000000000000000000000c0de",
+     "value": "0x15af1d78b58c40000",
+     "gas": "0x5208",
+     "gasPrice": "0x3b9aca00",
+     "input": "0x",
+     "v": "0x9e27",
+     "r": "0x63787498173f88c625f5ef1c5bd909acb96a7876fe2698915ef08b733ef8e329",
+     "s": "0x7d95934e273e4b865b4dd60da7e2b54f0b85469973a0dac1df91c0af1e58dfa7",
+     "type": "0x0",
+     "chainId": "0x4f02"
+    }
+   ],
+   "totalDifficulty": "228066751047",
+   "canonical": false
+  }
+ ],
+ "merchant": "0x000000000000000000000000000000000000c0de",
+ "amount": "12500000000000000000"
+}
