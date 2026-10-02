@@ -363,8 +363,13 @@ function buildBurn() {
   const amountStr = $('burnAmount').value.trim();
   if (!isAddress(to)) return { error: 'the recipient is not an address' };
   let wei;
-  try { wei = BigInt(Math.round(Number(amountStr) * 1e18)); }
-  catch { return { error: 'the amount is not a number' }; }
+  // ⛔ Decimal string -> wei with BigInt only. Number(x) * 1e18 rounds:
+  // 92000 became 92000.000000000008388608 MOLI.
+  const m = /^(\d*)(?:[.,](\d*))?$/.exec(amountStr);
+  if (!m || (m[1] === '' && !m[2])) return { error: 'the amount is not a number' };
+  const frac = ((m[2] || '') + '0'.repeat(18)).slice(0, 18);
+  if ((m[2] || '').length > 18) return { error: 'at most 18 decimals' };
+  wei = BigInt(m[1] || '0') * 10n ** 18n + BigInt(frac);
   if (!(wei > 0n)) return { error: 'a burn must be positive' };
   if (/^0x0{40}$/i.test(to)) return { error: 'the zero address would be unclaimable on the far side' };
   return { data: MOLI_BURN_TAG + addr32(to).slice(24) + word(wei), to, wei };
