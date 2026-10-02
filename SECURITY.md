@@ -64,11 +64,9 @@ cost is real and is stated rather than buried: **a node offline or partitioned f
 do this; several smaller chains do, precisely because they are small. Molibra is small. The
 refused blocks are kept, not discarded, so an operator can inspect what was offered.
 
-## Is this "better than the urna eletrônica"?
+## What the record guarantees, and what Molibra is not
 
-On some axes yes, on others no, and the honest answer matters more than the flattering one.
-
-**Where this record is stronger:**
+**What the record guarantees:**
 
 - **Anyone can re-derive the tally.** Every node re-executes every transaction and arrives at
   the same state root independently — proven in the tests by a second node reaching the same
@@ -79,22 +77,13 @@ On some axes yes, on others no, and the honest answer matters more than the flat
 - **The count needs no trusted counter**: burning *is* the tally.
 - **It is open, reproducible and permissionlessly replicable** by anyone with the source.
 
-**Where it is weaker, and cannot simply be parameterised into strength:**
+What it does not guarantee — coercion resistance, one person one voice, availability against a
+determined attacker on a small network — is set out under *Known and accepted limitations*
+below and in [WHITEPAPER.md](WHITEPAPER.md) §8.1.
 
-- **Coercion resistance.** The urna's ballot secrecy is strong. Molibra's is not: individual
-  verifiability *means* a receipt, and a receipt enables vote-buying. This is a genuine
-  trade-off between two properties that pull against each other, not an omission. See
-  [WHITEPAPER.md](WHITEPAPER.md) §8.1.
-- **One person, one voice.** The urna binds to an identified electorate. Molibra binds to
-  addresses, and addresses are free. The earning puzzle is a speed bump, not a Sybil defence.
-- **Availability.** A small proof-of-work network is far easier to disrupt than air-gapped
-  national infrastructure.
-
-**And the framing that matters most:** Molibra does not run elections and is not a voting
-system. What it carries is **expressão pública de compra** — a purchase, made public by the
-person who made it. It is not an enquete and not a pesquisa. Any comparison with the urna is a
-comparison of *record integrity*, not of electoral machinery, and it should never be presented
-as the latter.
+**What Molibra is not:** Molibra does not run elections and is not a voting system. What it
+carries is **expressão pública de compra** — a purchase, made public by the person who made it.
+It is not an enquete and not a pesquisa.
 
 ## Known and accepted limitations
 
