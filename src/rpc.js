@@ -501,6 +501,23 @@ async function handleAudit(node, req, res) {
   const path = url.pathname;
 
   /**
+   * Short and mistyped page addresses people type by hand: molibra.org/pay,
+   * /Pay, /molibra/pay/ all land on /molibra/pay, query kept. Only page names
+   * listed here are redirected, so no JSON endpoint changes meaning.
+   */
+  {
+    const m = /^\/(?:molibra\/)?([a-z]+)\/?$/i.exec(path);
+    // ⛔ not 'download': /download is served as-is further down and is printed
+    // on installers and the carousel.
+    const pages = ['pay', 'swap', 'buy', 'connect', 'return', 'bridgedmoli', 'documents'];
+    const name = m && m[1].toLowerCase();
+    if (name && pages.includes(name) && path !== '/molibra/' + name) {
+      res.writeHead(301, { Location: '/molibra/' + name + url.search });
+      return res.end();
+    }
+  }
+
+  /**
    * The front door.
    *
    * ⛔ '/' is the SITE; '/molibra' stays the identity JSON. Nothing fetches the
