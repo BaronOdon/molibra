@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
+<title>MOLIBRA · Comprar bMOLI / Buy bMOLI</title>
+<!--
+  Buy bMOLI with ETH on Ethereum mainnet, straight against the Uniswap v4 pool.
+  A PUBLIC page; it holds no key and custodies nothing. One transaction, signed
+  in the buyer's own wallet: Universal Router execute() with V4_SWAP
+  (SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL), then SWEEP of any unused ETH
+  back to the buyer. Native ETH needs no approval and no Permit2.
+
+  Why not app.uniswap.org: its router does not index or quote this pool.
+
+  ⛔⛔ Every number comes from the chain when it is drawn: the quote from
+  V4Quoter.quoteExactInputSingle, the spot price from StateView.getSlot0, the
+  dollar price from Chainlink ETH/USD. Nothing here hard-codes a price.
+
+  ⛔⛔ A quote that cannot fill the WHOLE amount is refused, never sent. The
+  quoter reverts with NotEnoughLiquidity when the pool runs dry part-way; the
+  page also asks the quoter the reverse question (exact output) and refuses if
+  the input it needs is less than the input offered, which is what a partial
+  fill looks like.
+
+  ⛔ The PoolKey below was read from the pool's Initialize event (tx
+  0xb87eb11e…5f67, block 26,044,855) and test/buy-page.mjs checks that
+  keccak256(abi.encode(PoolKey)) is the poolId. tickSpacing is 25 - read, not
+  guessed.
+
+  ⛔ Fees: an explicit LOW tip (0.05 gwei) and maxFeePerGas = 2 x baseFee + tip.
+  The wallet's default tip has charged ~2 gwei on a 0.05 gwei base fee here.
+-->
+<script>
+  (function () {
+    var l = null;
+    try { l = localStorage.getItem('molibra.lang'); } catch (e) { l = null; }
+    // Portuguese by default: the buyers this page is for are in Brazil.
+    document.documentElement.lang = l === 'en' ? 'en' : 'pt-BR';
+  })();
+</script>
+<style>
+  :root{
+    --void:#07070a; --card:#121210; --box:#1b1a16; --box-hi:#24221c;
+    --ink:#f5f3ea; --dim:#b3ae9c; --dimmer:#858170; --line:#2e2c24;
+    --gold:#FFD100; --gold-glow:rgba(255,209,0,.30); --edge:rgba(255,209,0,.20);
+    --bad:#ff7a7a; --ok:#6dffa6; --warn:#ffbe55;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;color:var(--ink);background:var(--void);font:16px/1.5 var(--sans);
+       padding:16px 16px 64px;overflow-x:hidden;min-height:100vh}
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(120% 70% at 50% -10%, rgba(255,209,0,.12), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px), var(--void)}
+  .wrap{max-width:480px;margin:0 auto}
+  a{color:var(--gold)}
+  button,input,select{font:inherit;color:inherit}
+  button{cursor:pointer}
+  button:disabled{cursor:not-allowed}
+  [hidden]{display:none !important}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 18px}
+  .mark{font:700 20px/1 var(--mono);letter-spacing:.2em;color:var(--gold);text-decoration:none;text-shadow:0 0 16px var(--gold-glow)}
+  .hdr-right{display:flex;align-items:center;gap:8px;min-width:0}
+  .lang{display:flex;border:1px solid var(--edge);border-radius:999px;overflow:hidden;flex:none}
+  .lang button{background:transparent;border:0;color:var(--dim);padding:7px 10px;font:600 13px/1 var(--sans)}
+  .lang button.on{background:var(--gold);color:#0a0a0a}
+  .chip{background:var(--box);border:1px solid var(--edge);color:var(--ink);border-radius:999px;padding:8px 12px;
+        font:600 14px/1 var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+  .chip.warn{border-color:var(--warn);color:var(--warn)}
+
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:20px;padding:16px;margin:0 0 14px;
+        box-shadow:0 20px 60px -30px rgba(0,0,0,.9)}
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+  h1,h2{margin:0;font:700 20px/1.25 var(--sans)}
+  h2{font-size:18px}
+  .icon{background:transparent;border:0;color:var(--dim);font-size:22px;line-height:1;padding:6px;border-radius:10px;flex:none}
+  .icon:hover{color:var(--gold)}
+
+  .box{background:var(--box);border:1px solid transparent;border-radius:16px;padding:14px}
+  .box:focus-within{border-color:var(--edge)}
+  .box-top{color:var(--dim);font-size:15px;margin:0 0 6px}
+  .box-mid{display:flex;align-items:center;gap:10px}
+  .amt{flex:1;min-width:0;width:100%;background:transparent;border:0;outline:none;color:var(--ink);font:600 28px/1.2 var(--mono);padding:2px 0}
+  .amt::placeholder{color:var(--dimmer)}
+  .amt.out{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .amt.empty{color:var(--dimmer)}
+  .unit{flex:none;color:var(--gold);font:700 16px/1 var(--sans);background:var(--box-hi);border:1px solid var(--edge);border-radius:999px;padding:10px 14px}
+  .box-bot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 0;color:var(--dim);font-size:15px;flex-wrap:wrap;min-height:28px}
+  .max{background:transparent;border:1px solid var(--edge);color:var(--gold);border-radius:8px;padding:4px 10px;font:700 13px/1.2 var(--sans)}
+  .arrow{display:flex;justify-content:center;height:10px;position:relative;z-index:1}
+  .arrow span{display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin-top:-17px;border-radius:12px;
+              background:var(--box-hi);border:4px solid var(--card);color:var(--gold);font-size:20px;line-height:1}
+
+  .details{margin:12px 2px 0;font-size:15px}
+  .drow{display:flex;justify-content:space-between;gap:12px;padding:4px 0}
+  .drow span:first-child{color:var(--dim)}
+  .drow span:last-child{text-align:right;word-break:break-word}
+
+  .primary{display:block;width:100%;margin:14px 0 0;background:var(--gold);color:#0a0a0a;border:0;border-radius:16px;
+           padding:17px 16px;font:700 18px/1.2 var(--sans);text-align:center;text-decoration:none}
+  .primary:hover:not(:disabled){box-shadow:0 0 24px var(--gold-glow)}
+  .primary:disabled{background:var(--box-hi);color:var(--dimmer)}
+  .ghost{display:block;width:100%;margin:10px 0 0;background:transparent;color:var(--gold);border:1px solid var(--edge);
+         border-radius:14px;padding:14px;font:600 16px/1.2 var(--sans);text-align:center;text-decoration:none}
+
+  .msg{margin:12px 0 0;padding:12px 14px;border-radius:12px;font-size:15px;line-height:1.5;background:var(--box);
+       border-left:3px solid var(--gold);word-break:break-word}
+  .msg.ok{border-left-color:var(--ok)} .msg.bad{border-left-color:var(--bad)} .msg.warn{border-left-color:var(--warn)}
+  .msg a{display:inline-block;margin-top:4px;font-weight:600}
+  .msg b{color:var(--ink)}
+  .msg .small{margin-top:8px}
+  .small{background:transparent;border:1px solid var(--edge);color:var(--gold);border-radius:8px;padding:6px 10px;font:700 14px/1.2 var(--sans)}
+  .hint{color:var(--dim);font-size:14px;margin:8px 2px 0}
+  .addr{font:400 13px/1.4 var(--mono);color:var(--dim);word-break:break-all}
+
+  .settings{background:var(--box);border-radius:14px;padding:12px 14px;margin:0 0 12px}
+  .settings p{margin:0 0 10px;color:var(--dim);font-size:14px}
+  .seg{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .seg button{background:var(--box-hi);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font:600 15px/1 var(--sans);color:var(--ink)}
+  .seg button.on{border-color:var(--gold);color:var(--gold)}
+  .seg .pct{display:flex;align-items:center;gap:4px;background:var(--box-hi);border:1px solid var(--line);border-radius:10px;padding:0 10px}
+  .seg .pct input{width:64px;background:transparent;border:0;outline:none;padding:9px 0;font:600 15px/1 var(--sans);text-align:right}
+
+  ol.steps{margin:8px 0 0;padding-left:22px;color:var(--dim);font-size:15px}
+  .big{font:700 32px/1.15 var(--mono);color:var(--gold);word-break:break-word;margin:6px 0 0}
+  footer{text-align:center;color:var(--dimmer);font-size:14px;margin:18px 0 0}
+  footer a{color:var(--dim)}
+  @media (min-width:700px){ body{padding-top:32px} .card{padding:20px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <a class="mark" href="/">MOLIBRA</a>
+  <div class="hdr-right">
+    <div class="lang" role="group" aria-label="Language">
+      <button id="langPt" type="button">PT</button><button id="langEn" type="button">EN</button>
+    </div>
+    <button class="chip" id="walletChip" type="button" data-i18n="connectShort">Conectar</button>
+  </div>
+</header>
+
+<div class="msg warn" id="walletHelp" hidden><span id="walletMsg"></span></div>
+<div class="msg bad" id="netNote" hidden></div>
+
+<section class="card" id="buyCard">
+  <div class="card-head">
+    <h1 data-i18n="title">Comprar bMOLI com ETH</h1>
+    <button class="icon" id="gear" type="button" aria-label="Settings" title="Settings">&#9881;</button>
+  </div>
+
+  <div class="settings" id="settings" hidden>
+    <p><b data-i18n="slipTitle">Tolerância de preço</b><br><span data-i18n="slipHelp">Se o preço piorar mais do que isso até a transação entrar num bloco, ela é cancelada e o ETH fica com você (só a taxa de rede é gasta).</span></p>
+    <div class="seg" id="slipSeg">
+      <button type="button" data-slip="0.5">0.5%</button>
+      <button type="button" data-slip="1">1%</button>
+      <button type="button" data-slip="3">3%</button>
+      <span class="pct"><input id="slippage" value="1" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="%">%</span>
+    </div>
+  </div>
+
+  <div class="box">
+    <div class="box-top" data-i18n="youPay">Você paga</div>
+    <div class="box-mid">
+      <input id="amountIn" class="amt" placeholder="0" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="ETH">
+      <span class="unit">ETH</span>
+    </div>
+    <div class="box-bot"><span><span data-i18n="balance">Saldo</span>: <span id="ethBal">—</span></span></div>
+  </div>
+
+  <div class="arrow"><span>&#8595;</span></div>
+
+  <div class="box">
+    <div class="box-top" data-i18n="youGet">Você recebe ≈</div>
+    <div class="box-mid">
+      <div id="amountOut" class="amt out empty">0</div>
+      <span class="unit">bMOLI</span>
+    </div>
+    <div class="box-bot"><span data-i18n="oneToOne">1 bMOLI = 1 MOLI na Molibra</span></div>
+  </div>
+
+  <div class="details" id="details" hidden>
+    <div class="drow"><span data-i18n="priceEth">Preço por MOLI</span><span id="priceEth">—</span></div>
+    <div class="drow"><span data-i18n="priceUsd">Preço por MOLI (US$)</span><span id="priceUsd">—</span></div>
+    <div class="drow"><span data-i18n="impact">Impacto no preço</span><span id="impact">—</span></div>
+    <div class="drow"><span data-i18n="minReceived">Mínimo recebido</span><span id="minOut">—</span></div>
+    <div class="drow"><span data-i18n="slipShort">Tolerância</span><span id="slipShow">—</span></div>
+    <div class="drow"><span data-i18n="netFee">Taxa de rede ≈</span><span id="netFee">—</span></div>
+  </div>
+  <div class="msg warn" id="impactNote" hidden></div>
+  <div class="msg bad" id="fillNote" hidden><span id="fillText"></span><br>
+    <button class="small" id="useMax" type="button" hidden></button></div>
+
+  <button class="primary" id="action" type="button" disabled>…</button>
+  <div class="msg" id="buyMsg" hidden></div>
+</section>
+
+<section class="card" id="doneCard" hidden>
+  <h2 data-i18n="doneTitle">Compra concluída</h2>
+  <div class="big" id="doneAmount">—</div>
+  <div class="msg ok" id="doneMsg"></div>
+  <button class="primary" id="watchBtn" type="button" data-i18n="addToken">Adicionar bMOLI à carteira</button>
+  <div class="msg" id="watchMsg" hidden></div>
+  <p class="hint" data-i18n="whatNext">O bMOLI é o MOLI na Ethereum. Para usar na rede Molibra — pagar em lojas, trocar, minerar junto — traga de volta: o bMOLI é queimado na Ethereum e chega como MOLI no mesmo endereço.</p>
+  <a class="ghost" href="/molibra/return" data-i18n="toReturn">Transformar bMOLI em MOLI</a>
+</section>
+
+<section class="card" id="noWallet" hidden>
+  <h2 data-i18n="openInWallet">Abra esta página na sua carteira</h2>
+  <p class="hint" data-i18n="openInWalletWhy">Para comprar, a página precisa abrir dentro de um app de carteira com ETH na rede Ethereum.</p>
+  <a class="primary" id="mmLink" href="#" data-i18n="openMM">Abrir na MetaMask</a>
+  <a class="ghost" id="twLink" href="#" data-i18n="openTW">Abrir na Trust Wallet</a>
+</section>
+
+<section class="card">
+  <h2 data-i18n="howTitle">Como funciona</h2>
+  <ol class="steps">
+    <li data-i18n="how1">Conecte a carteira; a página muda para a rede Ethereum.</li>
+    <li data-i18n="how2">Digite quanto ETH quer gastar. A cotação vem do próprio pool, na hora.</li>
+    <li data-i18n="how3">Confirme uma única transação. Não há aprovação: o ETH vai direto para o pool e o bMOLI volta para você.</li>
+  </ol>
+  <p class="hint"><span data-i18n="poolIs">Pool Uniswap v4 bMOLI/ETH, taxa 0,25%. Contrato do bMOLI:</span><br>
+    <a class="addr" id="tokenLink" href="https://etherscan.io/token/0xa302877efb74f567f3605851194b46f1d5746822" target="_blank" rel="noopener">0xa302877efb74f567f3605851194b46f1d5746822</a></p>
+</section>
+
+<footer>
+  <span data-i18n="signNote">Nada é enviado sem a sua assinatura na carteira.</span><br>
+  <a href="/molibra/swap" data-i18n="exchange">Trocar</a> ·
+  <a href="/molibra/return" data-i18n="returnLink">bMOLI → MOLI</a> ·
+  <a href="/">molibra.org</a>
+</footer>
+</div>
+
+<script src="/molibra/mobilewallet.js"></script>
+<script>
+// The origin that SERVED this page (for the token icon); the literal is only the
+// fallback for opening the file from disk.
+const NODE = location.protocol.startsWith('http') ? location.origin : 'https://molibra.org';
+// Reads go to a public Ethereum node so the quote shows before any wallet is
+// connected; only the signature goes through the wallet. Same node as return.html.
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+const MAINNET = '0x1';
+const ETHERSCAN = 'https://etherscan.io';
+
+/** Verified with eth_getCode and against Uniswap's deployments (test/buy-page.mjs names the sources). */
+const UNIVERSAL_ROUTER = '0x66a9893cc07d91d95644aedd05d03f95e1dba8af';
+const V4_QUOTER = '0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203';
+const STATE_VIEW = '0x7ffe42c4a5deea5b0fec41c94c136cf115597227';
+const CHAINLINK_ETH_USD = '0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419';
+const ETH_ADDR = '0x0000000000000000000000000000000000000000';
+const BMOLI = '0xa302877efb74f567f3605851194b46f1d5746822';
+
+/**
+ * ⛔⛔ Read from the pool's Initialize event, not chosen. currency0 is native
+ * ETH (address 0), so buying bMOLI is zeroForOne = true.
+ */
+const POOL_KEY = { currency0: ETH_ADDR, currency1: BMOLI, fee: 2500n, tickSpacing: 25n, hooks: ETH_ADDR };
+const POOL_ID = '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312';
+
+/** ⛔ Checked against keccak256 of each signature by test/buy-page.mjs. */
+const SEL = {
+  execute:             '0x3593564c',   // execute(bytes,bytes[],uint256)
+  quoteExactInSingle:  '0xaa9d21cb',   // quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
+  quoteExactOutSingle: '0x58733073',   // quoteExactOutputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
+  getSlot0:            '0xc815641c',   // getSlot0(bytes32)
+  latestRoundData:     '0xfeaf968c',   // latestRoundData()
+};
+/** Revert selectors the page names (also checked by keccak). */
+const ERR = {
+  notEnoughLiquidity: '0x7a5ed734',    // NotEnoughLiquidity(bytes32)  - V4Quoter: the pool ran dry
+  tooLittleReceived:  '0x8b063d73',    // V4TooLittleReceived(uint256,uint256) - V4Router: below the minimum
+};
+/** Universal Router commands and v4-periphery Actions (Commands.sol, Actions.sol). */
+const CMD = { V4_SWAP: 0x10, SWEEP: 0x04 };
+const ACT = { SWAP_EXACT_IN_SINGLE: 0x06, SETTLE_ALL: 0x0c, TAKE_ALL: 0x0f };
+
+/** 0.05 gwei. maxFeePerGas = 2 x baseFee + this. */
+const TIP = 50000000n;
+/** When the node cannot estimate: a v4 single swap + sweep used 172,544 gas in simulation. */
+const DEFAULT_GAS = 220000n;
+const DEADLINE_SECONDS = 1200;
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+/* ============================================================ language */
+
+const T = {
+  pt: {
+    connectShort: 'Conectar', wrongNet: 'Rede errada',
+    title: 'Comprar bMOLI com ETH',
+    slipTitle: 'Tolerância de preço',
+    slipHelp: 'Se o preço piorar mais do que isso até a transação entrar num bloco, ela é cancelada e o ETH fica com você (só a taxa de rede é gasta).',
+    youPay: 'Você paga', youGet: 'Você recebe ≈', balance: 'Saldo', oneToOne: '1 bMOLI = 1 MOLI na Molibra',
+    priceEth: 'Preço por MOLI', priceUsd: 'Preço por MOLI (US$)', impact: 'Impacto no preço',
+    minReceived: 'Mínimo recebido', slipShort: 'Tolerância', netFee: 'Taxa de rede ≈',
+    impactHigh: 'Esta compra move o preço em {0}. Compras menores saem mais baratas por MOLI.',
+    cannotFill: 'O pool não tem bMOLI suficiente para vender {0} ETH de uma vez. Nada será enviado.',
+    maxNow: 'Agora ele vende no máximo ≈ {0} ETH (≈ {1} bMOLI).',
+    useMax: 'Usar {0} ETH', quoteFailed: 'Não foi possível cotar este valor no pool. Nada será enviado.',
+    connect: 'Conectar carteira', switchNet: 'Mudar para a rede Ethereum', enterAmount: 'Digite o valor em ETH',
+    loading: 'Cotando…', buy: 'Comprar bMOLI', insufficient: 'Saldo de ETH insuficiente (incluindo a taxa de rede)',
+    setSlippage: 'Ajuste a tolerância de preço (⚙)', refuse: 'Valor maior do que o pool vende agora',
+    openInWallet: 'Abra esta página na sua carteira',
+    openInWalletWhy: 'Para comprar, a página precisa abrir dentro de um app de carteira com ETH na rede Ethereum.',
+    openMM: 'Abrir na MetaMask', openTW: 'Abrir na Trust Wallet',
+    confirmWallet: 'Confirme na sua carteira…', waiting: 'Aguardando a rede Ethereum…', checking: 'Conferindo…',
+    sent: 'Transação enviada. Aguardando confirmação…',
+    priceMoved: 'O preço mudou desde a cotação e ficou abaixo do mínimo. Confira e tente de novo.',
+    wouldRevert: 'A simulação da transação falhou, então ela não foi enviada. Atualize a cotação e tente de novo.',
+    reverted: 'A transação não foi concluída na rede. O ETH da compra voltou; só a taxa foi gasta.',
+    rejected: 'Cancelado na carteira. Nada foi enviado.',
+    timeout: 'Ainda sem confirmação depois de 5 minutos. Acompanhe pelo link.',
+    stillWrong: 'A carteira ainda não está na rede Ethereum. Escolha Ethereum na carteira e tente de novo.',
+    noAccount: 'A carteira não informou nenhuma conta.',
+    nodeDown: 'Não foi possível falar com a rede Ethereum agora. Tente atualizar a página.',
+    viewTx: 'Ver no Etherscan',
+    doneTitle: 'Compra concluída', doneMsg: 'Você recebeu {0} bMOLI por {1} ETH.',
+    addToken: 'Adicionar bMOLI à carteira', added: 'bMOLI adicionado à carteira.',
+    notAdded: 'A carteira não adicionou. Você pode adicionar à mão com o endereço do contrato abaixo.',
+    whatNext: 'O bMOLI é o MOLI na Ethereum. Para usar na rede Molibra — pagar em lojas, trocar, minerar junto — traga de volta: o bMOLI é queimado na Ethereum e chega como MOLI no mesmo endereço.',
+    toReturn: 'Transformar bMOLI em MOLI',
+    howTitle: 'Como funciona',
+    how1: 'Conecte a carteira; a página muda para a rede Ethereum.',
+    how2: 'Digite quanto ETH quer gastar. A cotação vem do próprio pool, na hora.',
+    how3: 'Confirme uma única transação. Não há aprovação: o ETH vai direto para o pool e o bMOLI volta para você.',
+    poolIs: 'Pool Uniswap v4 bMOLI/ETH, taxa 0,25%. Contrato do bMOLI:',
+    signNote: 'Nada é enviado sem a sua assinatura na carteira.', exchange: 'Trocar', returnLink: 'bMOLI → MOLI',
+  },
+  en: {
+    connectShort: 'Connect', wrongNet: 'Wrong network',
+    title: 'Buy bMOLI with ETH',
+    slipTitle: 'Price tolerance',
+    slipHelp: 'If the price gets worse than this before the transaction lands in a block, it is cancelled and your ETH stays with you (only the network fee is spent).',
+    youPay: 'You pay', youGet: 'You receive ≈', balance: 'Balance', oneToOne: '1 bMOLI = 1 MOLI on Molibra',
+    priceEth: 'Price per MOLI', priceUsd: 'Price per MOLI (US$)', impact: 'Price impact',
+    minReceived: 'Minimum received', slipShort: 'Tolerance', netFee: 'Network fee ≈',
+    impactHigh: 'This purchase moves the price by {0}. Smaller purchases cost less per MOLI.',
+    cannotFill: 'The pool does not hold enough bMOLI to sell {0} ETH worth in one go. Nothing will be sent.',
+    maxNow: 'Right now it sells at most ≈ {0} ETH (≈ {1} bMOLI).',
+    useMax: 'Use {0} ETH', quoteFailed: 'This amount could not be quoted on the pool. Nothing will be sent.',
+    connect: 'Connect wallet', switchNet: 'Switch to Ethereum', enterAmount: 'Enter an amount in ETH',
+    loading: 'Quoting…', buy: 'Buy bMOLI', insufficient: 'Not enough ETH (including the network fee)',
+    setSlippage: 'Set the price tolerance (⚙)', refuse: 'More than the pool sells right now',
+    openInWallet: 'Open this page in your wallet',
+    openInWalletWhy: 'To buy, this page has to open inside a wallet app that holds ETH on Ethereum.',
+    openMM: 'Open in MetaMask', openTW: 'Open in Trust Wallet',
+    confirmWallet: 'Confirm in your wallet…', waiting: 'Waiting for Ethereum…', checking: 'Checking…',
+    sent: 'Transaction sent. Waiting for confirmation…',
+    priceMoved: 'The price moved since the quote and fell below the minimum. Check and try again.',
+    wouldRevert: 'The transaction failed in simulation, so it was not sent. Refresh the quote and try again.',
+    reverted: 'The transaction did not complete on the network. The purchase ETH came back; only the fee was spent.',
+    rejected: 'Cancelled in the wallet. Nothing was sent.',
+    timeout: 'Still not confirmed after 5 minutes. Follow it with the link.',
+    stillWrong: 'Your wallet is still not on Ethereum. Pick Ethereum in the wallet and try again.',
+    noAccount: 'The wallet returned no account.',
+    nodeDown: 'Could not reach Ethereum just now. Try reloading the page.',
+    viewTx: 'View on Etherscan',
+    doneTitle: 'Purchase complete', doneMsg: 'You received {0} bMOLI for {1} ETH.',
+    addToken: 'Add bMOLI to your wallet', added: 'bMOLI added to your wallet.',
+    notAdded: 'The wallet did not add it. You can add it by hand with the contract address below.',
+    whatNext: 'bMOLI is MOLI on Ethereum. To use it on the Molibra network — pay in shops, swap, mine alongside — bring it back: the bMOLI is burned on Ethereum and arrives as MOLI at the same address.',
+    toReturn: 'Turn bMOLI into MOLI',
+    howTitle: 'How it works',
+    how1: 'Connect your wallet; the page switches it to Ethereum.',
+    how2: 'Type how much ETH to spend. The quote comes from the pool itself, live.',
+    how3: 'Confirm one transaction. There is no approval: the ETH goes straight to the pool and the bMOLI comes back to you.',
+    poolIs: 'Uniswap v4 pool bMOLI/ETH, 0.25% fee. bMOLI contract:',
+    signNote: 'Nothing is sent until you sign it in your wallet.', exchange: 'Swap', returnLink: 'bMOLI → MOLI',
+  },
+};
+
+let LANG = /^pt/i.test(document.documentElement.lang) ? 'pt' : 'en';
+
+function t(key) {
+  let s = (T[LANG] && T[LANG][key]) || T.en[key] || key;
+  for (let i = 1; i < arguments.length; i++) s = s.split('{' + (i - 1) + '}').join(String(arguments[i]));
+  return s;
+}
+
+function setLang(l) {
+  LANG = l === 'en' ? 'en' : 'pt';
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  try { localStorage.setItem('molibra.lang', LANG); } catch (e) {}
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  $('langPt').className = LANG === 'pt' ? 'on' : '';
+  $('langEn').className = LANG === 'en' ? 'on' : '';
+  render();
+}
+
+/* ============================================================= helpers */
+
+const $ = (id) => document.getElementById(id);
+const hex = (v) => '0x' + BigInt(v).toString(16);
+const toBig = (h) => (h && h !== '0x' ? BigInt(h) : 0n);
+const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+const UNIT = 10n ** 18n;
+
+/** Decimal string -> wei. ⛔ No floating point anywhere near an amount. */
+function toWei(s) {
+  const t = String(s ?? '').trim().replace(',', '.');
+  if (!/^\d*\.?\d*$/.test(t) || t === '' || t === '.') return null;
+  const parts = t.split('.');
+  const w = parts[0];
+  const f = parts[1] || '';
+  if (f.length > 18) return null;
+  const frac = (f + '0'.repeat(18)).slice(0, 18);
+  const v = BigInt(w || '0') * UNIT + BigInt(frac || '0');
+  return v > 0n ? v : null;
+}
+
+function fromWei(v, places) {
+  const p = places === undefined ? 6 : places;
+  const n = BigInt(v);
+  const whole = n / UNIT;
+  const f = (n % UNIT).toString().padStart(18, '0').slice(0, p).replace(/0+$/, '');
+  return f ? whole + '.' + f : String(whole);
+}
+
+/** Localise a plain decimal string: 1234.5 -> 1.234,5 in PT. */
+function localise(s) {
+  const pt = LANG === 'pt';
+  const parts = s.split('.');
+  const g = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, pt ? '.' : ',');
+  return parts[1] ? g + (pt ? ',' : '.') + parts[1] : g;
+}
+
+/**
+ * An integer amount with `dec` decimals, shown with `sig` significant digits
+ * after any leading zeros (a MOLI costs a few millionths of an ETH, so fixed
+ * places would print 0). Whole numbers of 1000 and up drop the fraction.
+ */
+function fmtSig(v, dec, sig) {
+  const n = BigInt(v);
+  if (n <= 0n) return '0';
+  const s = n.toString().padStart(dec + 1, '0');
+  const whole = BigInt(s.slice(0, s.length - dec));
+  let frac = s.slice(s.length - dec);
+  if (whole >= 1000n) frac = '';
+  else if (whole > 0n) frac = frac.slice(0, Math.max(0, sig - whole.toString().length));
+  else { const lead = frac.search(/[1-9]/); frac = frac.slice(0, lead + sig); }
+  frac = frac.replace(/0+$/, '');
+  return localise(frac ? whole.toString() + '.' + frac : whole.toString());
+}
+
+function fmt(v) {
+  const n = BigInt(v);
+  return n >= 1000n * UNIT ? localise(fromWei(n, 2)) : fmtSig(n, 18, 6);
+}
+
+/* ============================================================== ABI */
+
+function word(v) {
+  let b = BigInt(v);
+  if (b < 0n) b += 1n << 256n;
+  return b.toString(16).padStart(64, '0');
+}
+
+function addr32(a) {
+  return a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+}
+
+function pad32(h) {
+  return h.padEnd(Math.ceil(h.length / 64) * 64, '0');
+}
+
+function bytesEnc(h) {
+  return word(h.length / 2) + pad32(h);
+}
+
+/** bytes[]: length, then each element's offset from the first offset slot, then the elements. */
+function bytesArrayEnc(items) {
+  const encs = items.map(bytesEnc);
+  let head = word(items.length);
+  let off = items.length * 32;
+  for (const e of encs) { head += word(off); off += e.length / 2; }
+  return head + encs.join('');
+}
+
+function poolKeyEnc(k) {
+  return addr32(k.currency0) + addr32(k.currency1) + word(k.fee) + word(k.tickSpacing) + addr32(k.hooks);
+}
+
+/**
+ * V4Quoter.quoteExact{Input,Output}Single(QuoteExactSingleParams), buying
+ * bMOLI (zeroForOne). One dynamic tuple: {PoolKey, bool, uint128, bytes hookData}.
+ */
+function quoteData(sel, amount) {
+  return sel + word(0x20) + poolKeyEnc(POOL_KEY) + word(1) + word(amount) + word(8 * 32) + word(0);
+}
+
+/**
+ * The V4_SWAP input: abi.encode(bytes actions, bytes[] params) with
+ *   SWAP_EXACT_IN_SINGLE  ExactInputSingleParams{PoolKey, zeroForOne, amountIn, amountOutMinimum, hookData}
+ *   SETTLE_ALL            (ETH, maxAmount = amountIn)   - paid from the msg.value the router holds
+ *   TAKE_ALL              (bMOLI, minAmount = minOut)   - to the buyer
+ * The struct is the one deployed with Universal Router 2.0 (v4-periphery
+ * before the 2025 per-hop field was added); the live simulation is the proof.
+ */
+function swapInput(amountIn, minOut) {
+  const actions = [ACT.SWAP_EXACT_IN_SINGLE, ACT.SETTLE_ALL, ACT.TAKE_ALL].map((a) => a.toString(16).padStart(2, '0')).join('');
+  const swap = word(0x20) + poolKeyEnc(POOL_KEY) + word(1) + word(amountIn) + word(minOut) + word(9 * 32) + word(0);
+  const settle = addr32(POOL_KEY.currency0) + word(amountIn);
+  const take = addr32(POOL_KEY.currency1) + word(minOut);
+  const a = bytesEnc(actions);
+  return word(0x40) + word(0x40 + a.length / 2) + a + bytesArrayEnc([swap, settle, take]);
+}
+
+/**
+ * execute(bytes commands, bytes[] inputs, uint256 deadline) with V4_SWAP then
+ * SWEEP(ETH, buyer, 0): any ETH the swap did not use goes straight back.
+ */
+function executeData(amountIn, minOut, recipient, deadline) {
+  const commands = [CMD.V4_SWAP, CMD.SWEEP].map((c) => c.toString(16).padStart(2, '0')).join('');
+  const sweep = addr32(ETH_ADDR) + addr32(recipient) + word(0);
+  const c = bytesEnc(commands);
+  return SEL.execute + word(0x60) + word(0x60 + c.length / 2) + word(deadline) + c
+    + bytesArrayEnc([swapInput(amountIn, minOut), sweep]);
+}
+
+/* ============================================================== maths */
+
+/** Tolerance in basis points, parsed without floats; null when unusable. */
+function slippageBp(str) {
+  const s = String(str).trim().replace(',', '.');
+  if (!/^\d{1,2}(\.\d{1,2})?$/.test(s)) return null;
+  const parts = s.split('.');
+  const bp = Number(parts[0]) * 100 + Number(((parts[1] || '') + '00').slice(0, 2));
+  return bp >= 1 && bp <= 5000 ? bp : null;
+}
+
+function minOutFor(out, bp) {
+  return out * BigInt(10000 - bp) / 10000n;
+}
+
+/**
+ * ⛔ A partial fill: the exact-output quote for what we would receive needs
+ * LESS input than we offer, so part of the ETH would buy nothing. Rounding
+ * moves this by a few wei at most; anything past a millionth is a shortfall.
+ */
+function isPartial(amountIn, neededIn) {
+  return neededIn + amountIn / 1000000n + 1000n < amountIn;
+}
+
+/** ETH wei paid per whole bMOLI (both 18 decimals). */
+function priceWeiPerMoli(amountIn, out) {
+  return out > 0n ? amountIn * UNIT / out : 0n;
+}
+
+/** US dollars per MOLI, 8 decimals (Chainlink's answer is 8 decimals). */
+function usdPerMoli(priceWei, ethUsd8) {
+  return priceWei * ethUsd8 / UNIT;
+}
+
+/**
+ * Price impact in basis points against the pool's spot price, fee removed.
+ * Spot bMOLI per ETH = sqrtPriceX96^2 / 2^192 (both tokens 18 decimals).
+ */
+function impactBp(amountIn, out, sqrtP, feePips) {
+  const spotOut = amountIn * sqrtP * sqrtP / (1n << 192n);
+  const net = spotOut * (1000000n - feePips) / 1000000n;
+  if (net <= 0n || out >= net) return 0n;
+  return (net - out) * 10000n / net;
+}
+
+function feeFields(baseFee) {
+  return { maxPriorityFeePerGas: TIP, maxFeePerGas: 2n * baseFee + TIP };
+}
+
+const fmtBp = (bp) => localise(fromWei(BigInt(bp) * 10n ** 16n, 2)) + '%';
+
+/* ============================================================== state */
+
+const params = new URLSearchParams(location.search);
+let account = null;
+let chainOk = false;
+let busy = null;
+let balEth = null;
+let ethUsd = null;        // 8 decimals
+let baseFee = null;
+let slot0 = null;         // { sqrtP }
+let gasLimit = DEFAULT_GAS;
+let quote = null;         // { amountIn, out, cannot, reason, maxIn, maxOut }
+let quoteSeq = 0;
+let slipStr = '1';
+
+const eth = () => window.molibraWallet.require($('walletHelp'));
+
+async function ethRpc(method, params_) {
+  const r = await fetch(ETH_RPC, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params_ }),
+  });
+  const j = await r.json();
+  if (j.error) {
+    const e = new Error(j.error.message || 'rpc error');
+    e.data = typeof j.error.data === 'string' ? j.error.data : '';
+    throw e;
+  }
+  return j.result;
+}
+const ethCall = (to, data) => ethRpc('eth_call', [{ to: to, data: data }, 'latest']);
+
+/* ============================================================== reads */
+
+async function quoteOut(amountIn) {
+  const r = await ethCall(V4_QUOTER, quoteData(SEL.quoteExactInSingle, amountIn));
+  return BigInt('0x' + r.slice(2, 66));
+}
+
+/**
+ * The pool's answer for `amountIn`, or a refusal. ⛔ Every path that is not a
+ * clean, full fill comes back `cannot`, and `cannot` disables the button.
+ */
+async function getQuote(amountIn) {
+  let out;
+  try { out = await quoteOut(amountIn); }
+  catch (e) {
+    if (/fetch|network/i.test(String(e.message)) && !e.data) throw e;
+    return { amountIn: amountIn, cannot: true, reason: String(e.data || '').includes(ERR.notEnoughLiquidity.slice(2)) ? 'liquidity' : 'failed' };
+  }
+  if (out === 0n) return { amountIn: amountIn, cannot: true, reason: 'liquidity' };
+  let need;
+  try {
+    const r = await ethCall(V4_QUOTER, quoteData(SEL.quoteExactOutSingle, out));
+    need = BigInt('0x' + r.slice(2, 66));
+  } catch (e) { return { amountIn: amountIn, cannot: true, reason: 'liquidity' }; }
+  if (isPartial(amountIn, need)) return { amountIn: amountIn, cannot: true, reason: 'liquidity' };
+  return { amountIn: amountIn, out: out };
+}
+
+/** The most the pool fills right now, to within 0.1%, by bisection on the quoter. */
+async function maxFillable(upTo) {
+  let lo = 0n; let hi = upTo; let loOut = 0n;
+  for (let i = 0; i < 24 && hi - lo > hi / 1000n; i++) {
+    const mid = (lo + hi) / 2n;
+    const q = await getQuote(mid);
+    if (q.cannot) hi = mid; else { lo = mid; loOut = q.out; }
+  }
+  return { maxIn: lo, maxOut: loOut };
+}
+
+async function readMarket() {
+  const [s0, cl, blk] = await Promise.all([
+    ethCall(STATE_VIEW, SEL.getSlot0 + POOL_ID.slice(2)),
+    ethCall(CHAINLINK_ETH_USD, SEL.latestRoundData),
+    ethRpc('eth_getBlockByNumber', ['latest', false]),
+  ]);
+  slot0 = { sqrtP: BigInt('0x' + s0.slice(2, 66)) };
+  ethUsd = BigInt('0x' + cl.slice(66, 130));
+  baseFee = toBig(blk.baseFeePerGas);
+  if (account) balEth = toBig(await ethRpc('eth_getBalance', [account, 'latest']));
+}
+
+async function refresh() {
+  try {
+    await readMarket();
+    $('netNote').hidden = true;
+  } catch (e) {
+    $('netNote').textContent = t('nodeDown') + ' (' + e.message + ')';
+    $('netNote').hidden = false;
+  }
+  await requote();
+}
+
+function amountIn() {
+  return toWei($('amountIn').value);
+}
+
+async function requote() {
+  const seq = ++quoteSeq;
+  const a = amountIn();
+  if (!a) { quote = null; render(); return; }
+  if (quote && quote.amountIn !== a) { quote = null; render(); }
+  let q;
+  try { q = await getQuote(a); }
+  catch (e) {
+    if (seq !== quoteSeq) return;
+    $('netNote').textContent = t('nodeDown') + ' (' + e.message + ')';
+    $('netNote').hidden = false;
+    return;
+  }
+  if (seq !== quoteSeq) return;
+  const prev = quote;
+  quote = q;
+  render();
+  if (q.out && account && chainOk) estimateGas(q).catch(() => {});
+  if (q.cannot && q.reason === 'liquidity' && prev && prev.cannot && prev.amountIn === a && prev.maxIn !== undefined) {
+    // Same amount, same refusal: keep the last bisection rather than redo it every refresh.
+    quote.maxIn = prev.maxIn; quote.maxOut = prev.maxOut;
+    render();
+  } else if (q.cannot && q.reason === 'liquidity') {
+    const m = await maxFillable(a).catch(() => null);
+    if (seq !== quoteSeq || !m) return;
+    quote.maxIn = m.maxIn; quote.maxOut = m.maxOut;
+    render();
+  }
+}
+
+/** The gas this buyer's swap needs, with a quarter on top. */
+async function estimateGas(q) {
+  const bp = slippageBp(slipStr);
+  if (bp === null) return;
+  const data = executeData(q.amountIn, minOutFor(q.out, bp), account, deadline());
+  const g = toBig(await ethRpc('eth_estimateGas', [{ from: account, to: UNIVERSAL_ROUTER, data: data, value: hex(q.amountIn) }]));
+  if (g > 0n) { gasLimit = g * 125n / 100n; render(); }
+}
+
+const deadline = () => BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS);
+
+/* ============================================================= wallet */
+
+const isRejection = (e) => Boolean(e) && (e.code === 4001 || /user (rejected|denied|cancel)/i.test(String(e.message || '')));
+
+async function readChain() {
+  try { chainOk = BigInt(await eth().request({ method: 'eth_chainId' })) === BigInt(MAINNET); }
+  catch (e) { chainOk = false; }
+}
+
+async function connect() {
+  const accs = await eth().request({ method: 'eth_requestAccounts' });
+  account = accs && accs[0] ? String(accs[0]).toLowerCase() : null;
+  if (!account) throw new Error(t('noAccount'));
+  $('walletHelp').hidden = true;
+  await readChain();
+  render();
+  try { if (!chainOk) await switchChain(); }
+  finally { await refresh(); }
+}
+
+/** Ethereum mainnet is in every wallet already: switch, never add. */
+async function switchChain() {
+  const w = eth();
+  try { await w.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MAINNET }] }); }
+  catch (e) { if (isRejection(e)) throw e; }
+  await readChain();
+  render();
+  if (!chainOk) throw new Error(t('stillWrong'));
+}
+
+async function requireMainnet() {
+  if (!account) await connect();
+  await readChain();
+  if (!chainOk) await switchChain();
+}
+
+/* ================================================================ buy */
+
+function costOf(q) {
+  const f = feeFields(baseFee || 0n);
+  return q.amountIn + gasLimit * f.maxFeePerGas;
+}
+
+function actionState() {
+  if (busy) return { label: busy, disabled: true };
+  const a = amountIn();
+  if (!a) return { label: t('enterAmount'), disabled: true };
+  if (!quote) return { label: t('loading'), disabled: true };
+  if (quote.cannot) return { label: t('refuse'), disabled: true };
+  if (!account) return { label: t('connect'), act: connect };
+  if (!chainOk) return { label: t('switchNet'), act: switchChain };
+  if (slippageBp(slipStr) === null) return { label: t('setSlippage'), disabled: true };
+  // Not until the balance and the base fee are known: "enough ETH?" is part of the answer.
+  if (balEth === null || baseFee === null) return { label: t('loading'), disabled: true };
+  if (balEth < costOf(quote)) return { label: t('insufficient'), disabled: true };
+  return { label: t('buy'), act: buy };
+}
+
+async function buy() {
+  await requireMainnet();
+  const shown = quote;
+  const bp = slippageBp(slipStr);
+  if (!shown || shown.cannot || !shown.out || bp === null) throw new Error(t('refuse'));
+  const minOut = minOutFor(shown.out, bp);
+  busy = t('checking'); render();
+
+  // ⛔ The pool is asked again right before signing; a refusal now still refuses.
+  const fresh = await getQuote(shown.amountIn);
+  if (fresh.cannot) { quote = fresh; throw new Error(t('cannotFill', fmt(shown.amountIn))); }
+  if (fresh.out < minOut) throw new Error(t('priceMoved'));
+
+  const data = executeData(shown.amountIn, minOut, account, deadline());
+  const tx = { from: account, to: UNIVERSAL_ROUTER, data: data, value: hex(shown.amountIn) };
+  // ⛔ Simulate the exact transaction first, so a failing one never costs gas.
+  try { await ethRpc('eth_call', [tx, 'latest']); }
+  catch (e) { throw new Error(String(e.data || '').includes(ERR.tooLittleReceived.slice(2)) ? t('priceMoved') : t('wouldRevert')); }
+  try {
+    const g = toBig(await ethRpc('eth_estimateGas', [tx]));
+    if (g > 0n) gasLimit = g * 125n / 100n;
+  } catch (e) { /* the simulation passed; keep the default limit */ }
+  await readMarket();
+  const fees = feeFields(baseFee);
+  if (balEth < shown.amountIn + gasLimit * fees.maxFeePerGas) throw new Error(t('insufficient'));
+
+  busy = t('confirmWallet'); render();
+  const h = await eth().request({ method: 'eth_sendTransaction', params: [{
+    from: account, to: UNIVERSAL_ROUTER, data: data, value: hex(shown.amountIn), gas: hex(gasLimit),
+    maxFeePerGas: hex(fees.maxFeePerGas), maxPriorityFeePerGas: hex(fees.maxPriorityFeePerGas),
+  }] });
+  busy = t('waiting'); render();
+  showMsg('buyMsg', '', t('sent'), h);
+  const rc = await waitFor(h);
+  const got = receivedIn(rc, account);
+  done(h, got === null ? shown.out : got, shown.amountIn);
+  await refresh();
+}
+
+/** The bMOLI Transfer to the buyer in a receipt, or null. */
+function receivedIn(rc, who) {
+  let sum = null;
+  for (const l of (rc && rc.logs) || []) {
+    if (String(l.address).toLowerCase() !== BMOLI || !l.topics || l.topics[0] !== TRANSFER_TOPIC) continue;
+    if (('0x' + String(l.topics[2]).slice(26)).toLowerCase() !== who) continue;
+    sum = (sum || 0n) + BigInt(l.data);
+  }
+  return sum;
+}
+
+async function waitFor(hash) {
+  for (let i = 0; i < 100; i++) {
+    const r = await ethRpc('eth_getTransactionReceipt', [hash]).catch(() => null);
+    if (r) {
+      if (r.status !== '0x1') { const e = new Error(t('reverted')); e.hash = hash; throw e; }
+      return r;
+    }
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+  const e = new Error(t('timeout')); e.hash = hash; throw e;
+}
+
+function done(hash, got, paid) {
+  $('doneCard').hidden = false;
+  $('doneAmount').textContent = fmt(got) + ' bMOLI';
+  const el = $('doneMsg');
+  el.textContent = t('doneMsg', fmt(got), fmt(paid));
+  el.appendChild(document.createElement('br'));
+  const a = document.createElement('a');
+  a.href = ETHERSCAN + '/tx/' + hash; a.target = '_blank'; a.rel = 'noopener';
+  a.textContent = t('viewTx') + ' ↗';
+  el.appendChild(a);
+  $('buyMsg').hidden = true;
+  $('amountIn').value = '';
+  quote = null;
+  $('doneCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function watchAsset() {
+  try {
+    const ok = await eth().request({ method: 'wallet_watchAsset', params: {
+      type: 'ERC20', options: { address: BMOLI, symbol: 'bMOLI', decimals: 18, image: NODE + '/icon.png' },
+    } });
+    showMsg('watchMsg', ok ? 'ok' : 'warn', ok ? t('added') : t('notAdded'));
+  } catch (e) {
+    showMsg('watchMsg', isRejection(e) ? 'warn' : 'bad', isRejection(e) ? t('notAdded') : String(e.message || e));
+  }
+}
+
+/* ============================================================ drawing */
+
+function setBtn(btn, st) {
+  btn.textContent = st.label;
+  btn.disabled = Boolean(st.disabled);
+  btn._act = st.act || null;
+}
+
+function showMsg(id, kind, text, hash) {
+  const el = $(id);
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+  el.textContent = text;
+  if (hash) {
+    el.appendChild(document.createElement('br'));
+    const a = document.createElement('a');
+    a.href = ETHERSCAN + '/tx/' + hash; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = t('viewTx') + ' ↗';
+    el.appendChild(a);
+  }
+  el.hidden = false;
+}
+
+function showErr(id, e) {
+  if (!window.ethereum) {
+    $('walletMsg').textContent = String((e && e.message) || e);
+    $('walletHelp').hidden = false;
+    return;
+  }
+  if (isRejection(e)) return showMsg(id, 'warn', t('rejected'));
+  showMsg(id, 'bad', String((e && e.message) || e), e && e.hash);
+}
+
+async function run(fn, msgId) {
+  if (!fn || busy) return;
+  $(msgId).hidden = true;
+  try { await fn(); }
+  catch (e) { showErr(msgId, e); }
+  finally { busy = null; render(); }
+}
+
+function renderHeader() {
+  const chip = $('walletChip');
+  chip.classList.toggle('warn', Boolean(account) && !chainOk);
+  if (!account) chip.textContent = t('connectShort');
+  else if (!chainOk) chip.textContent = t('wrongNet');
+  else chip.textContent = short(account);
+}
+
+function render() {
+  renderHeader();
+  $('noWallet').hidden = Boolean(window.ethereum);
+  $('ethBal').textContent = account && balEth !== null ? fmt(balEth) + ' ETH' : '—';
+  const q = quote;
+  const good = q && !q.cannot && q.out;
+  $('amountOut').textContent = good ? fmt(q.out) : '0';
+  $('amountOut').classList.toggle('empty', !good);
+  $('details').hidden = !good;
+  const bp = slippageBp(slipStr);
+  for (const b of document.querySelectorAll('#slipSeg button')) b.className = b.dataset.slip === slipStr ? 'on' : '';
+  if (good) {
+    const pw = priceWeiPerMoli(q.amountIn, q.out);
+    $('priceEth').textContent = fmtSig(pw, 18, 4) + ' ETH';
+    $('priceUsd').textContent = ethUsd ? 'US$ ' + fmtSig(usdPerMoli(pw, ethUsd), 8, 4) : '—';
+    const imp = slot0 ? impactBp(q.amountIn, q.out, slot0.sqrtP, POOL_KEY.fee) : null;
+    $('impact').textContent = imp === null ? '—' : (imp < 1n ? '< 0,01%'.replace(',', LANG === 'pt' ? ',' : '.') : fmtBp(imp));
+    $('minOut').textContent = bp === null ? '—' : fmt(minOutFor(q.out, bp)) + ' bMOLI';
+    $('slipShow').textContent = bp === null ? '—' : fmtBp(bp);
+    if (baseFee !== null) {
+      const fee = gasLimit * (baseFee + TIP);
+      $('netFee').textContent = fmtSig(fee, 18, 2) + ' ETH' + (ethUsd ? ' (US$ ' + fmtSig(fee * ethUsd / UNIT, 8, 2) + ')' : '');
+    }
+    $('impactNote').hidden = !(imp !== null && imp >= 500n);
+    if (imp !== null) $('impactNote').textContent = t('impactHigh', fmtBp(imp));
+  } else {
+    $('impactNote').hidden = true;
+  }
+  const refuse = q && q.cannot;
+  $('fillNote').hidden = !refuse;
+  if (refuse) {
+    let s = q.reason === 'liquidity' ? t('cannotFill', fmt(q.amountIn)) : t('quoteFailed');
+    if (q.maxIn && q.maxIn > 0n) s += ' ' + t('maxNow', fmtSig(q.maxIn, 18, 4), fmt(q.maxOut));
+    $('fillText').textContent = s;
+    const useable = q.maxIn && q.maxIn > 0n ? roundDown(q.maxIn) : 0n;
+    $('useMax').hidden = !(useable > 0n);
+    if (useable > 0n) { $('useMax').textContent = t('useMax', localise(fromWei(useable, 6))); $('useMax')._v = useable; }
+  }
+  setBtn($('action'), actionState());
+}
+
+/** Down to 6 decimals, then a hair under, so the suggestion fills. */
+function roundDown(v) {
+  const step = 10n ** 12n;
+  const r = (v * 995n / 1000n) / step * step;
+  return r;
+}
+
+const cleanAmount = (el) => {
+  const v = el.value.replace(/[^\d.,]/g, '');
+  const i = v.search(/[.,]/);
+  el.value = i === -1 ? v : v.slice(0, i + 1) + v.slice(i + 1).replace(/[.,]/g, '');
+};
+
+/* ============================================================ wiring */
+
+let typing = null;
+$('langPt').onclick = () => setLang('pt');
+$('langEn').onclick = () => setLang('en');
+$('walletChip').onclick = () => {
+  if (account && chainOk) { window.open(ETHERSCAN + '/address/' + account, '_blank', 'noopener'); return; }
+  run(account ? switchChain : connect, 'buyMsg');
+};
+$('action').onclick = () => run($('action')._act, 'buyMsg');
+$('watchBtn').onclick = () => watchAsset();
+$('amountIn').oninput = () => {
+  cleanAmount($('amountIn'));
+  $('buyMsg').hidden = true;
+  quote = null; render();
+  clearTimeout(typing);
+  typing = setTimeout(() => { requote().catch(() => {}); }, 350);
+};
+$('useMax').onclick = () => {
+  if (!$('useMax')._v) return;
+  $('amountIn').value = fromWei($('useMax')._v, 6);
+  quote = null; render(); requote().catch(() => {});
+};
+$('gear').onclick = () => { $('settings').hidden = !$('settings').hidden; };
+const setSlip = (s) => {
+  slipStr = s;
+  $('slippage').value = s;
+  try { localStorage.setItem('molibra.buy.slippage', s); } catch (e) {}
+  render();
+};
+for (const b of document.querySelectorAll('#slipSeg button')) b.onclick = () => setSlip(b.dataset.slip);
+$('slippage').oninput = () => { slipStr = $('slippage').value.trim(); try { localStorage.setItem('molibra.buy.slippage', slipStr); } catch (e) {} render(); };
+
+$('mmLink').href = 'https://metamask.app.link/dapp/' + location.host + location.pathname + location.search;
+$('twLink').href = 'https://link.trustwallet.com/open_url?coin_id=60&url=' + encodeURIComponent(location.href);
+
+if (window.ethereum && typeof window.ethereum.on === 'function') {
+  window.ethereum.on('accountsChanged', (accs) => {
+    account = accs && accs[0] ? String(accs[0]).toLowerCase() : null;
+    balEth = null;
+    readChain().then(refresh);
+  });
+  window.ethereum.on('chainChanged', () => { readChain().then(refresh); });
+}
+
+try { const s = localStorage.getItem('molibra.buy.slippage'); if (s && slippageBp(s) !== null) slipStr = s; } catch (e) {}
+$('slippage').value = slipStr;
+const preset = String(params.get('amount') || '').replace(',', '.');
+if (toWei(preset)) $('amountIn').value = preset;
+setLang(LANG);
+
+(async () => {
+  if (window.ethereum) {
+    try {
+      const accs = await window.ethereum.request({ method: 'eth_accounts' });
+      if (accs && accs[0]) { account = String(accs[0]).toLowerCase(); await readChain(); }
+    } catch (e) {}
+  }
+  await refresh();
+  setInterval(() => { if (!busy) refresh().catch(() => {}); }, 20000);
+})();
+</script>
+</body>
+</html>

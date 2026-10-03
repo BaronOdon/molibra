@@ -909,6 +909,19 @@ async function handleAudit(node, req, res) {
     return;
   }
 
+  /**
+   * Buy bMOLI with ETH on Ethereum mainnet, straight against the Uniswap v4
+   * pool (app.uniswap.org does not quote it). One transaction through the
+   * Universal Router, signed in the buyer's wallet; it holds no key and
+   * custodies nothing.
+   */
+  if (path === '/molibra/buy') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'buy.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   // The QR encoder the pay page draws with (Kazuhiko Arase, MIT), vendored and
   // served from this node for the same reason as wallet.js: a page that tells
   // a customer where to send money must not fetch its maths from a CDN.

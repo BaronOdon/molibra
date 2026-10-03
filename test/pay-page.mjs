@@ -240,7 +240,7 @@ check('a phone with no wallet gets MetaMask and Trust Wallet deep links',
 check('  plus the connect page', page.includes('href="/molibra/connect"'));
 check('"Comprar MOLI" offers the counter, WSRO and ETH routes',
   page.includes('id="buyCounter"') && page.includes('href="/molibra/swap"') && page.includes('href="/molibra/return"')
-  && page.includes('outputCurrency=0xa302877efb74f567f3605851194b46f1d5746822'));
+  && page.includes('href="/molibra/buy"'));
 check('"Vender MOLI" scans with BarcodeDetector and falls back to pasting',
   page.includes("new BarcodeDetector({ formats: ['qr_code'] })") && page.includes("t('noScanner')"));
 check('the fixed sign prints on its own', /@media print\{[\s\S]*\.sign,\.sign \*\{visibility:visible\}/.test(page));
