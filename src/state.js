@@ -42,6 +42,7 @@ import { proveBurn } from './burnproof.js';
 import {
   decodeMoliReturn, proveReturn, returnKey, inboundPositionKey, HISTORICAL_INBOUND_POSITIONS,
   BRIDGE_V2_ACTIVATION, ETH_CHAIN_ID, ETH_HEADER_AUTHORITY,
+  BOT_HEADER_ACTIVATION, ETH_HEADER_BOT, BOT_RETURN_CAP, BOT_RETURN_WINDOW,
 } from './molireturn.js';
 
 /** A storage word of zero. Unset and zero are the same thing, as in the EVM. */
@@ -744,20 +745,28 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
   // inbound leg (src/molireturn.js has the reasoning). Below it, the old rules
   // exactly, so all history replays unchanged.
   const bridgeV2 = BigInt(blockNumber ?? 0n) >= BRIDGE_V2_ACTIVATION;
+  // ⛔⛔ The header-bot flag day (src/molireturn.js): a second, lesser chain-1
+  // header committer whose roots carry capped MOLI returns and nothing else.
+  // Below it every line that reads this is a no-op.
+  const botEra = BigInt(blockNumber ?? 0n) >= BOT_HEADER_ACTIVATION;
 
   const header = decodeHeaderCommit(tx.data);
   if (header) {
     if (tx.value !== 0n) throw new Error('committing a header moves no value');
+    const ethHeader = BigInt(header.originChainId) === ETH_CHAIN_ID;
+    const committer = normalizeAddress(tx.from);
     // 1. Ethereum headers come from ONE named authority. Before this, any
     //    address that registered a throwaway asset on chain 1 could commit a
-    //    fabricated root, or squat a real burn's block with junk.
-    if (bridgeV2 && BigInt(header.originChainId) === ETH_CHAIN_ID
-        && normalizeAddress(tx.from) !== ETH_HEADER_AUTHORITY) {
+    //    fabricated root, or squat a real burn's block with junk. From the
+    //    header-bot flag day, the bot as well - in a lower tier (inbound.js).
+    if (bridgeV2 && ethHeader && committer !== ETH_HEADER_AUTHORITY
+        && !(botEra && committer === ETH_HEADER_BOT)) {
       throw new Error(
         `Ethereum headers are committed by ${ETH_HEADER_AUTHORITY} only: a receipts root is `
         + "the bridge's trusted input, and it has one named source");
     }
-    header.authority = bridgeV2 && BigInt(header.originChainId) === ETH_CHAIN_ID;
+    header.authority = bridgeV2 && ethHeader;
+    if (botEra && ethHeader) header.tiers = { operator: ETH_HEADER_AUTHORITY, bot: ETH_HEADER_BOT };
     // Rehearsed on a copy so a refused commit leaves the ledger untouched.
     state.inbound.clone().commitHeader({ ...header, by: tx.from });
   }
@@ -795,6 +804,14 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
       // 2. The root must be the one THIS asset's registrar committed, not
       //    whichever root reached the chain first.
       const committed = state.inbound.headerFor(asset.origin.chainId, claimed.blockNumber);
+      // ⛔⛔ Stated, not left to the registrar check below: a root ONLY the
+      //    header bot committed never mints a foreign asset. Its roots count
+      //    for capped MOLI returns and for nothing else.
+      if (committed.by === ETH_HEADER_BOT) {
+        throw new Error(
+          `the root for that block was committed only by the header bot ${ETH_HEADER_BOT}: bot `
+          + `roots count for MOLI returns alone. ${asset.symbol} waits for its registrar's commit.`);
+      }
       if (committed.by !== asset.registrar) {
         throw new Error(
           `the root for that block was committed by ${committed.by}, not by ${asset.symbol}'s `
@@ -834,7 +851,11 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
         `no receiptsRoot is committed for Ethereum block ${returning.blockNumber}. `
         + `${ETH_HEADER_AUTHORITY} commits it with HEADER_COMMIT first.`);
     }
-    if (committed.by !== ETH_HEADER_AUTHORITY) {
+    // From the header-bot flag day a root the bot alone committed also counts -
+    // under the rolling cap below. One the operator committed (or confirmed)
+    // never does count against it.
+    const byBot = botEra && committed.by === ETH_HEADER_BOT;
+    if (committed.by !== ETH_HEADER_AUTHORITY && !byBot) {
       throw new Error(`the root for Ethereum block ${returning.blockNumber} was not committed `
         + `by the header authority ${ETH_HEADER_AUTHORITY}`);
     }
@@ -843,7 +864,10 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     });
     const key = returnKey(returning.blockNumber, returning.txIndex);
     state.outbound.assertReturnable(key, total);
-    returned = { key, bySender, total };
+    if (byBot) {
+      state.outbound.assertBotReturnable(blockNumber, total, BOT_RETURN_CAP, BOT_RETURN_WINDOW);
+    }
+    returned = { key, bySender, total, byBot };
   }
 
   const releasing = decodeBridgeRelease(tx.data);
@@ -1056,6 +1080,9 @@ export async function applyTransaction(state, tx, intrinsicGas, miner, blockNumb
     // ⛔ Credited to the senders the proof names - never to tx.from, who may
     // be anybody relaying the proof. Every check already passed above.
     state.outbound.recordReturn(returned.key, returned.bySender);
+    if (returned.byBot) {
+      state.outbound.recordBotReturn(blockNumber, returned.key, returned.total, BOT_RETURN_WINDOW);
+    }
     for (const [from, amount] of returned.bySender) state.credit(from, amount);
   }
   if (releasingAsset) {

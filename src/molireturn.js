@@ -92,6 +92,45 @@ export const ETH_CHAIN_ID = 1n;
  */
 export const ETH_HEADER_AUTHORITY = '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a';
 
+/**
+ * ⛔⛔ The flag day for the HEADER BOT (operator decision, 2 Oct 2026: "yes,
+ * with a daily cap"). From this height a second address may commit chain-1
+ * receipts roots, so returns flow without the operator signing each one. Below
+ * it every rule in this block is off and the chain behaves byte for byte as it
+ * did - a bot commit is refused exactly as any other non-authority commit is.
+ *
+ * Set 2 Oct 2026 at tip 138,700. The chain was measured at ~24 s a block
+ * (~3,600 a day) that evening, so 146,000 is ~2 days out: enough to upgrade
+ * node 2, then node 1, with a day spare. As with every flag day here,
+ * divergence is triggered by a TRANSACTION (a bot commit at or above it), not
+ * by the height, so a late node agrees on every block until the bot acts.
+ * ⛔ Free to change until the first bot commit is mined; frozen after.
+ */
+export const BOT_HEADER_ACTIVATION = 146_000n;
+
+/**
+ * The header bot: a key that lives on the operator's server (recorded in
+ * CREDENTIALS.md, 2 Oct 2026), never the operator's wallet.
+ *
+ * ⛔ Its roots are worth LESS than the operator's, by construction:
+ *   - a MOLI_RETURN resting on a root ONLY the bot committed is capped at
+ *     BOT_RETURN_CAP per BOT_RETURN_WINDOW blocks, rolling, refused whole
+ *     (never paid in part) above it;
+ *   - a WSRO claim (BRIDGE_CLAIM) never rests on a bot root at all;
+ *   - it can never override, or even repeat, a root the operator committed;
+ *   - the operator committing the same root lifts the cap for that block, and
+ *     the operator committing a DIFFERENT root replaces the bot's (the bot's is
+ *     kept on the record as `botRoot`, so the disagreement stays visible).
+ * So a stolen bot key releases at most BOT_RETURN_CAP per window, and never more
+ * than is outstanding (`returned <= burned` still binds everything).
+ */
+export const ETH_HEADER_BOT = '0xd30cb4d5bd928313d0b50908b1f6dc3bfbe61dcf';
+
+/** At most 5,000 MOLI of bot-only returns ... */
+export const BOT_RETURN_CAP = 5_000n * 10n ** 18n;
+/** ... in any 5,760 consecutive Molibra blocks (the operator's "rolling day"). */
+export const BOT_RETURN_WINDOW = 5_760n;
+
 /** bMOLI on Ethereum. The only contract whose transfers count as a return. */
 export const BMOLI_CONTRACT = '0xa302877efb74f567f3605851194b46f1d5746822';
 

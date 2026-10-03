@@ -91,7 +91,9 @@
 <div class="card">
   <h2>3 · Commit the Ethereum header — operator only</h2>
   <p class="sub">Produced by <code>node scripts-inbound/prove-return.mjs &lt;hash&gt;</code> once the transfer is
-    mined. Only the header authority's commit counts; from anyone else, consensus refuses it.</p>
+    mined. Only the header authority's commit counts; from anyone else, consensus refuses it.
+    From Molibra block 146,000 the bridge bot also commits roots and relays returns on its own, capped at
+    5,000 MOLI per rolling 5,760 blocks; a return above that waits here for the operator's commit, which is uncapped.</p>
   <label>HEADER_COMMIT calldata</label>
   <input id="commitData" placeholder="arrives in the URL as ?commit=0x…">
   <button id="commit" disabled>Commit the header</button>

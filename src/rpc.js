@@ -21,7 +21,10 @@ import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
 import { simulate } from './evm.js';
 import { MOLI_BURN_ACTIVATION } from './moliburn.js';
-import { MOLI_RETURN_ADDRESS, BRIDGE_V2_ACTIVATION } from './molireturn.js';
+import {
+  MOLI_RETURN_ADDRESS, BRIDGE_V2_ACTIVATION, BOT_HEADER_ACTIVATION, ETH_HEADER_BOT,
+  BOT_RETURN_CAP, BOT_RETURN_WINDOW,
+} from './molireturn.js';
 
 /** The release assets /download/<name> redirects to. Nothing else. */
 const INSTALLER_FILES = ['Molibra-Miner-Setup.exe', 'Molibra-Miner.pkg', 'SHA256SUMS.txt'];
@@ -544,6 +547,13 @@ async function handleAudit(node, req, res) {
           blocksAway: chain.height >= STATE_MERKLE_ACTIVATION
             ? 0 : Number(STATE_MERKLE_ACTIVATION - chain.height),
         },
+        // The second, capped Ethereum header committer (src/molireturn.js).
+        botHeaders: {
+          height: Number(BOT_HEADER_ACTIVATION),
+          active: chain.height >= BOT_HEADER_ACTIVATION,
+          blocksAway: chain.height >= BOT_HEADER_ACTIVATION
+            ? 0 : Number(BOT_HEADER_ACTIVATION - chain.height),
+        },
       },
       // A COUNT of distinct clients in the last 15 minutes - never the
       // addresses. A chain whose claim is that participation is voluntary and
@@ -606,6 +616,16 @@ async function handleAudit(node, req, res) {
         outstanding: chain.state.outbound.outstanding().toString(),
         returnVault: MOLI_RETURN_ADDRESS,
         returnsFrom: BRIDGE_V2_ACTIVATION.toString(),
+        // Returns resting on a root only the header bot committed: how much of
+        // the rolling cap the NEXT block would find already used.
+        botCap: {
+          bot: ETH_HEADER_BOT,
+          from: BOT_HEADER_ACTIVATION.toString(),
+          cap: BOT_RETURN_CAP.toString(),
+          windowBlocks: BOT_RETURN_WINDOW.toString(),
+          usedInWindow: chain.state.outbound
+            .botWindowUsed(chain.height + 1n, BOT_RETURN_WINDOW).toString(),
+        },
       },
       endpoints: ['/molibra/head', '/molibra/blocks?from=&to=&decoded=1', '/molibra/block/{numberOrHash}?decoded=1', '/molibra/tx/{hash}', '/molibra/theories', '/molibra/peers', '/molibra/bridge', '/molibra/settle', '/molibra/inbound', '/molibra/pool', '/molibra/bridgedmoli', '/molibra/return', '/molibra/documents', '/molibra/download'],
     });
@@ -774,7 +794,12 @@ async function handleAudit(node, req, res) {
       claimsHonoured: inbound.claimed.size,
       headers: [...inbound.headers.entries()].map(([k, v]) => {
         const [chainId, blockNumber] = k.split(':');
-        return { chainId, blockNumber, receiptsRoot: v.receiptsRoot, committedBy: v.by };
+        return {
+          chainId, blockNumber, receiptsRoot: v.receiptsRoot, committedBy: v.by,
+          // Present only when the header bot also committed this block: the
+          // root it gave, which may differ from the operator's that won.
+          ...(v.botRoot ? { botRoot: v.botRoot } : {}),
+        };
       }),
       trustModel: {
         trustless: 'that a burn is in a block with the committed receiptsRoot, that it burned '

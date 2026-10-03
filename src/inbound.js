@@ -131,11 +131,14 @@ export class InboundLedger {
    * invisible - the old root would simply be gone - so it is refused at the
    * point where the evidence still exists.
    */
-  commitHeader({ originChainId, blockNumber, receiptsRoot, by, authority = false }) {
+  commitHeader({ originChainId, blockNumber, receiptsRoot, by, authority = false, tiers = null }) {
     const chain = BigInt(originChainId);
     const root = String(receiptsRoot).toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(root)) throw new Error('a receipts root is 32 bytes');
     const committer = normalizeAddress(by);
+    // From the header-bot flag day (src/molireturn.js) chain-1 commits have two
+    // tiers. Below it `tiers` is never passed and nothing here runs.
+    if (tiers) return this.commitTiered({ chain, blockNumber, root, committer, tiers });
     // `authority`: the named header authority for that chain (from the
     // bridge-v2 flag day, src/molireturn.js), who commits for the MOLI return
     // leg as well as for registered assets, so needs no asset of its own.
@@ -156,6 +159,74 @@ export class InboundLedger {
     }
     if (!existing) this.headers.set(key, { receiptsRoot: root, by: committer });
     return { chainId: chain.toString(), blockNumber: BigInt(blockNumber).toString(), receiptsRoot: root, by: committer };
+  }
+
+  /**
+   * ⛔⛔ The two-tier rule for one block, from the header-bot flag day.
+   *
+   *   bot,  nothing committed            -> recorded, by the bot (capped tier)
+   *   bot,  bot already, same root       -> nothing changes (as for anyone)
+   *   bot,  bot already, different root  -> REFUSED: a commitment is not a draft
+   *   bot,  anyone else already          -> REFUSED: a bot root never overrides,
+   *                                         nor even repeats, an operator root
+   *   operator, nothing committed        -> recorded, by the operator
+   *   operator, operator already         -> same root: nothing; different: REFUSED
+   *   operator, bot already, same root   -> by becomes the operator (uncapped);
+   *                                         `botRoot` keeps the bot's word on record
+   *   operator, bot already, other root  -> ⭐ the OPERATOR'S ROOT WINS. It
+   *                                         replaces the bot's, and the bot's is
+   *                                         kept as `botRoot`, so the conflict is
+   *                                         public and permanent, not erased.
+   *
+   * Why the operator may replace a bot root when nobody may replace their own:
+   * the bot is the lesser authority by design, and the operator's commit is the
+   * remedy for a wrong one. What the wrong root already paid is bounded by the
+   * cap and stays paid (return keys are positional and spent); everything else
+   * at that block now proves against the operator's root.
+   */
+  commitTiered({ chain, blockNumber, root, committer, tiers }) {
+    const operator = normalizeAddress(tiers.operator);
+    const bot = normalizeAddress(tiers.bot);
+    if (committer !== operator && committer !== bot) {
+      throw new Error(`${committer} is neither the header authority nor the header bot`);
+    }
+    const key = headerKey(chain, blockNumber);
+    const existing = this.headers.get(key);
+    const result = (rec) => ({
+      chainId: chain.toString(), blockNumber: BigInt(blockNumber).toString(),
+      receiptsRoot: rec.receiptsRoot, by: rec.by,
+    });
+    if (!existing) {
+      const rec = { receiptsRoot: root, by: committer };
+      this.headers.set(key, rec);
+      return result(rec);
+    }
+    if (committer === bot) {
+      if (existing.by !== bot) {
+        throw new Error(
+          `chain ${chain} block ${blockNumber} is already committed by ${existing.by}. `
+          + 'The header bot never overrides, or repeats, a root the authority committed.');
+      }
+      if (existing.receiptsRoot !== root) {
+        throw new Error(
+          `chain ${chain} block ${blockNumber} is already committed by the bot as `
+          + `${existing.receiptsRoot}. A commitment that can be replaced is a draft.`);
+      }
+      return result(existing);
+    }
+    // The operator.
+    if (existing.by === bot) {
+      const rec = { receiptsRoot: root, by: operator, botRoot: existing.receiptsRoot };
+      this.headers.set(key, rec);
+      return result(rec);
+    }
+    if (existing.receiptsRoot !== root) {
+      throw new Error(
+        `chain ${chain} block ${blockNumber} is already committed as ${existing.receiptsRoot}. `
+        + 'A commitment that can be replaced is a draft, and a claim proved against a draft '
+        + 'can be un-proved later.');
+    }
+    return result(existing);
   }
 
   /** The committed record - root AND committer - or null. */
@@ -417,7 +488,9 @@ export class InboundLedger {
     for (const k of [...this.claimed].sort()) lines.push(`bclaim:${k}`);
     for (const k of [...this.headers.keys()].sort()) {
       const h = this.headers.get(k);
-      lines.push(`bhead:${k}:${h.receiptsRoot}:${h.by}`);
+      // `botRoot` exists only from the header-bot flag day, so every line
+      // written before it is byte for byte what it was.
+      lines.push(`bhead:${k}:${h.receiptsRoot}:${h.by}${h.botRoot ? `:bot:${h.botRoot}` : ''}`);
     }
     return lines;
   }

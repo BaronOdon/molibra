@@ -176,7 +176,7 @@ export function decodeMoliBurn(data) {
  */
 export class OutboundLedger {
   constructor(burned = 0n, byRecipient = new Map(), returned = 0n,
-              returnedTo = new Map(), returnKeys = new Set()) {
+              returnedTo = new Map(), returnKeys = new Set(), botReturns = []) {
     this.burned = BigInt(burned);
     this.byRecipient = byRecipient;
     // The way back (src/molireturn.js). Kept in the same ledger because the
@@ -184,6 +184,41 @@ export class OutboundLedger {
     this.returned = BigInt(returned);
     this.returnedTo = returnedTo;
     this.returnKeys = returnKeys;
+    // Returns paid against a root ONLY the header bot committed, inside the
+    // rolling window: [{ height, key, amount }]. Empty until the header-bot
+    // flag day, and contributes nothing to the root while empty.
+    this.botReturns = botReturns;
+  }
+
+  /** MOLI paid on bot-only roots in the `window` blocks ending at `height`. */
+  botWindowUsed(height, window) {
+    const floor = BigInt(height) - BigInt(window);
+    let used = 0n;
+    for (const r of this.botReturns) if (r.height > floor) used += r.amount;
+    return used;
+  }
+
+  /**
+   * ⛔⛔ The header-bot cap. Refuses WHOLE - never pays part of a return - one
+   * that would take bot-only returns in the rolling window past `cap`. The
+   * return is not consumed, so it stays submittable once the window has moved
+   * on, or at once if the operator commits the same root.
+   */
+  assertBotReturnable(height, amount, cap, window) {
+    const used = this.botWindowUsed(height, window);
+    if (used + BigInt(amount) > BigInt(cap)) {
+      throw new Error(
+        `refused: this return of ${amount} rests on a root only the header bot committed, and `
+        + `${used} has already come back that way in the last ${window} blocks. The cap is `
+        + `${cap}; it waits for the window to move, or for the operator to commit the same root.`);
+    }
+  }
+
+  /** Record a bot-only return and drop entries the window has left behind. */
+  recordBotReturn(height, key, amount, window) {
+    const floor = BigInt(height) - BigInt(window);
+    this.botReturns = this.botReturns.filter((r) => r.height > floor);
+    this.botReturns.push({ height: BigInt(height), key: String(key), amount: BigInt(amount) });
   }
 
   burn(recipient, amount) {
@@ -231,7 +266,7 @@ export class OutboundLedger {
 
   clone() {
     return new OutboundLedger(this.burned, new Map(this.byRecipient), this.returned,
-      new Map(this.returnedTo), new Set(this.returnKeys));
+      new Map(this.returnedTo), new Set(this.returnKeys), this.botReturns.map((r) => ({ ...r })));
   }
 
   /**
@@ -251,6 +286,10 @@ export class OutboundLedger {
       }
       for (const k of [...this.returnKeys].sort()) lines.push(`molireturnkey:${k}`);
     }
+    // Header-bot window. Empty, and so absent, before that flag day.
+    const bot = this.botReturns.map((r) => `molireturnbot:${r.height.toString(16)}:${r.key}:`
+      + r.amount.toString(16));
+    lines.push(...bot.sort());
     return lines;
   }
 
@@ -270,6 +309,11 @@ export class OutboundLedger {
         returned: this.returned.toString(), returnedTo, returnKeys: [...this.returnKeys].sort(),
       });
     }
+    if (this.botReturns.length > 0) {
+      out.botReturns = this.botReturns.map((r) => ({
+        height: r.height.toString(), key: r.key, amount: r.amount.toString(),
+      }));
+    }
     return out;
   }
 
@@ -284,6 +328,9 @@ export class OutboundLedger {
       returnedTo.set(normalizeAddress(to), BigInt(amount));
     }
     return new OutboundLedger(BigInt(raw.burned ?? 0), byRecipient, BigInt(raw.returned ?? 0),
-      returnedTo, new Set(raw.returnKeys ?? []));
+      returnedTo, new Set(raw.returnKeys ?? []),
+      (raw.botReturns ?? []).map((r) => ({
+        height: BigInt(r.height), key: String(r.key), amount: BigInt(r.amount),
+      })));
   }
 }
