@@ -215,7 +215,7 @@ async function distribute(m, token, pool, { vesting }) {
   const res = toHex(await view(pool, sel('reserves()'))).slice(2);
   const p0 = (BigInt('0x' + res.slice(0, 64)) * UNIT) / BigInt('0x' + res.slice(64, 128));
   const curveAmt = L.parseDec(m.meme.allocation.curve);
-  const curve = await deploy(OPERATOR, CURVE_BYTECODE, addr(token) + addr(pool) + word(curveAmt) + word(p0), `${sym} curve deploy`);
+  const curve = await deploy(OPERATOR, CURVE_BYTECODE, addr(token) + addr(pool) + word(curveAmt) + word(p0) + addr(OPERATOR) + word(1792972800n), `${sym} curve deploy`);
   let r = await send(OPERATOR, token, sel('transfer(address,uint256)') + addr(curve) + word(curveAmt), 0n, `${sym} fund curve`);
   check(`${sym}: curve deployed at the pool's price and funded with ${fmt(curveAmt, 0)}`, !r.failed && await bal(token, curve) === curveAmt,
     `opens ${fmt(p0, 4)} MOLI, sells out at ${fmt(5n * p0, 4)}`);

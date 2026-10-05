@@ -1251,7 +1251,7 @@ async function doSwap() {
 
   if (p.source === 'curve') {
     // ⭐ The sale curve: MOLI in, tokens out, and the MOLI goes into the pool
-    // as locked liquidity. Re-checked now; a curve that would refuse is never
+    // as liquidity (locked in the curve until 2026-10-26). Re-checked now; a curve that would refuse is never
     // signed for.
     const fresh = await curveQuote(plan[0].m, p.amount);
     if (fresh === null) throw new Error(t('curveMoved'));

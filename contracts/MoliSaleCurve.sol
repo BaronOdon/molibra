@@ -4,7 +4,10 @@ pragma solidity ^0.8.20;
 /**
  * MoliSaleCurve - sells ONE token for native MOLI only, on a fixed, rising
  * price schedule, and puts every MOLI it is paid into that token's MolibraPool
- * as liquidity that nobody can ever withdraw.
+ * as liquidity, LOCKED until `unlockAt` (operator, 5 Oct 2026: 2026-10-26
+ * 00:00 UTC). After that, and only then, the fixed `beneficiary` MAY withdraw
+ * it - as protection against market manipulation by third parties, not as a
+ * plan to sell.
  *
  * ## The schedule
  *
@@ -25,7 +28,10 @@ pragma solidity ^0.8.20;
  * Each buy deposits ITS OWN payment into the pool, in the same transaction,
  * together with tokens from the curve's inventory at the pool's current ratio
  * (MolibraPool only accepts proportional deposits). The LP shares stay in this
- * contract forever: there is no function that removes liquidity.
+ * contract. Until `unlockAt` nothing can remove them. From `unlockAt` on, only
+ * `beneficiary` can, through withdrawLiquidity(), which pays the MOLI and tokens
+ * straight to the beneficiary. The UNSOLD sale tokens are never withdrawable:
+ * they stay here, for sale, forever.
  *
  *   1. The curve never holds anybody's MOLI between transactions. A deposit
  *      at a manipulated pool price would hand the manipulator the deposit's
@@ -52,9 +58,11 @@ pragma solidity ^0.8.20;
  *
  * ## What is absent by construction
  *
- * No owner, no admin, no pause, no withdraw, no way to change the token, the
- * pool, the supply or the price. Tokens sent here beyond the sale supply stay
- * here. MOLI sent with no purchase is refused (receive reverts).
+ * No owner, no admin, no pause, no way to change the token, the pool, the
+ * supply, the price, the beneficiary or the unlock time (all immutable). No
+ * withdrawal of unsold tokens. Tokens sent here beyond the sale supply stay
+ * here. MOLI sent with no purchase is refused (receive accepts only the pool,
+ * during a withdrawal).
  *
  * No external imports.
  */
@@ -70,6 +78,8 @@ interface ICurvePool {
     function reserves() external view returns (uint256 moli, uint256 tokens);
     function totalShares() external view returns (uint256);
     function addLiquidity(uint256 tokenAmount, uint256 minShares) external payable returns (uint256);
+    function removeLiquidity(uint256 amount, uint256 minMoli, uint256 minTokens) external returns (uint256 moliOut, uint256 tokenOut);
+    function shares(address) external view returns (uint256);
 }
 
 contract MoliSaleCurve {
@@ -80,6 +90,10 @@ contract MoliSaleCurve {
     ICurvePool public immutable pool;
     uint256 public immutable supplyForSale;           // S
     uint256 public immutable startPrice;              // p0, MOLI-wei per 1e18 token-wei
+    /// The only address that may withdraw the curve's LIQUIDITY, and only from unlockAt.
+    address public immutable beneficiary;
+    /// Unix time before which the curve's liquidity cannot be withdrawn by anybody.
+    uint64 public immutable unlockAt;
 
     uint256 public sold;                              // x: units that left the curve
     uint256 public moliRaised;                        // all MOLI kept (deposited) by the curve
@@ -87,6 +101,7 @@ contract MoliSaleCurve {
 
     event Bought(address indexed buyer, uint256 moliPaid, uint256 tokensOut, uint256 priceAfter);
     event Deepened(uint256 moli, uint256 tokens, uint256 shares);
+    event LiquidityWithdrawn(address indexed to, uint256 shares, uint256 moli, uint256 tokens);
 
     error ZeroAddress();
     error BadPool();
@@ -100,6 +115,8 @@ contract MoliSaleCurve {
     error Slippage();
     error TransferFailed();
     error NoDirectSends();
+    error NotBeneficiary();
+    error Locked(uint64 unlockAt);
 
     modifier lock() {
         if (entered) revert Reentrant();
@@ -108,8 +125,10 @@ contract MoliSaleCurve {
         entered = false;
     }
 
-    constructor(address token_, address pool_, uint256 supplyForSale_, uint256 startPrice_) {
-        if (token_ == address(0) || pool_ == address(0)) revert ZeroAddress();
+    constructor(address token_, address pool_, uint256 supplyForSale_, uint256 startPrice_,
+        address beneficiary_, uint64 unlockAt_)
+    {
+        if (token_ == address(0) || pool_ == address(0) || beneficiary_ == address(0)) revert ZeroAddress();
         if (ICurvePool(pool_).token() != token_) revert BadPool();
         if (supplyForSale_ == 0 || startPrice_ == 0) revert BadParams();
         // Keeps every intermediate below 2^256 (see cost()).
@@ -118,6 +137,8 @@ contract MoliSaleCurve {
         pool = ICurvePool(pool_);
         supplyForSale = supplyForSale_;
         startPrice = startPrice_;
+        beneficiary = beneficiary_;
+        unlockAt = unlockAt_;
     }
 
     /* ------------------------------------------------------------- views */
@@ -298,10 +319,39 @@ contract MoliSaleCurve {
         while (t > 0 && cost(x, t) > moli) t--;
     }
 
+    /* --------------------------------------------------- the time lock */
+
+    /**
+     * After `unlockAt`, the beneficiary may take out any number of the
+     * curve's LP shares (all, some, or none - it is optional). The pool pays
+     * this contract and it is forwarded, in full, to the beneficiary. Only
+     * liquidity: the unsold sale tokens are untouched and stay for sale.
+     * Slippage: minMoli / minTokens, enforced by the pool.
+     */
+    function withdrawLiquidity(uint256 shareAmount, uint256 minMoli, uint256 minTokens)
+        external lock returns (uint256 moliOut, uint256 tokenOut)
+    {
+        if (msg.sender != beneficiary) revert NotBeneficiary();
+        if (block.timestamp < unlockAt) revert Locked(unlockAt);
+        if (shareAmount == 0) revert BadParams();
+        // Interactions only; the curve keeps no state about the shares (the
+        // pool does). The lock stops any re-entry into buy() or this function.
+        (moliOut, tokenOut) = pool.removeLiquidity(shareAmount, minMoli, minTokens);
+        if (!token.transfer(beneficiary, tokenOut)) revert TransferFailed();
+        (bool ok, ) = beneficiary.call{value: moliOut}("");
+        if (!ok) revert TransferFailed();
+        emit LiquidityWithdrawn(beneficiary, shareAmount, moliOut, tokenOut);
+    }
+
+    /// The curve's LP shares in its pool right now.
+    function liquidityShares() external view returns (uint256) {
+        return pool.shares(address(this));
+    }
+
     receive() external payable {
-        // The pool never pays this contract (it never removes liquidity or
-        // sells), so any plain send is a mistake: refuse it.
-        revert NoDirectSends();
+        // Only the pool, paying out inside withdrawLiquidity() (the lock is
+        // held then). Any other plain send is a mistake: refuse it.
+        if (msg.sender != address(pool) || !entered) revert NoDirectSends();
     }
 
     /* -------------------------------------------------------------- math */

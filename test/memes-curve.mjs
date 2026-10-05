@@ -88,7 +88,7 @@ const encCtor = (name, sym, desc, supply, holder) => {
 };
 
 /** One coin, set up the way /molibra/memes does it: token, pool at parity, curve funded with 95%. */
-async function setup({ supply, p0, seedMoli = 3000n * UNIT, fund = true, curveShare = 95n, bytecode = CURVE.bytecode }) {
+async function setup({ supply, p0, seedMoli = 3000n * UNIT, fund = true, curveShare = 95n, bytecode = CURVE.bytecode, unlockAt = 1792972800n }) {
   state = new State();
   for (const a of [OP, ALICE, BOB, EVE]) state.credit(a, 10n ** 30n);
   const token = await deploy(OP, MEME.bytecode, encCtor('Test Meme', 'TST', 'meme', supply, OP));
@@ -101,7 +101,7 @@ async function setup({ supply, p0, seedMoli = 3000n * UNIT, fund = true, curveSh
   const r = await tx(OP, pool, sel('addLiquidity(uint256,uint256)') + word(seedTok) + word(sq(seedMoli * seedTok) - 1000n), seedMoli);
   if (r.failed) throw new Error('seed failed ' + errName(r.returnValue));
   const S = (supply * curveShare) / 100n;
-  const curve = await deploy(OP, bytecode, addr(token) + addr(pool) + word(S) + word(p0));
+  const curve = await deploy(OP, bytecode, addr(token) + addr(pool) + word(S) + word(p0) + addr(OP) + word(unlockAt));
   if (fund) await tx(OP, token, sel('transfer(address,uint256)') + addr(curve) + word(S));
   return { token, pool, curve, S, p0 };
 }
@@ -178,8 +178,8 @@ console.log('\n2. buying\n');
   check('  sold = tokens to the buyer + tokens into the pool', await sold(c) === q[0] + (rt1 - rt0));
   check('  moliRaised records it', await curveView(c, 'moliRaised()') === q[1]);
   const fns = CURVE.abi.filter((x) => x.type === 'function').map((x) => x.name);
-  check('⛔ the LP is locked forever: the curve has no function that calls removeLiquidity',
-    !fns.some((n) => /remove|withdraw|sweep|rescue|migrate|exit/i.test(n)) && !CURVE.deployedBytecode.includes(sel('removeLiquidity(uint256,uint256,uint256)').slice(2)));
+  check('⛔ the only way liquidity leaves is withdrawLiquidity() (time-locked, beneficiary only); nothing withdraws unsold tokens',
+    fns.filter((n) => /remove|withdraw|sweep|rescue|migrate|exit/i.test(n)).join() === 'withdrawLiquidity');
 }
 
 {
@@ -334,13 +334,95 @@ async function sandwichRun(bytecode, mode, A, V) {
     !r2.failed && pp(after) > pp(before), `pool price after the pump ${f(pp(after), 4)} (the curve's deposit was at ${f(pp(before), 4)})`);
 }
 
+/* ============================ 4c. the time lock on the curve's liquidity */
+console.log('\n4c. time lock: liquidity locked until 2026-10-26T00:00:00Z, then the beneficiary may withdraw\n');
+const BENREENTER = JSON.parse(read('contracts/artifacts/CurveBeneficiaryReenter.test.json'));
+const UNLOCK = 1792972800n;
+const at = async (ts, from, to, data, value = 0n) => {
+  const r = await runEvm(state, { from, to, data, value, gasLimit: GAS, timestamp: ts, blockNumber: 210_000n });
+  if (!r.failed) state.bumpNonce(from);
+  return r;
+};
+const withdraw = (c, from, ts, shares, minM = 0n, minT = 0n) =>
+  at(ts, from, c.curve, sel('withdrawLiquidity(uint256,uint256,uint256)') + word(shares) + word(minM) + word(minT));
+{
+  check('UNLOCK is 2026-10-26T00:00:00Z exactly', new Date(Number(UNLOCK) * 1000).toISOString() === '2026-10-26T00:00:00.000Z');
+  check('the page deploys the curve with the operator as beneficiary and that unlock time',
+    page.includes('const CURVE_UNLOCK_AT = 1792972800n;') && page.includes('+ addr32(OPERATOR) + word(CURVE_UNLOCK_AT)'));
+  c = await setup({ supply: 1_000_000_000n * UNIT, p0: BOLSO_P0 });
+  check('beneficiary() and unlockAt() read back', '0x' + (await curveView(c, 'beneficiary()')).toString(16).padStart(40, '0') === OP
+    && await curveView(c, 'unlockAt()') === UNLOCK);
+  await buy(c, ALICE, 1000n * UNIT);
+  const shares = await curveView(c, 'liquidityShares()');
+  check('a buy gives the curve LP shares', shares > 0n, String(shares));
+  let r = await withdraw(c, OP, UNLOCK - 1n, shares);
+  check('⛔ before unlock the beneficiary is refused (Locked), one second early included', r.failed && toHex(r.returnValue).startsWith(sel('Locked(uint64)')));
+  r = await withdraw(c, ALICE, UNLOCK + 10n, shares);
+  check('⛔ after unlock a non-beneficiary is refused (NotBeneficiary)', r.failed && toHex(r.returnValue).startsWith(sel('NotBeneficiary()')));
+  const [rm, rt] = await reserves(c.pool);
+  const ts = await view(c.pool, sel('totalShares()'));
+  const half = shares / 2n;
+  const expM = (half * rm) / ts, expT = (half * rt) / ts;
+  r = await withdraw(c, OP, UNLOCK, half, expM + 1n, 0n);
+  check('⛔ slippage: minMoli above what the shares are worth is refused by the pool', r.failed);
+  const m0 = state.balanceOf(OP), t0 = await bal(c.token, OP), sold0 = await sold(c), inv0 = await bal(c.token, c.curve);
+  r = await withdraw(c, OP, UNLOCK, half, expM, expT);
+  check('at unlock: a PARTIAL withdrawal pays the beneficiary exactly the MOLI and tokens of those shares',
+    !r.failed && state.balanceOf(OP) - m0 === expM && (await bal(c.token, OP)) - t0 === expT, `${f(expM, 4)} MOLI + ${f(expT, 6)} tokens`);
+  check('  the unsold sale tokens are untouched (not withdrawable), and nothing stays in the curve',
+    await bal(c.token, c.curve) === inv0 && await sold(c) === sold0 && state.balanceOf(c.curve) < 10n ** 9n);
+  check('  the curve keeps the other half of its shares', await curveView(c, 'liquidityShares()') === shares - half);
+  // Buys still work after a partial withdrawal (the pool price did not move).
+  r = await at(UNLOCK + 60n, BOB, c.curve, sel('buy(uint256,uint256,uint256)') + word(0n) + word(MAXU) + word(MAXU), 100n * UNIT);
+  check('buys still work after a partial withdrawal, and their MOLI deepens the pool again', !r.failed && await curveView(c, 'liquidityShares()') > shares - half);
+  const all = await curveView(c, 'liquidityShares()');
+  r = await withdraw(c, OP, UNLOCK + 120n, all);
+  check('a FULL withdrawal takes every remaining share', !r.failed && await curveView(c, 'liquidityShares()') === 0n);
+  r = await at(UNLOCK + 180n, OP, c.curve, '0x', UNIT);
+  check('⛔ a plain MOLI send is still refused after unlock (only the pool, mid-withdrawal, may pay the curve)', r.failed);
+}
+{
+  // Re-entry from the beneficiary's own payout.
+  state = new State();
+  for (const a of [OP, ALICE, BOB, EVE]) state.credit(a, 10n ** 30n);
+  const ben = await deploy(EVE, BENREENTER.bytecode);
+  state.credit(ben, 10n ** 24n);
+  const c2 = await (async () => {
+    const saved = state;
+    const x = await setup({ supply: 1_000_000_000n * UNIT, p0: BOLSO_P0, bytecode: CURVE.bytecode });
+    return x;
+  })();
+  // setup() made a fresh state; redeploy the beneficiary into it and a curve naming it.
+  const ben2 = await deploy(EVE, BENREENTER.bytecode);
+  state.credit(ben2, 10n ** 24n);
+  const S = await curveView(c2, 'supplyForSale()');
+  const curve2 = await deploy(OP, CURVE.bytecode, addr(c2.token) + addr(c2.pool) + word(1_000_000n * UNIT) + word(BOLSO_P0) + addr(ben2) + word(UNLOCK));
+  await tx(OP, c2.token, sel('transfer(address,uint256)') + addr(curve2) + word(1_000_000n * UNIT));
+  await at(UNLOCK - 100n, EVE, ben2, sel('setCurve(address)') + addr(curve2));
+  const c3 = { ...c2, curve: curve2 };
+  const b = await at(UNLOCK - 50n, ALICE, curve2, sel('buy(uint256,uint256,uint256)') + word(0n) + word(MAXU) + word(MAXU), 500n * UNIT);
+  const sh = await view(curve2, sel('liquidityShares()'));
+  await at(UNLOCK, EVE, ben2, sel('setMode(uint256)') + word(1n));
+  let r = await at(UNLOCK + 1n, EVE, ben2, sel('pull(uint256)') + word(sh / 2n));
+  check('⛔ a beneficiary re-entering withdrawLiquidity() from its payout is refused; the withdrawal unwinds',
+    !b.failed && r.failed && await view(curve2, sel('liquidityShares()')) === sh);
+  await at(UNLOCK + 2n, EVE, ben2, sel('setMode(uint256)') + word(2n));
+  r = await at(UNLOCK + 3n, EVE, ben2, sel('pull(uint256)') + word(sh / 2n));
+  check('⛔ a beneficiary re-entering buy() from its payout is refused too', r.failed && await view(curve2, sel('liquidityShares()')) === sh);
+  await at(UNLOCK + 4n, EVE, ben2, sel('setMode(uint256)') + word(0n));
+  r = await at(UNLOCK + 5n, EVE, ben2, sel('pull(uint256)') + word(sh / 2n));
+  check('  and the same beneficiary, behaving, withdraws normally', !r.failed && await view(curve2, sel('liquidityShares()')) === sh - sh / 2n);
+  void ben; void S; void c3;
+}
+
 /* ========================================================== 5. no owner */
 console.log('\n5. nobody controls it\n');
 {
   c = await setup({ supply: 1_000_000n * UNIT, p0: UNIT });
   const fns = CURVE.abi.filter((x) => x.type === 'function');
   const writes = fns.filter((x) => !['view', 'pure'].includes(x.stateMutability)).map((x) => x.name);
-  check('the only state-changing function is buy()', writes.length === 1 && writes[0] === 'buy', writes.join(','));
+  check('the only state-changing functions are buy() and the time-locked withdrawLiquidity()',
+    writes.slice().sort().join() === 'buy,withdrawLiquidity', writes.join(','));
   for (const s of ['owner()', 'transferOwnership(address)', 'pause()', 'withdraw()', 'setPrice(uint256)']) {
     const r = await runEvm(state.clone(), { from: OP, to: c.curve, data: sel(s) + word(1n), gasLimit: GAS });
     check(`⛔ ${s} does not exist`, r.failed);

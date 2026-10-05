@@ -106,7 +106,7 @@ async function market({ fund = true, S = 950_000_000n * UNIT } = {}) {
   await tx(OP, token, sel('approve(address,uint256)') + addr32(pool) + word(seedT));
   const sq = (n) => { let x = n, y = (x + 1n) / 2n; while (y < x) { x = y; y = (x + n / x) / 2n; } return x; };
   await tx(OP, pool, sel('addLiquidity(uint256,uint256)') + word(seedT) + word(sq(seedM * seedT) - 1000n), seedM);
-  const curve = await deploy(OP, CURVE.bytecode + addr32(token) + addr32(pool) + word(S) + word(P0));
+  const curve = await deploy(OP, CURVE.bytecode + addr32(token) + addr32(pool) + word(S) + word(P0) + addr32(OP) + word(1792972800n));
   if (fund) await tx(OP, token, sel('transfer(address,uint256)') + addr32(curve) + word(S));
   return { token, pool, curve, symbol: 'TST' };
 }

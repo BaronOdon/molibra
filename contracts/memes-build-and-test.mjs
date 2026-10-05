@@ -22,6 +22,10 @@ const SWAP = join(ROOT, 'src/web/swap.html');
 const SOLC_DIR = process.env.SOLC_DIR;
 if (!SOLC_DIR) { console.error('set SOLC_DIR to a directory with solc@0.8.26 and ethers@6 installed'); process.exit(2); }
 const req = createRequire(join(SOLC_DIR, 'package.json'));
+// ⛔ Sources are compiled with LF line endings whatever the checkout has: the
+// source text is inside the metadata hash, so a CRLF checkout (core.autocrlf)
+// would otherwise produce DIFFERENT bytecode from the same commit.
+const lf = (text) => text.split(String.fromCharCode(13)).join('');
 const solc = req('solc');
 const { ethers } = req('ethers');
 
@@ -40,7 +44,7 @@ check('compiler is 0.8.26, like bridge/* and contracts/*', solc.version().starts
 const SOURCE_KEY = 'contracts/MemeToken.sol';
 const input = {
   language: 'Solidity',
-  sources: { [SOURCE_KEY]: { content: readFileSync(join(HERE, 'MemeToken.sol'), 'utf8') } },
+  sources: { [SOURCE_KEY]: { content: lf(readFileSync(join(HERE, 'MemeToken.sol'), 'utf8')) } },
   settings: {
     optimizer: { enabled: true, runs: 200 },
     // ⛔ paris: a Cancun target emits PUSH0/MCOPY and dies "invalid instruction" on
@@ -79,7 +83,7 @@ writeFileSync(join(HERE, 'etherscan', 'MemeToken.standard-input.json'), JSON.str
 
 /* ------------------------------------------------------- MoliSaleCurve */
 const CURVE_KEY = 'contracts/MoliSaleCurve.sol';
-const curveInput = { ...input, sources: { [CURVE_KEY]: { content: readFileSync(join(HERE, 'MoliSaleCurve.sol'), 'utf8') } } };
+const curveInput = { ...input, sources: { [CURVE_KEY]: { content: lf(readFileSync(join(HERE, 'MoliSaleCurve.sol'), 'utf8')) } } };
 const curveOut = JSON.parse(solc.compile(JSON.stringify(curveInput)));
 for (const e of curveOut.errors ?? []) {
   if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
@@ -101,16 +105,22 @@ writeFileSync(join(HERE, 'etherscan', 'MoliSaleCurve.standard-input.json'), JSON
 {
   // Test-only attacker for the reentrancy check in test/memes-curve.mjs.
   const atkOut = JSON.parse(solc.compile(JSON.stringify({ ...input,
-    sources: { 'contracts/test/CurveReenter.sol': { content: readFileSync(join(HERE, 'test', 'CurveReenter.sol'), 'utf8') } } })));
+    sources: { 'contracts/test/CurveReenter.sol': { content: lf(readFileSync(join(HERE, 'test', 'CurveReenter.sol'), 'utf8')) } } })));
   for (const e of atkOut.errors ?? []) if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
   const a = atkOut.contracts['contracts/test/CurveReenter.sol'].CurveReenter;
   writeFileSync(join(HERE, 'artifacts', 'CurveReenter.test.json'), JSON.stringify({ abi: a.abi, bytecode: '0x' + a.evm.bytecode.object }, null, 2) + '\n');
   // The auditor's sandwich PoC (moves the pool from inside the refund callback).
   const swOut = JSON.parse(solc.compile(JSON.stringify({ ...input,
-    sources: { 'contracts/test/CurveSandwich.sol': { content: readFileSync(join(HERE, 'test', 'CurveSandwich.sol'), 'utf8') } } })));
+    sources: { 'contracts/test/CurveSandwich.sol': { content: lf(readFileSync(join(HERE, 'test', 'CurveSandwich.sol'), 'utf8')) } } })));
   for (const e of swOut.errors ?? []) if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
   const sw = swOut.contracts['contracts/test/CurveSandwich.sol'].Sandwich;
   writeFileSync(join(HERE, 'artifacts', 'CurveSandwich.test.json'), JSON.stringify({ abi: sw.abi, bytecode: '0x' + sw.evm.bytecode.object }, null, 2) + '\n');
+  // A beneficiary that re-enters withdrawLiquidity() / buy() from its payout.
+  const brOut = JSON.parse(solc.compile(JSON.stringify({ ...input,
+    sources: { 'contracts/test/CurveBeneficiaryReenter.sol': { content: lf(readFileSync(join(HERE, 'test', 'CurveBeneficiaryReenter.sol'), 'utf8')) } } })));
+  for (const e of brOut.errors ?? []) if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
+  const br = brOut.contracts['contracts/test/CurveBeneficiaryReenter.sol'].CurveBeneficiaryReenter;
+  writeFileSync(join(HERE, 'artifacts', 'CurveBeneficiaryReenter.test.json'), JSON.stringify({ abi: br.abi, bytecode: '0x' + br.evm.bytecode.object }, null, 2) + '\n');
 }
 const vestingBytecode = JSON.parse(readFileSync(join(HERE, 'artifacts', 'trust.json'), 'utf8')).contracts.TokenVesting.bytecode;
 
