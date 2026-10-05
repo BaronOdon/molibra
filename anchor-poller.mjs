@@ -25,6 +25,7 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { keccak256, toHex } from './src/crypto.js';
+import { DEFAULT_ANCHOR_PUBLISHERS, parsePublishers } from './src/anchor.js';
 
 const args = Object.fromEntries(process.argv.slice(2).flatMap((a, i, all) =>
   a.startsWith('--') ? [[a.slice(2), all[i + 1]?.startsWith('--') === false ? all[i + 1] : true]] : []));
@@ -34,6 +35,10 @@ const CONTRACT = (args.contract ?? '0x2beba454d810eac41c6778e351f81d37a07ae03b')
 const DATADIR = args.datadir ?? './data';
 const OUT = join(DATADIR, 'anchors.json');
 const EVERY = Number(args.every ?? 300) * 1000;
+// ⛔⛔ MolibraAnchor is permissionless. Only these publishers' anchors are
+//    written; the node filters again (src/anchor.js), this is defence in depth.
+const PUBLISHERS = new Set(args.publishers && args.publishers !== true
+  ? parsePublishers(args.publishers) : DEFAULT_ANCHOR_PUBLISHERS);
 
 const sel = (sig) => toHex(keccak256(new TextEncoder().encode(sig))).slice(0, 10);
 const word = (v) => BigInt(v).toString(16).padStart(64, '0');
@@ -68,12 +73,17 @@ async function poll() {
     const height = await callUint(SEL.heights + word(i));
     const w = String(await call(SEL.anchors + word(height))).replace(/^0x/, '').match(/.{64}/g) ?? [];
     if (w.length < 4) continue;
+    const publisher = '0x' + w[3].slice(24);
+    if (!PUBLISHERS.has(publisher)) {
+      console.warn(`[anchor-poller] IGNORED anchor at height ${height} from non-allowlisted publisher ${publisher}`);
+      continue;
+    }
     anchors.push({
       height: height.toString(),
       blockHash: '0x' + w[0],
       cumulativeWork: BigInt('0x' + w[1]).toString(),
       ethBlock: BigInt('0x' + w[2]).toString(),
-      publisher: '0x' + w[3].slice(24),
+      publisher,
     });
   }
 

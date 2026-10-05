@@ -481,6 +481,9 @@ export class Node {
       }
       if (!payload.blocks?.length) break;
       let sinceYield = 0;
+      // Blocks this page ADDED and not yet written. Tracked separately from
+      // sinceYield so the end-of-page write below happens only when needed.
+      let unpersisted = 0;
       for (const serialized of payload.blocks) {
         if (Number(serialized.header.number) === 0) continue; // genesis is ours already
         if (this.chain.blockByHash(serialized.hash)) continue;
@@ -493,7 +496,7 @@ export class Node {
         // anyway. Same lesson as load(), from the acquiring side rather than
         // the reading side.
         const result = await this.chain.appendSerialized(serialized, { persist: false });
-        if (result.accepted) accepted++;
+        if (result.accepted) { accepted++; unpersisted++; }
         // Yield periodically. Verifying a block re-executes every transaction
         // in it, and doing a whole page without pause means the node answers
         // nothing at all while it catches up - the same lesson as the mining
@@ -502,13 +505,17 @@ export class Node {
         // pointed at it.
         if (++sinceYield >= SYNC_BATCH) {
           sinceYield = 0;
-          this.chain.persist();
+          if (unpersisted) { this.chain.persist(); unpersisted = 0; }
           await new Promise((resolve) => setImmediate(resolve));
         }
       }
       // Whatever the last partial batch acquired is durable before the next
       // page is requested, so progress is never lost a page at a time.
-      this.chain.persist();
+      // ⛔⛔ ONLY if something was added. persist() rewrites the whole chain file
+      //    synchronously (~102 MB on node 1), and a steady-state sync tick that
+      //    learned nothing still did it every 10 s - the event loop blocked on
+      //    disk while the RPC queue filled.
+      if (unpersisted) { this.chain.persist(); unpersisted = 0; }
       const last = Number(payload.to ?? cursor);
       if (last < cursor) break; // no progress; stop rather than spin
       cursor = last + 1;

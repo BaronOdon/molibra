@@ -35,6 +35,8 @@
  * generous is the correct direction to fail.
  */
 
+import { isIP } from 'node:net';
+
 /** Sustained requests per second, and the burst a client may spend at once. */
 export const DEFAULT_REFILL_PER_SECOND = 25;
 export const DEFAULT_CAPACITY = 200;
@@ -70,11 +72,29 @@ export const METHOD_COSTS = {
   eth_estimateGas: 10,
   eth_getLogs: 10,
   eth_sendRawTransaction: 5,
+  // Builds arrays of blockCount entries; blockCount is capped at
+  // MAX_FEE_HISTORY_BLOCKS (src/rpc.js), and the cost still reflects it.
+  eth_feeHistory: 5,
 };
 
+/**
+ * ⛔⛔ The path a cost is computed from must be the path the ROUTER will see.
+ * handleAudit routes on `new URL(req.url).pathname`, which resolves dot
+ * segments - so `/molibra/./blocks` was charged 1 here and served as
+ * `/molibra/blocks` (cost 20) there. Normalise the same way, then lower-case.
+ */
+export function normalisePath(rawUrl) {
+  try {
+    return new URL(String(rawUrl ?? '/'), 'http://localhost').pathname.toLowerCase();
+  } catch {
+    return String(rawUrl ?? '/').split('?')[0].toLowerCase();
+  }
+}
+
 export function costOfPath(path) {
+  const p = normalisePath(path);
   for (const [prefix, cost] of ROUTE_COSTS) {
-    if (String(path).startsWith(prefix)) return cost;
+    if (p.startsWith(prefix)) return cost;
   }
   return 1;
 }
@@ -173,16 +193,26 @@ export class RateLimiter {
   }
 }
 
+/** Socket addresses that are the local reverse proxy (Caddy) and nothing else. */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
 /**
  * The key a request is limited under.
  *
- * ⛔ The socket address, deliberately — NOT `X-Forwarded-For`. That header is
- * set by whoever sent the request when there is no trusted proxy in front, so
- * honouring it would let an attacker mint a fresh identity per request and
- * turn the limiter off by asking. If this node is ever put behind a real proxy
- * this becomes wrong in the other direction, and that is a deliberate
- * trade-off to revisit THEN, with the proxy in hand.
+ * ⛔ The socket address - EXCEPT when the socket is loopback, i.e. the request
+ * came through the local Caddy. Then every client in the world shared ONE
+ * bucket (127.0.0.1), so the limiter either throttled everybody or nobody,
+ * and node 1's outage came through exactly that hole. From loopback only, the
+ * RIGHTMOST X-Forwarded-For entry is used: it is the one the trusted hop
+ * (Caddy) wrote; anything to its left was supplied by the client and is
+ * ignored. From any other address the header is ignored entirely, because
+ * then whoever sent the request wrote it.
  */
 export function clientKey(req) {
-  return req?.socket?.remoteAddress ?? 'unknown';
+  const remote = req?.socket?.remoteAddress ?? 'unknown';
+  if (!LOOPBACK.has(remote)) return remote;
+  const xff = req?.headers?.['x-forwarded-for'];
+  if (!xff) return remote;
+  const last = String(Array.isArray(xff) ? xff[xff.length - 1] : xff).split(',').pop().trim();
+  return isIP(last) ? last : remote;
 }

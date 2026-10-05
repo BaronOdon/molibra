@@ -46,6 +46,14 @@ export class Chain {
     // before anchoring existed - so this is additive, never a silent rule
     // change under an operator who did not ask for one. See src/anchor.js.
     this.anchors = limits.anchors ?? null;
+    // ⛔⛔ An anchor may only raise the floor onto a block THIS node holds at
+    //    that height (src/anchor.js binding()). Read lazily: canonical changes.
+    if (this.anchors?.attachChain) {
+      this.anchors.attachChain({
+        height: () => this.height,
+        hashAt: (h) => this.blockByNumber(h)?.hash ?? null,
+      });
+    }
     this.maxMempoolSize = limits.maxMempoolSize ?? MAX_MEMPOOL_SIZE;
     this.maxMempoolPerSender = limits.maxMempoolPerSender ?? MAX_MEMPOOL_PER_SENDER;
     this.maxOrphans = limits.maxOrphans ?? MAX_ORPHANS;

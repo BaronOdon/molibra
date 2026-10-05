@@ -22,7 +22,10 @@ import { keccak256, toHex } from '../src/crypto.js';
 import { MOLI_BURN_TAG } from '../src/moliburn.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const page = readFileSync(join(ROOT, 'src/web/bridgedmoli.html'), 'utf8');
+const page = readFileSync(join(ROOT, 'src/web/bridgedmoli.html'), 'utf8')
+  // Line-ending agnostic: a Windows checkout has CRLF, and a check below looks
+  // for a literal '\n'. The served page is identical either way.
+  .replace(/\r\n/g, '\n');
 const artifact = JSON.parse(readFileSync(join(ROOT, 'bridge/artifacts/BridgedMoli.json'), 'utf8'));
 
 let pass = 0, fail = 0;

@@ -45,10 +45,16 @@ async function makeNode(args) {
   let anchors = null;
   let feed = null;
   if (args.anchors || args['anchor-rpc']) {
-    const { AnchorStore } = await import('./anchor.js');
+    const { AnchorStore, DEFAULT_ANCHOR_PUBLISHERS, parsePublishers } = await import('./anchor.js');
     const { AnchorFeed } = await import('./anchorfeed.js');
     const { join: joinPath } = await import('node:path');
-    anchors = new AnchorStore({});
+    // ⛔⛔ Only allowlisted publishers' anchors are believed. MolibraAnchor is
+    //    permissionless; one outsider's anchor above the tip used to halt the node.
+    const publishers = args['anchor-publishers'] && args['anchor-publishers'] !== true
+      ? parsePublishers(args['anchor-publishers'])
+      : [...DEFAULT_ANCHOR_PUBLISHERS];
+    anchors = new AnchorStore({ publishers });
+    console.log(`  anchor publishers: ${publishers.join(', ')}`);
     // ⛔ --anchor-rpc is accepted so an existing unit file keeps working, but it
     //    no longer means "poll from in here" - that could not work in a mining
     //    process. Anchors come from the file anchor-poller.mjs writes.

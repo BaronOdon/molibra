@@ -64,6 +64,32 @@ export const ETH_CONFIRMATIONS = 96;
  *  publisher keeps, and `anchorHealth` reports whether it is being kept. */
 export const TARGET_ANCHOR_INTERVAL = 100;
 
+/**
+ * ⛔⛔ The publishers whose anchors this node believes, by default.
+ *
+ * MolibraAnchor is permissionless behind a WSRO bond, and WSRO has no market,
+ * so the bond is a commitment device and not collateral (see the header). An
+ * anchor from anybody else is therefore an unauthenticated sentence, and one
+ * such sentence at a height above the tip used to raise the floor above the
+ * head and refuse every new block - a network halt for the price of a bond.
+ * Only these keys (the two operator publishers) are believed unless the
+ * operator names others with --anchor-publishers.
+ */
+export const DEFAULT_ANCHOR_PUBLISHERS = Object.freeze([
+  '0x8d1f2713eb83e4d55fbeda47b26fd08ec9170e14',
+  '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a',
+]);
+
+/** Parse a comma-separated publisher list. Throws on anything that is not an address. */
+export function parsePublishers(list) {
+  const out = String(list ?? '').split(',').map((p) => p.trim().toLowerCase()).filter(Boolean);
+  if (!out.length) throw new Error('an anchor publisher allowlist cannot be empty');
+  for (const p of out) {
+    if (!/^0x[0-9a-f]{40}$/.test(p)) throw new Error(`not an address: ${p}`);
+  }
+  return out;
+}
+
 /** The bytes a publisher signs, and the contract stores. One encoder, so the
  *  two sides can never disagree about what was attested. */
 export function anchorDigest({ height, blockHash, cumulativeWork }) {
@@ -104,8 +130,24 @@ function normalize(raw) {
  * network.
  */
 export class AnchorStore {
-  constructor({ ethConfirmations = ETH_CONFIRMATIONS } = {}) {
+  /**
+   * @param {object} [o]
+   * @param {number|bigint} [o.ethConfirmations]
+   * @param {string[]|null} [o.publishers] allowlist; defaults to
+   *   DEFAULT_ANCHOR_PUBLISHERS. `null` disables the allowlist and exists ONLY
+   *   for unit tests of the floor rule itself - the CLI never passes it.
+   */
+  constructor({ ethConfirmations = ETH_CONFIRMATIONS, publishers = DEFAULT_ANCHOR_PUBLISHERS } = {}) {
     this.ethConfirmations = BigInt(ethConfirmations);
+    this.publishers = publishers === null
+      ? null
+      : new Set([...publishers].map((p) => String(p).toLowerCase()));
+    /** Anchors dropped because their publisher is not allowlisted. */
+    this.ignoredPublishers = 0;
+    /** The local chain, once attached: { height(): bigint, hashAt(h): string|null }. */
+    this.local = null;
+    /** Keys already warned about, so a bad anchor is logged loudly ONCE, not every tick. */
+    this.warned = new Set();
     /** height (as string) -> anchor. One per height; conflicts are faults. */
     this.byHeight = new Map();
     /** Equivocations found: the same height attested two different ways. */
@@ -158,6 +200,15 @@ export class AnchorStore {
    */
   add(raw) {
     const anchor = normalize(raw);
+    // ⛔⛔ Allowlist BEFORE equivocation detection: an outsider's anchor must not
+    //    even be able to fault (and so un-bind) a height a real publisher anchored.
+    if (this.publishers && !this.publishers.has(anchor.publisher ?? '')) {
+      this.ignoredPublishers++;
+      this.warnOnce(`pub:${anchor.publisher}:${anchor.height}`,
+        `[molibra] ANCHOR IGNORED: publisher ${anchor.publisher ?? '(none)'} is not on the `
+        + `allowlist (height ${anchor.height}, hash ${anchor.blockHash.slice(0, 18)}...)`);
+      return { added: false, fault: null, ignored: 'publisher not on the allowlist' };
+    }
     const fault = this.detectEquivocation(anchor);
     if (fault) return { added: false, fault };
 
@@ -179,13 +230,67 @@ export class AnchorStore {
     return { added: true, fault: null, anchor };
   }
 
-  /** Every anchor buried deeply enough on Ethereum to be believed. */
-  binding() {
+  warnOnce(key, message) {
+    if (this.warned.has(key)) return;
+    this.warned.add(key);
+    console.warn(message);
+  }
+
+  /**
+   * Attach the node's own chain. From then on an anchor can only bind a block
+   * this node actually holds, canonically, at that height (see `binding`).
+   * @param {{ height: () => bigint, hashAt: (h: bigint) => (string|null) }} view
+   */
+  attachChain(view) {
+    this.local = view;
+    return this;
+  }
+
+  /** Every non-faulted anchor buried deeply enough on Ethereum to be believed. */
+  attested() {
     const faulted = new Set(this.equivocations.map((e) => e.height));
     return [...this.byHeight.values()]
       .filter((a) => !faulted.has(a.height.toString()))
       .filter((a) => this.ethHead - a.ethBlock >= this.ethConfirmations)
       .sort((a, b) => (a.height < b.height ? -1 : 1));
+  }
+
+  /**
+   * ⛔⛔ The anchors that may raise the floor.
+   *
+   * An attested anchor binds ONLY if the anchored height is at or below the
+   * local tip AND the local canonical block at that height has exactly the
+   * anchored hash. Anything else is ignored, loudly, once:
+   *
+   *   - above the tip: a floor above the head refuses every extension of the
+   *     head (the extension's fork point IS the head), which halts the node;
+   *   - a different hash: the floor would forbid the node from ever moving to
+   *     the anchored chain, so it would pin the node to the wrong history.
+   *
+   * Ignoring can only LOWER the floor, never raise it, so this only ever
+   * removes refusals; it never adds one. With no chain attached (unit tests of
+   * the rule) every attested anchor binds, as before.
+   */
+  binding() {
+    const attested = this.attested();
+    if (!this.local) return attested;
+    const tip = BigInt(this.local.height());
+    return attested.filter((a) => {
+      if (a.height > tip) {
+        this.warnOnce(`tip:${a.height}:${a.blockHash}`,
+          `[molibra] ANCHOR NOT BINDING: height ${a.height} is above the local tip ${tip}; `
+          + 'it cannot raise the floor until this node holds that block');
+        return false;
+      }
+      const mine = this.local.hashAt(a.height);
+      if (!mine || mine.toLowerCase() !== a.blockHash) {
+        this.warnOnce(`hash:${a.height}:${a.blockHash}:${mine}`,
+          `[molibra] ANCHOR NOT BINDING: height ${a.height} anchors ${a.blockHash} but the local `
+          + `block is ${mine ?? '(none)'} - ignored for the floor, reported as a disagreement`);
+        return false;
+      }
+      return true;
+    });
   }
 
   /**
@@ -237,7 +342,9 @@ export class AnchorStore {
    */
   disagreements(hashAtHeight) {
     const out = [];
-    for (const a of this.binding()) {
+    // attested(), not binding(): a mismatched anchor never binds, and it is
+    // exactly the one that must still be reported.
+    for (const a of this.attested()) {
       const mine = hashAtHeight(a.height);
       if (mine && mine.toLowerCase() !== a.blockHash) {
         out.push({

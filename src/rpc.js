@@ -48,6 +48,7 @@ function currentCommit() {
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 import { poolHistoryCache } from './poolhistory.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
+import { checkPeerUrl } from './netguard.js';
 
 // Sibling node state for /molibra/nodes, refreshed at most every 5s. A status
 // page polling every few seconds must not turn into a fetch storm against the
@@ -348,7 +349,12 @@ export function createRpcHandlers(node) {
     },
 
     eth_feeHistory: ([count]) => {
-      const blocks = Number(BigInt(count ?? '0x1'));
+      // ⛔ Capped. An uncapped blockCount let one request allocate arrays of any
+      //    length (0xffffffff -> RangeError, or gigabytes just below it).
+      let requested;
+      try { requested = BigInt(count ?? '0x1'); } catch { throw new RpcError(INVALID_PARAMS, 'blockCount must be a quantity'); }
+      if (requested < 1n) throw new RpcError(INVALID_PARAMS, 'blockCount must be at least 1');
+      const blocks = Number(requested > BigInt(MAX_FEE_HISTORY_BLOCKS) ? BigInt(MAX_FEE_HISTORY_BLOCKS) : requested);
       return {
         oldestBlock: toQuantity(chain.height),
         baseFeePerGas: Array(blocks + 1).fill(toQuantity(0n)),
@@ -358,6 +364,24 @@ export function createRpcHandlers(node) {
     },
   };
 }
+
+/** geth's own cap on eth_feeHistory blockCount. */
+export const MAX_FEE_HISTORY_BLOCKS = 1024;
+
+/**
+ * ⛔⛔ Socket-level limits. Node 1 went down under ~11.5k POSTs from 627 proxy
+ * IPs: with no request/headers timeout and no connection cap, slow and idle
+ * sockets piled up until the accept queue overflowed. Overridable by env for
+ * an operator who measures otherwise.
+ */
+export const SERVER_LIMITS = {
+  requestTimeout: Number(process.env.MOLIBRA_REQUEST_TIMEOUT_MS ?? 30_000),
+  headersTimeout: Number(process.env.MOLIBRA_HEADERS_TIMEOUT_MS ?? 15_000),
+  // Shorter than headersTimeout; Caddy's upstream keepalive must be shorter
+  // still (docs/HARDENING-DEPLOY.md) or it reuses a socket the node just closed.
+  keepAliveTimeout: Number(process.env.MOLIBRA_KEEPALIVE_TIMEOUT_MS ?? 10_000),
+  maxConnections: Number(process.env.MOLIBRA_MAX_CONNECTIONS ?? 512),
+};
 
 export function startRpcServer(node, { host, port }) {
   const handlers = createRpcHandlers(node);
@@ -400,8 +424,9 @@ export function startRpcServer(node, { host, port }) {
     if (req.method === 'GET') {
       // Cost is per ROUTE: a state proof rebuilds the whole Merkle tree and is
       // not the same unit of work as reading a balance.
-      const path = (req.url ?? '/').split('?')[0];
-      const verdict = limiter.take(clientKey(req), costOfPath(path));
+      // ⛔ costOfPath normalises exactly as the router does: /molibra/./blocks
+      //    used to be charged 1 and served as /molibra/blocks (cost 20).
+      const verdict = limiter.take(clientKey(req), costOfPath(req.url ?? '/'));
       if (!verdict.ok) return refuse(res, verdict.retryAfter);
       // ⛔ awaited, and its failure answered. An unhandled rejection here would
       // leave the socket open until the client timed out, with nothing logged.
@@ -413,6 +438,13 @@ export function startRpcServer(node, { host, port }) {
     // Bounded, and bounded WHILE reading rather than after. A body is
     // attacker-controlled and arrives in pieces; the only moment at which
     // refusing it costs nothing is before the next piece is buffered.
+    // ⛔ A declared length over the cap is refused before a byte is read.
+    if (Number(req.headers['content-length'] ?? 0) > MAX_REQUEST_BYTES) {
+      res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' });
+      res.end(JSON.stringify({ error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` }));
+      req.resume();
+      return;
+    }
     let body = '';
     let size = 0;
     let oversized = false;
@@ -483,6 +515,11 @@ export function startRpcServer(node, { host, port }) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
   });
+
+  server.requestTimeout = SERVER_LIMITS.requestTimeout;
+  server.headersTimeout = SERVER_LIMITS.headersTimeout;
+  server.keepAliveTimeout = SERVER_LIMITS.keepAliveTimeout;
+  server.maxConnections = SERVER_LIMITS.maxConnections;
 
   return new Promise((resolve) => {
     server.listen(port, host, () => resolve(server));
@@ -1551,9 +1588,13 @@ async function handlePeerPost(node, path, payload, res) {
      * Announcing is an optimisation; refusing one costs nothing but latency.
      */
     if (path === '/molibra/announce') {
-      const url = String(payload?.url ?? '').replace(/\/$/, '');
-      if (!/^https?:\/\/[^\s/]+$/i.test(url)) {
-        return json(res, 400, { error: 'url must be http(s)://host:port' });
+      const claimed = String(payload?.url ?? '').replace(/\/$/, '');
+      if (claimed && claimed === node.rpcUrl) return json(res, 200, { peers: node.peers.size, self: true });
+      // ⛔⛔ SSRF: an announced URL is fetched from on a timer. Only public
+      //    http(s) hosts; see src/netguard.js for what is refused and why.
+      let url;
+      try { url = await checkPeerUrl(claimed); } catch (error) {
+        return json(res, 400, { error: error.message });
       }
       if (url === node.rpcUrl) return json(res, 200, { peers: node.peers.size, self: true });
       if (node.peers.has(url)) return json(res, 200, { peers: node.peers.size, known: true });

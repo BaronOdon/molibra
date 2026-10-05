@@ -22,7 +22,7 @@ import vm from 'node:vm';
 import { keccak256, toHex, fromHex } from '../src/crypto.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const page = readFileSync(join(ROOT, 'src/web/buy.html'), 'utf8');
+const page = readFileSync(join(ROOT, 'src/web/buy.html'), 'utf8').replace(/\r\n/g, '\n'); // CRLF-agnostic (Windows checkout)
 const rpc = readFileSync(join(ROOT, 'src/rpc.js'), 'utf8');
 
 let pass = 0, fail = 0, skip = 0;

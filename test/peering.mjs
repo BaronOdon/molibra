@@ -53,10 +53,10 @@ try {
   const answer = await (await fetch('http://127.0.0.1:18583/molibra/announce', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: 'http://10.0.0.9:8545' }),
+    body: JSON.stringify({ url: 'http://203.0.113.9:8545' }),
   })).json();
 
-  check('the announcement is accepted', answer.added === 'http://10.0.0.9:8545', JSON.stringify(answer));
+  check('the announcement is accepted', answer.added === 'http://203.0.113.9:8545', JSON.stringify(answer));
   check('  and the miner now has a peer', miner.peers.size === 1);
   check('  ⭐ and it is now FOLLOWING, without a restart', Boolean(miner.syncTimer));
   check('  which the answer says out loud', answer.following === true);

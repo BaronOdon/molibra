@@ -19,7 +19,7 @@ import vm from 'node:vm';
 import { keccak256, toHex } from '../src/crypto.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const page = readFileSync(join(ROOT, 'src/web/pay.html'), 'utf8');
+const page = readFileSync(join(ROOT, 'src/web/pay.html'), 'utf8').replace(/\r\n/g, '\n'); // CRLF-agnostic (Windows checkout)
 const qrSrc = readFileSync(join(ROOT, 'src/web/qr.js'), 'utf8');
 const pool = readFileSync(join(ROOT, 'contracts/MolibraPool.sol'), 'utf8');
 const rpc = readFileSync(join(ROOT, 'src/rpc.js'), 'utf8');

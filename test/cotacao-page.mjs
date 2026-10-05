@@ -32,7 +32,7 @@ import { keccak256, toHex, fromHex } from '../src/crypto.js';
 import { poolHistory, POOL_EVENTS } from '../src/poolhistory.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const read = (p) => readFileSync(join(ROOT, p), 'utf8');
+const read = (p) => readFileSync(join(ROOT, p), 'utf8').replace(/\r\n/g, '\n'); // CRLF-agnostic (Windows checkout)
 const page = read('src/web/cotacao.html');
 const rpc = read('src/rpc.js');
 

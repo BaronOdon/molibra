@@ -32,7 +32,7 @@ check('a different work claim is a different digest',
 
 // --- confirmations: an unconfirmed anchor binds nothing ---------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   s.add({ height: 100, blockHash: H(0xaa), cumulativeWork: 5000, ethBlock: 1000 });
   s.setEthereumHead(1000n + BigInt(ETH_CONFIRMATIONS) - 1n);
   check('an anchor one block short of confirmation does not bind',
@@ -47,7 +47,7 @@ check('a different work claim is a different digest',
 
 // --- ⛔⛔ the inversion: an anchor beats work -------------------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   s.add({ height: 500, blockHash: H(0xcc), cumulativeWork: 90000, ethBlock: 2000 });
   s.setEthereumHead(2000n + BigInt(ETH_CONFIRMATIONS));
 
@@ -64,7 +64,7 @@ check('a different work claim is a different digest',
 
 // --- ⛔ equivocation ---------------------------------------------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   s.add({ height: 300, blockHash: H(0x11), cumulativeWork: 7000, ethBlock: 500, publisher: '0xPUB' });
   const second = s.add({ height: 300, blockHash: H(0x22), cumulativeWork: 7000, ethBlock: 501, publisher: '0xPUB' });
   check('the same height attested two ways is refused', !second.added && !!second.fault);
@@ -84,7 +84,7 @@ check('a different work claim is a different digest',
 
 // --- work must increase with height -----------------------------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   s.add({ height: 100, blockHash: H(1), cumulativeWork: 9000, ethBlock: 10 });
   const r = s.add({ height: 200, blockHash: H(2), cumulativeWork: 8000, ethBlock: 20 });
   check('more height with less work is refused', !r.added,
@@ -95,7 +95,7 @@ check('a different work claim is a different digest',
 
 // --- ⛔ disagreement with the local chain ------------------------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   s.add({ height: 700, blockHash: H(0xdd), cumulativeWork: 100000, ethBlock: 3000 });
   s.setEthereumHead(3000n + BigInt(ETH_CONFIRMATIONS));
 
@@ -111,7 +111,7 @@ check('a different work claim is a different digest',
 
 // --- health: the number to publish instead of the word "final" --------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   check('with no anchors, ALL history is exposed',
     s.anchorHealth(1000).blocksExposed === '1000'
     && s.anchorHealth(1000).finalizedHeight === null
@@ -131,7 +131,7 @@ check('a different work claim is a different digest',
 
 // --- Ethereum reorging under us ---------------------------------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   s.setEthereumHead(5000);
   s.setEthereumHead(4990);
   check('Ethereum going backwards is recorded, not swallowed',
@@ -140,7 +140,7 @@ check('a different work claim is a different digest',
 
 // --- malformed anchors ------------------------------------------------------
 {
-  const s = new AnchorStore();
+  const s = new AnchorStore({ publishers: null });
   const bad = (raw) => { try { s.add(raw); return false; } catch { return true; } };
   check('an anchor needs a block hash', bad({ height: 1, cumulativeWork: 1, ethBlock: 1 }));
   check('an anchor needs positive work',

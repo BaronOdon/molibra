@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { keccak256, toHex } from '../src/crypto.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const page = readFileSync(join(ROOT, 'src/web/swap.html'), 'utf8');
+// Line-ending agnostic: a Windows checkout has CRLF, and grab() below matches '\n}\n'.
+const page = readFileSync(join(ROOT, 'src/web/swap.html'), 'utf8').replace(/\r\n/g, '\n');
 const pool = readFileSync(join(ROOT, 'contracts/MolibraPool.sol'), 'utf8');
 
 let pass = 0, fail = 0;
