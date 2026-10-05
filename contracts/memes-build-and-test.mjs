@@ -77,6 +77,37 @@ writeFileSync(join(HERE, 'artifacts', 'MemeToken.json'), JSON.stringify({
 mkdirSync(join(HERE, 'etherscan'), { recursive: true });
 writeFileSync(join(HERE, 'etherscan', 'MemeToken.standard-input.json'), JSON.stringify(input, null, 2) + '\n');
 
+/* ------------------------------------------------------- MoliSaleCurve */
+const CURVE_KEY = 'contracts/MoliSaleCurve.sol';
+const curveInput = { ...input, sources: { [CURVE_KEY]: { content: readFileSync(join(HERE, 'MoliSaleCurve.sol'), 'utf8') } } };
+const curveOut = JSON.parse(solc.compile(JSON.stringify(curveInput)));
+for (const e of curveOut.errors ?? []) {
+  if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
+}
+const curveArt = curveOut.contracts[CURVE_KEY].MoliSaleCurve;
+const curveBytecode = '0x' + curveArt.evm.bytecode.object;
+const curveRuntime = '0x' + curveArt.evm.deployedBytecode.object;
+check('MoliSaleCurve compiles for paris', true, `${(curveRuntime.length - 2) / 2} runtime bytes`);
+check('  and contains no PUSH0 at an opcode position', !hasPush0(curveRuntime));
+const curveFns = curveArt.abi.filter((f) => f.type === 'function').map((f) => f.name);
+for (const bad of ['owner', 'withdraw', 'removeLiquidity', 'pause', 'setPrice', 'sweep', 'transferOwnership', 'sell']) {
+  check(`MoliSaleCurve has NO ${bad}()`, !curveFns.includes(bad));
+}
+writeFileSync(join(HERE, 'artifacts', 'MoliSaleCurve.json'), JSON.stringify({
+  contractName: 'MoliSaleCurve', compiler: solc.version(), evmVersion: 'paris',
+  optimizer: { enabled: true, runs: 200 }, abi: curveArt.abi, bytecode: curveBytecode, deployedBytecode: curveRuntime,
+}, null, 2) + '\n');
+writeFileSync(join(HERE, 'etherscan', 'MoliSaleCurve.standard-input.json'), JSON.stringify(curveInput, null, 2) + '\n');
+{
+  // Test-only attacker for the reentrancy check in test/memes-curve.mjs.
+  const atkOut = JSON.parse(solc.compile(JSON.stringify({ ...input,
+    sources: { 'contracts/test/CurveReenter.sol': { content: readFileSync(join(HERE, 'test', 'CurveReenter.sol'), 'utf8') } } })));
+  for (const e of atkOut.errors ?? []) if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
+  const a = atkOut.contracts['contracts/test/CurveReenter.sol'].CurveReenter;
+  writeFileSync(join(HERE, 'artifacts', 'CurveReenter.test.json'), JSON.stringify({ abi: a.abi, bytecode: '0x' + a.evm.bytecode.object }, null, 2) + '\n');
+}
+const vestingBytecode = JSON.parse(readFileSync(join(HERE, 'artifacts', 'trust.json'), 'utf8')).contracts.TokenVesting.bytecode;
+
 /* --------------------------------------------------------------- stamp */
 let page = readFileSync(PAGE, 'utf8');
 const swap = readFileSync(SWAP, 'utf8');
@@ -87,65 +118,33 @@ check('memes.html has a FACTORY_BYTECODE line', FB_RE.test(page));
 // ⛔ The factory is the one swap.html already deploys - one build, one source.
 // A second compilation with other settings would be a second factory nobody reviewed.
 const swapFactory = swap.match(FB_RE)[0];
-const BA_RE = /const BRIDGED_BYTECODE = '[^']*';/;
-const bridgedBytecode = JSON.parse(readFileSync(join(HERE, 'artifacts', 'pool.json'), 'utf8')).BridgedAsset.bytecode;
-check('memes.html has a BRIDGED_BYTECODE line', BA_RE.test(page));
 if (!process.argv.includes('--no-stamp')) {
   page = page.replace(BC_RE, `const MEME_BYTECODE = '${bytecode}';`).replace(FB_RE, swapFactory)
-    .replace(BA_RE, `const BRIDGED_BYTECODE = '${bridgedBytecode}';`);
+    .replace(/const CURVE_BYTECODE = '[^']*';/, `const CURVE_BYTECODE = '${curveBytecode}';`)
+    .replace(/const VESTING_BYTECODE = '[^']*';/, `const VESTING_BYTECODE = '${vestingBytecode}';`);
   writeFileSync(PAGE, page);
 }
 page = readFileSync(PAGE, 'utf8');
+check('memes.html deploys exactly this MoliSaleCurve', page.includes(`const CURVE_BYTECODE = '${curveBytecode}';`));
+check('memes.html deploys exactly the trust pack\'s TokenVesting (artifacts/trust.json)',
+  page.includes(`const VESTING_BYTECODE = '${vestingBytecode}';`));
 check('memes.html deploys exactly this MemeToken bytecode', page.includes(`const MEME_BYTECODE = '${bytecode}';`));
 check('memes.html deploys exactly swap.html\'s factory bytecode', page.includes(swapFactory));
-check('memes.html deploys exactly the BridgedAsset from artifacts/pool.json (the one WSRO uses)',
-  page.includes(`const BRIDGED_BYTECODE = '${bridgedBytecode}';`));
 
 /* -------------------------- the page's own ABI code, against ethers */
 {
   const region = page.match(/\/\* ABI-BEGIN[\s\S]*?\*\/([\s\S]*?)\/\* ABI-END \*\//);
   check('memes.html has an ABI-BEGIN/ABI-END region', !!region);
-  const lib = new Function(region[1] + '\nreturn { encCtor, encBridgedCtor, abiEncode, word, addr32, decString, isqrt, v4Plan, encPermit2Approve };')();
+  const lib = new Function(region[1] + '\nreturn { encCtor, abiEncode, word, addr32, decString, isqrt };')();
   const OP = '0xf51ac8FD4112bF1d45fD5C38D5aBfe0c61Ec3F5a';
   const desc = 'meme não oficial, sem vínculo com Fulano — 宪法 · البيان · no promise of value';
-  const args = ['Bolsonaro', 'BOLSO', desc, 10n ** 27n, OP];
+  const args = ['Bolsonaro Meme', 'BOLSO', desc, 10n ** 27n, OP];
   const mine = lib.encCtor(...args);
   const theirs = ethers.AbiCoder.defaultAbiCoder().encode(
     ['string', 'string', 'string', 'uint256', 'address'], args).slice(2);
   check('page encCtor == ethers ABI encoding, byte for byte', mine === theirs.toLowerCase(), `${mine.length / 64} words`);
   const enc = iface.encodeFunctionResult('description', [desc]);
   check('page decString round-trips a multi-byte string', lib.decString(enc) === desc);
-  {
-    const ab = ethers.AbiCoder.defaultAbiCoder();
-    const mine2 = lib.encBridgedCtor('Faz o L', 'FAZOL', OP);
-    check('page encBridgedCtor == ethers', mine2 === ab.encode(['string', 'string', 'address'], ['Faz o L', 'FAZOL', OP]).slice(2).toLowerCase());
-    const TOK = '0x1234567890abcdef1234567890abcdef12345678';
-    const v = lib.v4Plan({ token: TOK, ethUsdE18: 2724n * 10n ** 18n, tokenUsdE18: 102346n * 10n ** 12n,
-      amount1: 10n ** 24n, owner: OP, deadline: 1800000000n });
-    const KEY = 'tuple(address,address,uint24,int24,address)';
-    const key = [ethers.ZeroAddress, TOK, 2500, 25, ethers.ZeroAddress];
-    const pm = new ethers.Interface([
-      `function initializePool(${KEY} key, uint160 sqrtPriceX96) returns (int24)`,
-      'function modifyLiquidities(bytes unlockData, uint256 deadline)',
-      'function multicall(bytes[] data) returns (bytes[])',
-    ]);
-    const initE = pm.encodeFunctionData('initializePool', [key, v.sqrtPriceX96]);
-    const mintP = ab.encode([KEY, 'int24', 'int24', 'uint256', 'uint128', 'uint128', 'address', 'bytes'],
-      [key, v.tickLower, v.tickUpper, v.liquidity, 0n, 10n ** 24n, OP, '0x']);
-    const settleP = ab.encode(['address', 'address'], [ethers.ZeroAddress, TOK]);
-    const unlock = ab.encode(['bytes', 'bytes[]'], ['0x020d', [mintP, settleP]]);
-    const modE = pm.encodeFunctionData('modifyLiquidities', [unlock, 1800000000n]);
-    const mcE = pm.encodeFunctionData('multicall', [[initE, modE]]);
-    check('page v4Plan initializePool == ethers', v.init === initE.toLowerCase());
-    check('page v4Plan modifyLiquidities(MINT_POSITION, SETTLE_PAIR) == ethers', v.modify === modE.toLowerCase());
-    check('page v4Plan multicall == ethers', v.data === mcE.toLowerCase(), `${(v.data.length - 2) / 2} bytes`);
-    check('page v4Plan: tickUpper STRICTLY below the initial tick, asks only, multiples of 25',
-      v.tickUpper < v.tick && v.tickLower < v.tickUpper && v.tickUpper % 25n === 0n && v.tickLower % 25n === 0n);
-    check('page v4Plan never asks for more than amount1', v.needed <= 10n ** 24n, v.needed.toString());
-    const p2 = new ethers.Interface(['function approve(address token, address spender, uint160 amount, uint48 expiration)']);
-    check('page encPermit2Approve == ethers', lib.encPermit2Approve(TOK, OP, 10n ** 24n, 1800000000n)
-      === p2.encodeFunctionData('approve', [TOK, OP, 10n ** 24n, 1800000000n]).toLowerCase());
-  }
   check('page isqrt is floor sqrt', [0n, 1n, 3n, 4n, 10n ** 36n, 10n ** 36n + 1n, 2n ** 255n].every(
     (n) => { const r = lib.isqrt(n); return r * r <= n && (r + 1n) * (r + 1n) > n; }));
 }

@@ -45,15 +45,12 @@ function check(label, ok, detail = '') {
 const region = page.match(/\/\* ABI-BEGIN[\s\S]*?\*\/([\s\S]*?)\/\* ABI-END \*\//);
 check('memes.html has an ABI-BEGIN/ABI-END region', !!region);
 const L = new Function(region[1] + `
-return { word, addr32, encCtor, encBridgedCtor, decString, isqrt, parseDec, parityTokens, quoteOut,
-  impactBp, firstShares, sqrtAtTick, tickAtSqrt, v4Plan, bridgeIds, encBridgeRegister };`)();
+return { word, addr32, encCtor, decString, isqrt, parseDec, parityTokens, quoteOut, impactBp, firstShares };`)();
 const pageConst = (name) => { const m = page.match(new RegExp(`const ${name} = '([^']*)';`)); return m && m[1]; };
 const MEME_BYTECODE = pageConst('MEME_BYTECODE');
 const FACTORY_BYTECODE = pageConst('FACTORY_BYTECODE');
-const BRIDGED_BYTECODE = pageConst('BRIDGED_BYTECODE');
 check('the page carries the built MemeToken bytecode', MEME_BYTECODE === MEME.bytecode,
   'rebuild with contracts/memes-build-and-test.mjs');
-check('the page carries the BridgedAsset WSRO uses', BRIDGED_BYTECODE === POOLART.BridgedAsset.bytecode);
 check('the page carries swap.html\'s factory', FACTORY_BYTECODE && read('src/web/swap.html').includes(FACTORY_BYTECODE));
 
 /* ---------------------------------------------------------- harness */
@@ -204,8 +201,48 @@ async function market(sym, token, seedMoli, seedTok, cpUsd) {
   return pool;
 }
 
+/**
+ * The distribution step the page runs after the market exists: curve at the
+ * pool's OWN spot price with its allocation, vesting with 4% (Molibra coins),
+ * then a real buy through the curve. Uses the page's stamped bytecode.
+ */
+const CURVE_BYTECODE = pageConst('CURVE_BYTECODE');
+const VESTING_BYTECODE = pageConst('VESTING_BYTECODE');
+check('the page carries the built MoliSaleCurve', CURVE_BYTECODE === JSON.parse(read('contracts/artifacts/MoliSaleCurve.json')).bytecode);
+check('the page carries the trust pack\'s TokenVesting', VESTING_BYTECODE === JSON.parse(read('contracts/artifacts/trust.json')).contracts.TokenVesting.bytecode);
+async function distribute(m, token, pool, { vesting }) {
+  const sym = m.symbol;
+  const res = toHex(await view(pool, sel('reserves()'))).slice(2);
+  const p0 = (BigInt('0x' + res.slice(0, 64)) * UNIT) / BigInt('0x' + res.slice(64, 128));
+  const curveAmt = L.parseDec(m.meme.allocation.curve);
+  const curve = await deploy(OPERATOR, CURVE_BYTECODE, addr(token) + addr(pool) + word(curveAmt) + word(p0), `${sym} curve deploy`);
+  let r = await send(OPERATOR, token, sel('transfer(address,uint256)') + addr(curve) + word(curveAmt), 0n, `${sym} fund curve`);
+  check(`${sym}: curve deployed at the pool's price and funded with ${fmt(curveAmt, 0)}`, !r.failed && await bal(token, curve) === curveAmt,
+    `opens ${fmt(p0, 4)} MOLI, sells out at ${fmt(5n * p0, 4)}`);
+  if (vesting) {
+    const v = m.meme.vestingSchedule;
+    const vest = await deploy(OPERATOR, VESTING_BYTECODE, addr(token) + addr(v.beneficiary) + word(1_790_000_000n)
+      + word(BigInt(v.cliffDays) * 86400n) + word(BigInt(v.durationDays) * 86400n), `${sym} vesting deploy`);
+    const vAmt = L.parseDec(m.meme.allocation.vesting);
+    r = await send(OPERATOR, token, sel('transfer(address,uint256)') + addr(vest) + word(vAmt), 0n, `${sym} fund vesting`);
+    check(`${sym}: vesting deployed and funded with 4% (${fmt(vAmt, 0)})`, !r.failed && await bal(token, vest) === vAmt);
+    const wallet = L.parseDec(m.meme.allocation.wallet);
+    const opBal = await bal(token, OPERATOR);
+    check(`${sym}: the operator keeps the 1% less what seeded the pool, and holds under 1% of supply`,
+      opBal < wallet && opBal > wallet - L.parseDec('1000000'), `${fmt(opBal, 2)} ${sym}`);
+    check(`${sym}: 95 + 4 + 1 = the whole supply`,
+      curveAmt + vAmt + wallet === L.parseDec(m.meme.supply));
+  }
+  const before = await bal(token, ALICE);
+  r = await send(ALICE, curve, sel('buy(uint256,uint256,uint256)') + word(1n) + 'f'.repeat(64) + 'f'.repeat(64), 100n * UNIT, `${sym} curve buy`);
+  const got = (await bal(token, ALICE)) - before;
+  check(`${sym}: 100 MOLI bought through the curve, and the MOLI went into the pool`, !r.failed && got > 0n
+    && state.balanceOf(curve) < 10n ** 9n, `${fmt(got, 6)} ${sym}${r.failed ? ' ' + r.error : ''}`);
+  return curve;
+}
+
 const used = {};
-for (const key of ['caramelo', 'bolso']) {
+for (const key of ['caramelo', 'bolso', 'fazol']) {
   const m = REG.markets.find((x) => x.key === key);
   const cp = REG.counterparts[m.meme.counterpart];
   const supply = L.parseDec(m.meme.supply);
@@ -217,46 +254,8 @@ for (const key of ['caramelo', 'bolso']) {
   const seedMoli = L.parseDec(m.meme.seedMoli);
   const seedTok = L.parityTokens(seedMoli, moliUsdE18, L.parseDec(cp.usd));
   used[key] = seedMoli;
-  await market(m.symbol, token, seedMoli, seedTok, cp.usd);
-}
-
-/* ------------------------------------------- 3. FAZOL on Molibra */
-console.log('\n3. FAZOL: BridgedAsset, BRIDGE_REGISTER, market\n');
-{
-  const m = REG.markets.find((x) => x.key === 'fazol');
-  // Any Ethereum address works for the derivation; the plan script predicts
-  // the real one from the operator's Ethereum nonce.
-  const ETH_FAZOL = '0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a';
-  const keccak = (hex) => toHex(keccak256(fromHex('0x' + hex.replace(/^0x/, ''))));
-  const ids = L.bridgeIds(keccak, 1, ETH_FAZOL);
-  check('page bridgeIds: token id == src/foreign.js foreignTokenId', ids.tokenId === foreignTokenId(1n, ETH_FAZOL));
-  check('page bridgeIds: authority == src/bridgemint.js bridgeAuthority', ids.authority === bridgeAuthority(ids.tokenId));
-  check('page BRIDGE_REGISTER tag == src/bridgemint.js', pageConst('BRIDGE_REGISTER_TAG') === BRIDGE_REGISTER_TAG);
-
-  const asset = await deploy(OPERATOR, BRIDGED_BYTECODE, L.encBridgedCtor(m.meme.name, 'FAZOL', ids.authority), 'FAZOL BridgedAsset deploy');
-  check('the FAZOL BridgedAsset deploys trusting the keyless authority',
-    '0x' + toHex(await view(asset, sel('bridge()'))).slice(-40) === ids.authority);
-  const CAP = L.parseDec(m.meme.ethereum.bridgeCap);
-  const payload = L.encBridgeRegister(1, ETH_FAZOL, asset, CAP, 'FAZOL');
-  check('page encBridgeRegister == src/bridgemint.js encodeBridgeRegister',
-    payload === encodeBridgeRegister({ originChainId: 1n, contract: ETH_FAZOL, assetContract: asset, cap: CAP, symbol: 'FAZOL' }));
-  const tx = { from: OPERATOR, to: asset, value: 0n, nonce: state.nonceOf(OPERATOR), gasPrice: 1n, gasLimit: 500_000n, data: payload };
-  const out = await applyTransaction(state, tx, intrinsicGas(tx), MINER, 150_000n);
-  check('⭐ BRIDGE_REGISTER is accepted by consensus', out.bridgeAsset === ids.tokenId, out.bridgeAsset);
-  check('  the operator is the asset\'s registrar', state.inbound.get(ids.tokenId).registrar === OPERATOR);
-
-  // The claim path (proof of the Ethereum burn) is covered for WSRO by
-  // test/bridgemint.mjs. Here the authority mints directly, as the claim
-  // would, so the market can be exercised.
-  const IN = L.parseDec(m.meme.ethereum.bridgeIn);
-  const minted = await runEvm(state, { from: ids.authority, to: asset, data: mintCall(OPERATOR, IN), gasLimit: GAS });
-  check(`stand-in for the proved claim: ${m.meme.ethereum.bridgeIn} FAZOL minted to the operator`, !minted.failed && await bal(asset, OPERATOR) === IN);
-  const cp = REG.counterparts[m.meme.counterpart];
-  const seedMoli = L.parseDec(m.meme.seedMoli);
-  const seedTok = L.parityTokens(seedMoli, moliUsdE18, L.parseDec(cp.usd));
-  check('the bridged-in amount covers the seed', seedTok <= IN, `${fmt(seedTok, 4)} of ${fmt(IN, 0)}`);
-  used.fazol = seedMoli;
-  await market('FAZOL', asset, seedMoli, seedTok, cp.usd);
+  const pool = await market(m.symbol, token, seedMoli, seedTok, cp.usd);
+  await distribute(m, token, pool, { vesting: true });
 }
 
 const spent = Object.values(used).reduce((a, b) => a + b, 0n);
@@ -277,11 +276,9 @@ console.log('\n4. The page and the registry\n');
 const SIGS = {
   name: 'name()', symbol: 'symbol()', description: 'description()', totalSupply: 'totalSupply()',
   balanceOf: 'balanceOf(address)', approve: 'approve(address,uint256)', allowance: 'allowance(address,address)',
-  burn: 'burn(uint256)', create: 'create(address)', poolOf: 'poolOf(address)',
+  transfer: 'transfer(address,uint256)', create: 'create(address)', poolOf: 'poolOf(address)',
   addLiquidity: 'addLiquidity(uint256,uint256)', reserves: 'reserves()', totalShares: 'totalShares()',
-  bridge: 'bridge()', initializePool: 'initializePool((address,address,uint24,int24,address),uint160)',
-  modifyLiquidities: 'modifyLiquidities(bytes,uint256)', multicall: 'multicall(bytes[])',
-  permit2Approve: 'approve(address,address,uint160,uint48)', getSlot0: 'getSlot0(bytes32)',
+  getSlot0: 'getSlot0(bytes32)',
   latestRoundData: 'latestRoundData()',
 };
 const block = page.match(/const SEL = \{[\s\S]*?\n\};/)[0];
@@ -289,10 +286,6 @@ for (const [k, s] of Object.entries(SIGS)) {
   const m = block.match(new RegExp(`${k}:\\s*'(0x[0-9a-f]{8})'`));
   check(`SEL.${k} is keccak of ${s}`, !!m && m[1] === sel(s), m ? m[1] : 'missing');
 }
-for (const [k, s] of [['initializePool', SIGS.initializePool], ['modifyLiquidities', SIGS.modifyLiquidities], ['multicall', SIGS.multicall]]) {
-  check(`SEL_V4.${k} agrees`, region[1].includes(`${k}: '${sel(s).slice(2)}'`));
-}
-check('encPermit2Approve uses the Permit2 approve selector', region[1].includes(`'${sel(SIGS.permit2Approve)}'`));
 
 check('the registry lists WSRO with its live pool', REG.markets.some((m) => m.key === 'wsro' && m.pool === '0x4f34d9bc5db2396640d8eb564667e8701528b43d'));
 for (const key of ['caramelo', 'bolso', 'fazol']) {
@@ -314,23 +307,20 @@ for (const key of ['caramelo', 'bolso', 'fazol']) {
   check('FAZOL and BOLSO share the TRUMP parity, and TRUMP is the dropdown default',
     fz.meme.counterpart === 'official-trump' && bo.meme.counterpart === 'official-trump'
     && fz.meme.options[0] === 'official-trump');
-  // ⛔ Upper tick STRICTLY below the initial tick, including the edge where the
-  // initial tick is itself a multiple of the spacing.
-  const TOK = '0x1234567890abcdef1234567890abcdef12345678';
-  for (const T of [100000n, 100013n, -50000n, -49990n]) {
-    const s = L.sqrtAtTick(T);
-    const v = L.v4Plan({ token: TOK, ethUsdE18: s * s, tokenUsdE18: 1n << 192n, amount1: 10n ** 24n,
-      owner: OPERATOR, deadline: 1n });
-    check(`  v4Plan at initial tick ${T}: upper ${v.tickUpper} < ${v.tick}, lower = upper − ln5 ticks, spacing 25`,
-      v.tick === T && v.tickUpper < v.tick && v.tick - v.tickUpper <= 25n && v.tickUpper % 25n === 0n
-      && v.tickUpper - v.tickLower === 16100n && v.needed <= 10n ** 24n);
+  for (const k of ['caramelo', 'bolso', 'fazol']) {
+    const mm = REG.markets.find((x) => x.key === k);
+    check(`  ${mm.symbol} declares its reference pair for display: ${mm.meme.referencePair && mm.meme.referencePair.symbol}`,
+      !!mm.meme.referencePair && REG.counterparts[mm.meme.referencePair.counterpart].symbol === mm.meme.referencePair.symbol
+      && /Não é paridade garantida nem lastro/.test(mm.meme.referencePair.note));
   }
+  check('  CARAMELO→DOGE, BOLSO→TRUMP, FAZOL→TRUMP', ['caramelo:DOGE', 'bolso:TRUMP', 'fazol:TRUMP'].every((x) => {
+    const [k, s] = x.split(':'); return REG.markets.find((m) => m.key === k).meme.referencePair.symbol === s; }));
 }
 const bolso = REG.markets.find((x) => x.key === 'bolso');
 check('BOLSO names the person it is NOT affiliated with, and the family and parties',
-  bolso.symbol === 'BOLSO' && bolso.meme.name === 'Bolsonaro' && /Jair Bolsonaro, sua família ou qualquer partido\/campanha/.test(bolso.meme.description));
+  bolso.symbol === 'BOLSO' && bolso.meme.name === 'Bolsonaro Meme' && /Jair Bolsonaro, sua família ou qualquer partido\/campanha/.test(bolso.meme.description));
 check('FAZOL: not affiliated with Lula or any party or campaign',
-  /Luiz Inácio Lula da Silva nem com nenhum partido ou campanha/.test(REG.markets.find((x) => x.key === 'fazol').meme.description));
+  /sem vínculo com Luiz Inácio Lula da Silva ou qualquer partido\/campanha/.test(REG.markets.find((x) => x.key === 'fazol').meme.description));
 check('⛔ the page shows no image of anybody', !/<img|background-image|\.jpg|\.png/i.test(page.replace(/\/icon\.png/g, '')));
 check('⛔ the page and registry add no electoral clause (electoral law attaches to GIZ only)',
   // Word boundaries: "querySelectorAll" contains "electorAl".
@@ -338,10 +328,9 @@ check('⛔ the page and registry add no electoral clause (electoral law attaches
 check('the page reads addresses from /molibra/markets.json', page.includes("'/molibra/markets.json'"));
 check('⛔ every Molibra step is simulated before the wallet is asked',
   /eth_estimateGas/.test(page) && /a simulação reverte/.test(page));
-check('⛔ every Ethereum step uses a 0.05 gwei tip and maxFee = 2×base + tip',
-  page.includes('const ETH_TIP = 50000000n;') && page.includes('const maxFee = 2n * base + ETH_TIP;'));
+check('⛔ FAZOL is Molibra-native now: no Ethereum send, no Uniswap, no bridge step on the page',
+  !['ethSend', 'PositionManager', 'Permit2', 'BRIDGE_REGISTER', 'BridgedAsset', 'id="e1"', 'id="m1"'].some((s) => page.includes(s)));
 check('⛔ the first deposit refuses a pool that already has liquidity', page.includes('if (ts !== 0n)'));
-check('⛔ the v4 step refuses an already-initialised pool', page.includes('este pool já foi inicializado'));
 {
   // The page's main script must at least PARSE: a syntax error kills every button at once.
   const scripts = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
@@ -350,7 +339,7 @@ check('⛔ the v4 step refuses an already-initialised pool', page.includes('este
   check('the page script parses', scripts.length > 0 && !err, err ?? `${scripts.length} inline script(s)`);
 }
 check('⛔ a price-setting step refuses to run on the snapshot prices',
-  (page.match(/needLive\(\);/g) || []).length >= 3);
+  (page.match(/needLive\(\);/g) || []).length >= 2);
 check('⛔ only the operator account may run a step', page.includes("if (account !== OPERATOR)"));
 
 console.log(`\n${passed} passed, ${failed} failed`);

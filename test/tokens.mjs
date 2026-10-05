@@ -181,7 +181,8 @@ const undeployed = (markets.markets || []).filter((m) => m.kind?.includes('meme'
 for (const s of undeployed) {
   check(`${s} has no address in markets.json, so it is NOT in the live list`, !live.tokens.some((x) => x.symbol === s && x.chainId === 20226));
 }
-check('every filled address enters the list', ['CARAMELO', 'BOLSO', 'FAZOL'].every((s) => has(full, 20226, s)) && has(full, 1, 'FAZOL'));
+// FAZOL is Molibra-native (operator, 5 Oct 2026): no chain-1 deployment.
+check('every filled address enters the list', ['CARAMELO', 'BOLSO', 'FAZOL'].every((s) => has(full, 20226, s)) && !has(full, 1, 'FAZOL'));
 const addedNow = full.tokens.length - live.tokens.length;
 check('each token added is one minor version up (Uniswap rule), major and patch untouched',
   full.version.minor === live.version.minor + addedNow && full.version.major === live.version.major
@@ -209,7 +210,7 @@ check('a MemeToken page expects the artifact\'s runtime hash (computed, not copi
   /^[0-9a-f]{64}$/.test(tokenPageData('caramelo').deployments[0].runtimeSha256 || '') && !!memeArtifact.deployedBytecode);
 check('a chain-1 buy link is only offered for a pool /molibra/buy knows',
   tokenPageData('bmoli').deployments[0].buy === '/molibra/buy'
-  && (tokenPageData('fazol').deployments[0].buy === null || /fazol:\s*\{\s*token/.test(readFileSync(join(ROOT, 'src/web/buy.html'), 'utf8'))));
+  && tokenPageData('fazol').deployments.every((d) => d.chainId !== 1));
 
 const tpl = readFileSync(join(ROOT, 'src/web/token.html'), 'utf8');
 const evil = { ...tokenPageData('bolso'), desc_pt: '</script><script>alert(1)</script>' };
