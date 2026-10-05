@@ -427,6 +427,11 @@ const SEL = {
   tokenCount:      '0x9f181b5e',   // tokenCount()
   symbol:          '0x95d89b41',   // symbol()
   decimals:        '0x313ce567',   // decimals()
+  // MoliSaleCurve (contracts/MoliSaleCurve.sol): the memecoins' sale for MOLI.
+  curveQuote:      '0xed1bd76c',   // quote(uint256)
+  curveInBand:     '0x5d33b8cf',   // inBand()
+  curveRemaining:  '0x55234ec0',   // remaining()
+  curveBuy:        '0x40993b26',   // buy(uint256,uint256,uint256)
 };
 
 /**
@@ -525,6 +530,9 @@ const T = {
     creating: 'Criando o mercado — confirme na carteira…', created: 'Mercado criado. Já aparece na lista.',
     createFail: 'A criação falhou: esse token já tem mercado, ou o endereço não é um contrato (como um token de expressão).',
     signNote: 'Nada é enviado sem a sua assinatura na carteira.', explorer: 'Explorador',
+    srcCurve: 'curva de venda', srcPool: 'pool', srcWhy: 'a fonte que dá mais',
+    curveFee: 'sem taxa · o MOLI vai para a liquidez do pool',
+    curveMoved: 'A curva de venda não aceita esta compra agora (o preço do pool saiu da faixa). Atualize: o pool será usado.',
   },
   en: {
     connectShort: 'Connect', wrongNet: 'Wrong network',
@@ -590,6 +598,9 @@ const T = {
     creating: 'Creating the market — confirm in your wallet…', created: 'Market created. It is in the list now.',
     createFail: 'Creation failed: that token already has a market, or the address is not a contract (as an expression token is not).',
     signNote: 'Nothing is sent until you sign it in your wallet.', explorer: 'Explorer',
+    srcCurve: 'sale curve', srcPool: 'pool', srcWhy: 'whichever gives more',
+    curveFee: 'no fee · the MOLI goes into the pool as liquidity',
+    curveMoved: 'The sale curve will not take this purchase right now (the pool moved out of its band). Refresh: the pool will be used.',
   },
 };
 
@@ -773,6 +784,8 @@ async function discover() {
       if (isAddr(m.token) && isAddr(m.pool) && !seen.has(m.token.toLowerCase())) {
         seen.set(m.token.toLowerCase(), { token: m.token.toLowerCase(), pool: m.pool.toLowerCase(), symbol: m.symbol || null });
       }
+      const c = m.meme && m.meme.curve;
+      if (isAddr(c) && seen.has(String(m.token).toLowerCase())) seen.get(String(m.token).toLowerCase()).curve = c.toLowerCase();
     }
     if (isAddr(reg.factory) && !isAddr($('factoryAddr').value.trim())) $('factoryAddr').value = reg.factory;
   } catch (e) { /* the seeds and the factory still list what they can */ }
@@ -859,6 +872,7 @@ function option(value, label) {
  * is forgotten, so the person's own choice is never overridden.
  */
 let wantFrom = null;
+let wantTo = null;
 
 function fillSelectors() {
   for (const id of ['fromSel', 'toSel']) {
@@ -872,6 +886,11 @@ function fillSelectors() {
     const w = wantFrom.toLowerCase();
     const hit = markets.find((m) => m.token.toLowerCase() === w || String(m.symbol || '').toLowerCase() === w);
     if (hit) { $('fromSel').value = hit.token; $('toSel').value = MOLI; wantFrom = null; }
+  }
+  if (wantTo) {
+    const w = wantTo.toLowerCase();
+    const hit = markets.find((m) => m.token.toLowerCase() === w || String(m.symbol || '').toLowerCase() === w);
+    if (hit) { $('fromSel').value = MOLI; $('toSel').value = hit.token; wantTo = null; }
   }
   if (!$('fromSel').value) $('fromSel').value = MOLI;
   if (!$('toSel').value || $('toSel').value === $('fromSel').value) {
@@ -924,6 +943,43 @@ function planRoute(from, to) {
   return [{ pool: a.pool, moliIn: false, m: a }, { pool: b.pool, moliIn: true, m: b }];
 }
 
+/* CURVE-BEGIN — pure, no DOM, no network. Run verbatim by test/swap-page.mjs. */
+/**
+ * Buying a memecoin with MOLI has TWO sources: its MolibraPool and its
+ * MoliSaleCurve. `curveOut` is null when the curve would refuse (pool outside
+ * its 1% band, sold out, not funded, no curve). The source that gives MORE
+ * tokens for the same MOLI wins; a tie goes to the pool (two-way, no band).
+ */
+function pickSource(poolOut, curveOut) {
+  const p = BigInt(poolOut || 0n);
+  if (curveOut === null || curveOut === undefined) return p > 0n ? 'pool' : null;
+  const c = BigInt(curveOut);
+  if (c > p) return 'curve';
+  return p > 0n ? 'pool' : null;
+}
+/** buy(minOut, maxPrice, deadline): the slippage floor is minOut, which already bounds the price. */
+function curveBuyData(minOut, deadline) {
+  return SEL.curveBuy + word(minOut) + 'f'.repeat(64) + word(deadline);
+}
+/* CURVE-END */
+
+/**
+ * What the sale curve gives for `amount` MOLI right now, or null if it would
+ * refuse. Views only: inBand(), remaining() against what it holds (a curve
+ * not yet funded refuses), and quote(amount).
+ */
+async function curveQuote(m, amount) {
+  if (!m || !m.curve) return null;
+  try {
+    if (toBig(await call(m.curve, SEL.curveInBand)) !== 1n) return null;
+    const left = toBig(await call(m.curve, SEL.curveRemaining));
+    const held = toBig(await call(m.token, SEL.balanceOf + addr32(m.curve)));
+    if (left === 0n || held < left) return null;
+    const raw = (await call(m.curve, SEL.curveQuote + word(amount))).replace(/^0x/, '');
+    return BigInt('0x' + raw.slice(0, 64));
+  } catch (e) { return null; }
+}
+
 /** ⛔⛔ Quoted by the POOL, hop by hop. The page never does the arithmetic. */
 async function quoteRoute(plan, amount) {
   let amt = amount;
@@ -968,13 +1024,19 @@ async function requote() {
   if (!plan || !amount) { lastPlan = null; renderSwap(); return; }
   renderSwap();
 
-  const out = await quoteRoute(plan, amount);
+  let out = await quoteRoute(plan, amount);
+  let source = 'pool'; let curveOut = null;
+  if (plan.length === 1 && plan[0].moliIn && plan[0].m.curve) {
+    curveOut = await curveQuote(plan[0].m, amount);
+    source = pickSource(out, curveOut) || 'pool';
+    if (source === 'curve') out = curveOut;
+  }
   let allowance = null;
   if (account && from !== MOLI) {
     allowance = toBig(await call(from, SEL.allowance + addr32(account) + addr32(plan[0].pool)));
   }
   if (seq !== quoteSeq) return;      // a newer keystroke owns the screen now
-  lastPlan = { key: key, plan: plan, amount: amount, out: out, from: from, to: to, allowance: allowance };
+  lastPlan = { key: key, plan: plan, amount: amount, out: out, from: from, to: to, allowance: allowance, source: source, curveOut: curveOut };
   renderSwap();
 }
 
@@ -1046,8 +1108,11 @@ function renderSwap() {
       : t('twoHops');
     const minOut = slipBp === null ? null : p.out * BigInt(10000 - slipBp) / 10000n;
     $('minOut').textContent = minOut === null ? '—' : fmt(minOut) + ' ' + symT;
-    $('routeRow').hidden = p.plan.length === 1;
-    $('route').textContent = symF + ' → MOLI → ' + symT;
+    const viaCurve = p.source === 'curve';
+    $('routeRow').hidden = p.plan.length === 1 && !p.plan[0].m.curve;
+    $('route').textContent = p.plan.length > 1 ? symF + ' → MOLI → ' + symT
+      : (viaCurve ? t('srcCurve') : t('srcPool')) + (p.plan[0].m.curve ? ' · ' + t('srcWhy') : '');
+    if (viaCurve) { $('fee').textContent = t('curveFee'); $('impact').textContent = '—'; }
     $('details').hidden = false;
 
     // Shown as a plain number on every trade; a gentle note only above 5%.
@@ -1184,6 +1249,25 @@ async function doSwap() {
   let carried = p.amount;
   let h = null;
 
+  if (p.source === 'curve') {
+    // ⭐ The sale curve: MOLI in, tokens out, and the MOLI goes into the pool
+    // as locked liquidity. Re-checked now; a curve that would refuse is never
+    // signed for.
+    const fresh = await curveQuote(plan[0].m, p.amount);
+    if (fresh === null) throw new Error(t('curveMoved'));
+    const minOut = fresh * BigInt(10000 - slipBp) / 10000n;
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+    const tx = { from: account, to: plan[0].m.curve, value: hex(p.amount), data: curveBuyData(minOut, deadline), gas: '0xc3500' };   // 800,000
+    await preflight(tx, 'wouldRevert');
+    h = (await sendTx(tx, 'swapMsg')).h;
+    const paidC = fmt(p.amount) + ' ' + symbolOf(p.from);
+    $('amountIn').value = '';
+    lastPlan = null;
+    await refresh();
+    showMsg('swapMsg', 'ok', t('swapDone', paidC, fmt(fresh) + ' ' + symbolOf(p.to)), h);
+    return;
+  }
+
   for (let i = 0; i < plan.length; i++) {
     const hop = plan[i];
     const last = i === plan.length - 1;
@@ -1193,8 +1277,8 @@ async function doSwap() {
     // leaving the trader holding MOLI they did not ask for.
     const minOut = last ? out * BigInt(10000 - slipBp) / 10000n : 0n;
     const tx = hop.moliIn
-      ? { from: account, to: hop.pool, value: hex(carried), data: SEL.swapMoliIn + word(minOut) }
-      : { from: account, to: hop.pool, data: SEL.swapTokenIn + word(carried) + word(minOut) };
+      ? { from: account, to: hop.pool, value: hex(carried), data: SEL.swapMoliIn + word(minOut), gas: '0x30d40' }   // 200,000
+      : { from: account, to: hop.pool, data: SEL.swapTokenIn + word(carried) + word(minOut), gas: '0x30d40' };
     await preflight(tx, 'wouldRevert');
     h = (await sendTx(tx, 'swapMsg')).h;
     carried = hopOut;
@@ -1579,6 +1663,7 @@ try { const s = localStorage.getItem('molibra.slippage'); if (s) slipStr = s; } 
 if (params.get('factory')) $('factoryAddr').value = params.get('factory');
 if (params.get('amount')) $('amountIn').value = params.get('amount');
 if (params.get('from')) wantFrom = String(params.get('from')).trim();
+if (params.get('to')) wantTo = String(params.get('to')).trim();
 if (params.get('slippage')) slipStr = params.get('slippage');
 $('slippage').value = slipStr;
 if (location.hash === '#pool') showTab('pool');

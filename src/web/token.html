@@ -346,7 +346,10 @@ function render() {
     const add = el('button', { type: 'button' }, t('add'));
     add.onclick = () => addToWallet(d, log);
     const links = el('div', { class: 'row' }, add);
-    if (d.buy) links.append(el('a', { href: d.buy }, d.chainId === 1 ? t('buy') : t('swap')));
+    // A "?to=" link opens /molibra/swap with this coin selected to BUY (the page
+    // routes to the sale curve or the pool, whichever gives more).
+    if (d.buy) links.append(el('a', { href: d.buy, class: /[?&]to=/.test(d.buy) ? 'btn' : '' },
+      d.chainId === 1 || /[?&]to=/.test(d.buy) ? t('buy') : t('swap')));
     card.append(links, log);
   }
 }

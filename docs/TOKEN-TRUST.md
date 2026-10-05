@@ -148,23 +148,23 @@ count against this: bMOLI shows creator 0% because 99.999% is in the v4
 PoolManager. So **the distribution plan is: put almost everything in the pool,
 lock the pool, and vest the rest.**
 
-### FAZOL (Ethereum, 1,000,000,000 supply): ⛔ fix before deploying
+### FAZOL, CARAMELO and BOLSO: all Molibra-native (operator, 5 Oct 2026)
 
-The current plan (`contracts/fazol-plan.json`) seeds the v4 position with
-**1,000,000 FAZOL (0.1%)**, so **999,000,000 (99.9%) would stay in the operator
-wallet**. That is a guaranteed creator-concentration flag on GoPlus, TokenSniffer and
-De.Fi from the first block. Proposed instead:
+FAZOL is no longer an Ethereum token: no chain-1 deployment, no Uniswap pool, no
+bridge. It is a `MemeToken` on Molibra like BOLSO and CARAMELO, with the same
+distribution for all three, none of it in the creator wallet beyond 1%:
 
-| slice | amount | where | contract |
-|---|---|---|---|
-| liquidity | **950,000,000 (95%)** | one-sided v4 position (same range as the plan, more depth) | `V4PositionLocker`, 12 months |
-| operator reserve | **40,000,000 (4%)** | vesting: 6-month cliff, linear to 24 months | `contracts/TokenVesting.sol` (no owner, no revoke; anyone may call `release()`, which only ever pays the beneficiary) |
-| bridge float | **10,000,000 (1%)** | operator wallet, for the burn bridge into Molibra (`bridgeCap` is 1,000,000) | — |
+| slice | share | where |
+|---|---|---|
+| sale | **95%** | `contracts/MoliSaleCurve.sol`: sold for MOLI only, price from the parity to 5x; every MOLI paid goes into the coin's MolibraPool as liquidity locked in the curve forever |
+| pool seed | 3,000 MOLI | MolibraPool at the parity, coins taken from the 1% below |
+| operator reserve | **4%** | `contracts/TokenVesting.sol` (180-day cliff, linear to 720 days, no owner) |
+| operations | **1%** | operator wallet |
 
-Each slice stays under the 5% per-holder line, and the creator ends under 5%.
-Adding 949M FAZOL to the same one-sided range does **not** change the starting
-price (a one-sided position above the current tick sets no price); it only
-deepens the ask side.
+BOLSO's on-chain name is **"Bolsonaro Meme"** (see the name-risk note below). Each
+coin shows a reference pair for display only (CARAMELO-DOGE, BOLSO-TRUMP,
+FAZOL-TRUMP): not a peg. Buying on `/molibra/swap` routes to the sale curve or the
+pool, whichever gives more; selling always goes to the pool.
 
 ### CARAMELO and BOLSO (Molibra)
 
