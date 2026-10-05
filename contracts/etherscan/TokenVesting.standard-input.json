@@ -1,0 +1,24 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "contracts/TokenVesting.sol": {
+      "content": "// SPDX-License-Identifier: Apache-2.0\npragma solidity ^0.8.20;\n\n/**\n * TokenVesting - holds a reserve of ONE ERC-20 and releases it on a fixed\n * schedule to ONE beneficiary. Used for the operator's reserve of a new coin,\n * so that the deployer does not hold the supply (the \"creator holds ~100%\"\n * flag every scanner raises) and so that anyone can read, on-chain, how much\n * of the reserve can move and when.\n *\n *   released by time t =  0                                  if t < start + cliff\n *                         total * (t - start) / duration     if inside the schedule\n *                         total                              after start + duration\n *\n * where total = what the contract holds + what it has already released. Funding\n * is a plain transfer of the token to this address, after deployment.\n *\n * What is absent BY CONSTRUCTION: no owner, no revoke, no way to change the\n * token, the beneficiary or the schedule, no way to pull out any OTHER token\n * sent here by mistake (it stays here: said plainly rather than adding an\n * admin to rescue it). `release()` may be called by anybody; it can only ever\n * pay the beneficiary.\n *\n * No external imports.\n */\n\ninterface IERC20Like {\n    function balanceOf(address) external view returns (uint256);\n    function transfer(address to, uint256 value) external returns (bool);\n}\n\ncontract TokenVesting {\n    IERC20Like public immutable token;\n    address public immutable beneficiary;\n    uint64 public immutable start;\n    uint64 public immutable cliff;      // seconds after start before anything vests\n    uint64 public immutable duration;   // seconds from start to fully vested\n\n    uint256 public released;\n\n    event Released(uint256 amount);\n\n    error ZeroAddress();\n    error BadSchedule();\n    error NothingToRelease();\n    error TransferFailed();\n\n    constructor(address token_, address beneficiary_, uint64 start_, uint64 cliff_, uint64 duration_) {\n        if (token_ == address(0) || beneficiary_ == address(0)) revert ZeroAddress();\n        if (duration_ == 0 || cliff_ > duration_) revert BadSchedule();\n        token = IERC20Like(token_);\n        beneficiary = beneficiary_;\n        start = start_;\n        cliff = cliff_;\n        duration = duration_;\n    }\n\n    function vestedAmount(uint64 timestamp) public view returns (uint256) {\n        uint256 total = token.balanceOf(address(this)) + released;\n        if (timestamp < start + cliff) return 0;\n        if (timestamp >= start + duration) return total;\n        return (total * (timestamp - start)) / duration;\n    }\n\n    function releasable() public view returns (uint256) {\n        return vestedAmount(uint64(block.timestamp)) - released;\n    }\n\n    function release() external {\n        uint256 amount = releasable();\n        if (amount == 0) revert NothingToRelease();\n        released += amount;\n        if (!token.transfer(beneficiary, amount)) revert TransferFailed();\n        emit Released(amount);\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "paris",
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode.object",
+          "evm.deployedBytecode.object"
+        ]
+      }
+    }
+  }
+}

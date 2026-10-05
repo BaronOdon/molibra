@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="MOLI">
+  <!-- MOLI: the Molibra mark (src/web/icon.svg) on a round coin. Gold on the void. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD100"/>
+      <stop offset="1" stop-color="#c9a600"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="#07070a"/>
+  <circle cx="128" cy="128" r="114" fill="none" stroke="#FFD100" stroke-width="7"/>
+  <g transform="translate(128 132) scale(3.1) translate(-32 -33)">
+    <path d="M14 46 V20 L32 38 L50 20 V46" fill="none" stroke="url(#g)" stroke-width="6.4" stroke-linecap="square" stroke-linejoin="miter"/>
+    <circle cx="32" cy="38" r="3.4" fill="#07070a" stroke="#FFD100" stroke-width="2"/>
+  </g>
+</svg>

@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TOKEN_TITLE__ · Molibra</title>
+<link rel="icon" type="image/png" href="__TOKEN_LOGO__">
+<meta property="og:image" content="__TOKEN_LOGO_ABS__">
+<!--
+  One page per coin, served at /molibra/token/<symbol> from src/tokens.js.
+
+  ⛔ Every fact about a contract on this page is READ FROM THE CHAIN by this
+  browser when the page opens: the runtime bytecode (and its SHA-256 against
+  the verified build), owner(), totalSupply(), the EIP-1967 proxy slot, which
+  privileged selectors the code contains, the pool and who holds each liquidity
+  position. The template's prose facts are shown only when the deployed bytecode
+  is byte-for-byte the verified build; otherwise the page says it could not
+  confirm them. Nothing here is a promise of value, and nothing is hard-coded
+  that the chain can answer.
+
+  It holds no key; "Adicionar à carteira" asks the reader's own wallet.
+-->
+<style>
+  :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--ok:#5cd68a;--warn:#e8b04a}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f6f6f4;--panel:#fff;--line:#deded8;--ink:#17171a;--dim:#66666e;--gold:#9a7a00;--ok:#1d8a4a;--warn:#9a6400}}
+  *{box-sizing:border-box}
+  body{margin:0 auto;background:var(--bg);color:var(--ink);padding:24px 16px 48px;max-width:860px;
+       font:15px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  a{color:var(--gold)}
+  header{display:flex;gap:18px;align-items:center;margin-bottom:18px}
+  header img{width:96px;height:96px;flex:none}
+  h1{font-size:24px;margin:0} h2{font-size:16px;margin:0 0 10px} h3{font-size:13px;margin:16px 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .sym{color:var(--dim);font-weight:600}
+  .lang{margin-left:auto;align-self:flex-start;background:var(--line);color:var(--ink);border:0;border-radius:8px;padding:6px 10px;cursor:pointer}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .notice{border-left:4px solid var(--gold);font-weight:600}
+  .row{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:4px 0}
+  .k{color:var(--dim);min-width:150px}
+  code,.addr{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all}
+  button{background:var(--gold);color:#111;border:0;border-radius:8px;padding:8px 13px;font-weight:650;cursor:pointer;font-size:13px}
+  button.ghost{background:var(--line);color:var(--ink);padding:4px 9px;font-size:12px}
+  ul{margin:6px 0;padding-left:20px} li{margin:3px 0}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .dim{color:var(--dim)}
+  .log{color:var(--dim);font-size:13px;margin-top:8px;min-height:1em}
+  footer{color:var(--dim);font-size:13px;margin-top:24px}
+  footer a{margin-right:10px}
+</style>
+</head>
+<body>
+<header>
+  <img id="logo" src="__TOKEN_LOGO__" alt="" width="96" height="96">
+  <div>
+    <h1 id="title"></h1>
+    <div class="sym" id="sub"></div>
+  </div>
+  <button class="lang" id="lang" type="button">EN</button>
+</header>
+
+<div class="card notice" id="unofficial" hidden></div>
+<div class="card"><p id="desc" style="margin:0"></p></div>
+<div id="deployments"></div>
+
+<footer>
+  <div id="others"></div>
+  <p><a href="/tokenlist.json">tokenlist.json</a> <a href="/molibra/cotacao">Cotação</a> <a href="/">molibra.org</a></p>
+  <p id="foot"></p>
+</footer>
+
+<script src="/molibra/mobilewallet.js"></script>
+<script>
+'use strict';
+const T = /*__TOKEN_DATA__*/null;
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+// The node that served this page answers Molibra JSON-RPC on POST /; the
+// literal is only the fallback for opening the file straight from disk.
+const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
+const STATE_VIEW = '0x7ffe42c4a5deea5b0fec41c94c136cf115597227';
+const POSM = '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e';
+const POOL_MANAGER = '0x000000000004444c5dc75cb358380d2e3de08a90';
+const IMPL_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+const SEL = {
+  getSlot0: '0xc815641c', getLiquidity: '0xfa6793d5', ownerOf: '0x6352211e', getPositionLiquidity: '0x1efeed33',
+  locks: '0xf4dadc61', balanceOf: '0x70a08231', totalSupply: '0x18160ddd', owner: '0x8da5cb5b',
+  paused: '0x5c975abb', reserves: '0x75172a8b',
+};
+const ZERO = '0x' + '0'.repeat(40);
+
+let lang = /^pt/i.test(navigator.language || 'pt') ? 'pt' : 'en';
+try { const s = localStorage.getItem('molibra.lang'); if (s === 'pt' || s === 'en') lang = s; } catch (e) { /* storage blocked */ }
+
+const L = {
+  pt: {
+    native: 'Moeda nativa', bridged: 'Ativo de ponte', erc20: 'Token ERC-20', meme: 'Memecoin',
+    chain: 'Rede', contract: 'Contrato', copy: 'Copiar', copied: 'Copiado', explorer: 'Ver no explorador',
+    source: 'Código-fonte verificado', notDeployed: 'Ainda não implantado nesta rede. O endereço aparece aqui assim que o contrato existir.',
+    supply: 'Oferta e permissões', reading: 'Lendo o contrato na rede…', readFail: 'Não foi possível ler a rede agora: ',
+    match: 'O código implantado é idêntico, byte a byte, à compilação verificada. Portanto vale:',
+    noMatch: 'O código implantado NÃO corresponde à compilação de referência; os fatos do modelo não são afirmados aqui. Leia o código-fonte verificado.',
+    totalSupply: 'Oferta total agora', ownerFn: 'owner()', noOwnerFn: 'não existe (o contrato não tem dono)',
+    renounced: '0x0000…0000 (renunciado)', proxy: 'Proxy (EIP-1967)', proxyNo: 'não - o código não pode ser trocado', proxyYes: 'SIM - o código pode ser trocado',
+    priv: 'Funções privilegiadas no código', privNone: 'nenhuma das conhecidas (mint, pause, blacklist, taxa, upgrade, owner)',
+    paused: 'Pausado', liquidity: 'Liquidez', pool: 'Pool', price: 'Preço atual na pool', inRange: 'Liquidez ativa no preço atual',
+    inPM: 'no PoolManager do Uniswap v4 (todas as pools deste token)', positions: 'Posições de liquidez', noPositions: 'nenhuma posição registrada aqui',
+    lockedUntil: 'TRAVADA até', notLocked: 'não travada: pertence a', canWithdraw: 'que pode retirá-la quando quiser',
+    reserves: 'Reservas', molibraNoLock: 'O MolibraPool não tem trava de liquidez: quem deu liquidez pode retirar a sua parte.',
+    noPool: 'Ainda não há pool para este token nesta rede.', holders: 'Titulares', holdersEth: 'Distribuição dos titulares no Etherscan',
+    holdersMoli: 'Ver o contrato no Moliscan', add: 'Adicionar à carteira', added: 'Pedido enviado à carteira.',
+    buy: 'Comprar', swap: 'Trocar na Molibra', nativeFacts: 'MOLI não tem contrato: é a moeda da própria rede. Altura atual da rede:',
+    addNet: 'Adicionar a rede Molibra à carteira', others: 'Outras moedas: ',
+    foot: 'Esta página lê a rede e não guarda chave nenhuma. Nada aqui é promessa de valor ou recomendação de compra.',
+    templateFrom: 'conforme',
+    noCode: 'O nó lido agora não tem contrato neste endereço (nó fora de sincronia ou rede errada). Nada é afirmado sobre ele.',
+  },
+  en: {
+    native: 'Native coin', bridged: 'Bridged asset', erc20: 'ERC-20 token', meme: 'Meme coin',
+    chain: 'Network', contract: 'Contract', copy: 'Copy', copied: 'Copied', explorer: 'View on explorer',
+    source: 'Verified source', notDeployed: 'Not deployed on this network yet. The address appears here as soon as the contract exists.',
+    supply: 'Supply and permissions', reading: 'Reading the contract on chain…', readFail: 'Could not read the chain right now: ',
+    match: 'The deployed code is byte-for-byte the verified build. So this holds:',
+    noMatch: 'The deployed code does NOT match the reference build; the template facts are not asserted here. Read the verified source.',
+    totalSupply: 'Total supply now', ownerFn: 'owner()', noOwnerFn: 'does not exist (the contract has no owner)',
+    renounced: '0x0000…0000 (renounced)', proxy: 'Proxy (EIP-1967)', proxyNo: 'no - the code cannot be replaced', proxyYes: 'YES - the code can be replaced',
+    priv: 'Privileged functions in the code', privNone: 'none of the known ones (mint, pause, blacklist, fee, upgrade, owner)',
+    paused: 'Paused', liquidity: 'Liquidity', pool: 'Pool', price: 'Current pool price', inRange: 'Active liquidity at the current price',
+    inPM: 'in the Uniswap v4 PoolManager (all of this token\'s pools)', positions: 'Liquidity positions', noPositions: 'no position recorded here',
+    lockedUntil: 'LOCKED until', notLocked: 'not locked: held by', canWithdraw: 'who can withdraw it at any time',
+    reserves: 'Reserves', molibraNoLock: 'MolibraPool has no liquidity lock: a liquidity provider can withdraw their share.',
+    noPool: 'No pool for this token on this network yet.', holders: 'Holders', holdersEth: 'Holder distribution on Etherscan',
+    holdersMoli: 'View the contract on Moliscan', add: 'Add to wallet', added: 'Request sent to the wallet.',
+    buy: 'Buy', swap: 'Swap on Molibra', nativeFacts: 'MOLI has no contract: it is the network\'s own coin. Current chain height:',
+    addNet: 'Add the Molibra network to your wallet', others: 'Other coins: ',
+    foot: 'This page reads the chain and holds no key. Nothing here is a promise of value or a recommendation to buy.',
+    templateFrom: 'per',
+    noCode: 'The node read right now has no contract at this address (node out of sync, or wrong network). Nothing is asserted about it.',
+  },
+};
+const t = (k) => L[lang][k] ?? k;
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === 'class') e.className = v; else e.setAttribute(k, v); }
+  for (const k of kids) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+};
+const row = (k, ...v) => el('div', { class: 'row' }, el('span', { class: 'k' }, k), ...v);
+
+async function rpc(url, method, params) {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || 'rpc error');
+  return j.result;
+}
+const urlFor = (chainId) => (chainId === 1 ? ETH_RPC : NODE);
+const call = (chainId, to, data) => rpc(urlFor(chainId), 'eth_call', [{ to, data }, 'latest']);
+const word = (n) => BigInt(n).toString(16).padStart(64, '0');
+const addr32 = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const big = (hex) => (hex && hex !== '0x' ? BigInt(hex.slice(0, 66)) : 0n);
+const fmt = (wei, dec = 18) => {
+  const s = (BigInt(wei) / 10n ** BigInt(dec)).toString();
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, lang === 'pt' ? '.' : ',');
+};
+const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+async function sha256(hex) {
+  const bytes = new Uint8Array(hex.replace(/^0x/, '').match(/../g).map((b) => parseInt(b, 16)));
+  const d = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+const explorerAddr = (chainId, a) => (chainId === 1 ? `https://etherscan.io/address/${a}` : `/molibra/moliscan/address/${a}`);
+
+function copyBtn(text) {
+  const b = el('button', { class: 'ghost', type: 'button' }, t('copy'));
+  b.onclick = async () => { try { await navigator.clipboard.writeText(text); b.textContent = t('copied'); } catch (e) { /* no clipboard */ } };
+  return b;
+}
+
+/* ------------------------------------------------------------ live reads */
+
+async function readContract(d, box) {
+  box.replaceChildren(el('div', { class: 'dim' }, t('reading')));
+  try {
+    const [code, supply, owner, impl] = await Promise.all([
+      rpc(urlFor(d.chainId), 'eth_getCode', [d.address, 'latest']),
+      call(d.chainId, d.address, SEL.totalSupply).catch(() => null),
+      call(d.chainId, d.address, SEL.owner).catch(() => null),
+      rpc(urlFor(d.chainId), 'eth_getStorageAt', [d.address, IMPL_SLOT, 'latest']).catch(() => null),
+    ]);
+    if (!code || code === '0x') {
+      box.replaceChildren(el('div', { class: 'warn' }, t('noCode')));
+      return;
+    }
+    const hash = await sha256(code);
+    const out = [];
+    if (hash && d.runtimeSha256 && hash === d.runtimeSha256) {
+      out.push(el('div', { class: 'ok' }, '✓ ' + t('match')));
+      out.push(el('ul', {}, ...(lang === 'pt' ? d.facts_pt : d.facts_en).map((f) => el('li', {}, f))));
+    } else {
+      out.push(el('div', { class: 'warn' }, t('noMatch')));
+    }
+    out.push(row(t('totalSupply'), el('b', {}, supply ? fmt(big(supply), T.decimals) + ' ' + T.symbol : '?')));
+    const ownerAddr = owner && owner.length >= 66 ? '0x' + owner.slice(-40) : null;
+    out.push(row(t('ownerFn'), ownerAddr === null ? t('noOwnerFn') : ownerAddr === ZERO ? t('renounced') : el('code', {}, ownerAddr)));
+    const isProxy = impl && !/^0x0*$/.test(impl);
+    out.push(row(t('proxy'), el('span', { class: isProxy ? 'warn' : '' }, isProxy ? t('proxyYes') : t('proxyNo'))));
+    const lc = (code || '').toLowerCase();
+    const found = T.privileged.filter((p) => lc.includes(p.sel));
+    out.push(row(t('priv'), found.length
+      ? found.map((p) => `${p.sig} (${lang === 'pt' ? p.pt : p.en})`).join('; ')
+      : t('privNone')));
+    if (found.some((p) => p.sig === 'pause()')) {
+      const p = await call(d.chainId, d.address, SEL.paused).catch(() => null);
+      if (p) out.push(row(t('paused'), big(p) ? 'SIM / YES' : 'não / no'));
+    }
+    box.replaceChildren(...out);
+  } catch (e) {
+    box.replaceChildren(el('div', { class: 'warn' }, t('readFail') + e.message));
+  }
+}
+
+async function lockStatus(d, tokenId, owner) {
+  const lockers = (T.lockers[String(d.chainId)] || []).filter((l) => l.address);
+  const locker = lockers.find((l) => l.address.toLowerCase() === owner.toLowerCase());
+  if (locker && locker.kind === 'molibra-v4') {
+    const rec = await call(d.chainId, locker.address, SEL.locks + word(tokenId));
+    const unlockAt = Number(BigInt('0x' + rec.slice(66, 130)));
+    if (unlockAt) return el('span', { class: 'ok' }, `${t('lockedUntil')} ${new Date(unlockAt * 1000).toISOString().slice(0, 10)} (${locker.name})`);
+  }
+  if (locker) return el('span', { class: 'ok' }, `${t('lockedUntil')} — ${locker.name}`);
+  return el('span', {}, `${t('notLocked')} `, el('a', { href: explorerAddr(d.chainId, owner), target: '_blank', rel: 'noopener' }, short(owner)), `, ${t('canWithdraw')}.`);
+}
+
+async function readPool(d, box) {
+  const p = d.pool;
+  if (!p || (p.type === 'uniswap-v4' && !p.poolId) || (p.type === 'molibra-pool' && !p.address)) {
+    box.replaceChildren(el('div', { class: 'dim' }, t('noPool')));
+    return;
+  }
+  box.replaceChildren(el('div', { class: 'dim' }, t('reading')));
+  try {
+    const out = [];
+    if (p.type === 'uniswap-v4') {
+      const [slot0, liq, inPM] = await Promise.all([
+        call(1, STATE_VIEW, SEL.getSlot0 + p.poolId.slice(2)),
+        call(1, STATE_VIEW, SEL.getLiquidity + p.poolId.slice(2)),
+        call(1, d.address, SEL.balanceOf + addr32(POOL_MANAGER)),
+      ]);
+      out.push(row(t('pool'), el('code', {}, `Uniswap v4 · ETH/${T.symbol} · ${p.fee / 10000}% · ${short(p.poolId)}`), copyBtn(p.poolId)));
+      const sqrtP = big(slot0);
+      if (sqrtP > 0n) {
+        // currency0 is native ETH, so token-per-ETH = (sqrtPriceX96 / 2^96)^2.
+        const perEth = Number((sqrtP * sqrtP) >> 128n) / 2 ** 64;
+        out.push(row(t('price'), `1 ETH = ${perEth.toLocaleString(lang === 'pt' ? 'pt-BR' : 'en', { maximumFractionDigits: 0 })} ${T.symbol}`));
+      }
+      out.push(row(t('inRange'), big(liq).toString()));
+      out.push(row(T.symbol, `${fmt(big(inPM), T.decimals)} ${t('inPM')}`));
+      out.push(el('h3', {}, t('positions')));
+      if (!p.positions || !p.positions.length) out.push(el('div', { class: 'dim' }, t('noPositions')));
+      for (const id of p.positions || []) {
+        const [own, pl] = await Promise.all([
+          call(1, POSM, SEL.ownerOf + word(id)),
+          call(1, POSM, SEL.getPositionLiquidity + word(id)).catch(() => '0x'),
+        ]);
+        const owner = '0x' + own.slice(-40);
+        out.push(row(`#${id}`, el('a', { href: `https://app.uniswap.org/positions/v4/ethereum/${id}`, target: '_blank', rel: 'noopener' }, 'Uniswap'),
+          `L=${big(pl)}`, await lockStatus(d, id, owner)));
+      }
+    } else {
+      const r = await call(20226, p.address, SEL.reserves);
+      if (!r || r.length < 130) { box.replaceChildren(el('div', { class: 'warn' }, t('noCode'))); return; }
+      const moli = BigInt('0x' + r.slice(2, 66));
+      const tok = BigInt('0x' + r.slice(66, 130));
+      out.push(row(t('pool'), el('code', {}, `MolibraPool · MOLI/${T.symbol} · ${short(p.address)}`), copyBtn(p.address)));
+      out.push(row(t('reserves'), `${fmt(moli)} MOLI · ${fmt(tok, T.decimals)} ${T.symbol}`));
+      out.push(el('div', { class: 'dim' }, t('molibraNoLock')));
+    }
+    box.replaceChildren(...out);
+  } catch (e) {
+    box.replaceChildren(el('div', { class: 'warn' }, t('readFail') + e.message));
+  }
+}
+
+/* ------------------------------------------------------------ wallet */
+
+async function addToWallet(d, log) {
+  try {
+    const eth = window.molibraWallet.require(log);
+    if (d.chainId === 20226) {
+      await eth.request({ method: 'wallet_addEthereumChain', params: [{
+        chainId: '0x4f02', chainName: 'Molibra', nativeCurrency: { name: 'Molibra', symbol: 'MOLI', decimals: 18 },
+        rpcUrls: [NODE], iconUrls: [location.origin + '/icon.png'],
+      }] });
+    } else {
+      await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1' }] });
+    }
+    await eth.request({ method: 'wallet_watchAsset', params: {
+      type: 'ERC20', options: { address: d.address, symbol: T.symbol, decimals: T.decimals, image: T.logoAbs },
+    } });
+    log.textContent = t('added');
+  } catch (e) {
+    log.textContent = e.message;
+  }
+}
+
+/* ------------------------------------------------------------ render */
+
+function render() {
+  document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
+  $('lang').textContent = lang === 'pt' ? 'EN' : 'PT';
+  $('title').textContent = `${T.name}`;
+  $('sub').textContent = `${T.symbol} · ${t(T.kind)}`;
+  $('desc').textContent = lang === 'pt' ? T.desc_pt : T.desc_en;
+  if (T.unofficial) { $('unofficial').hidden = false; $('unofficial').textContent = lang === 'pt' ? T.unofficial.pt : T.unofficial.en; }
+  $('foot').textContent = t('foot');
+  $('others').replaceChildren(t('others'), ...T.others.filter((o) => o.key !== T.key)
+    .flatMap((o) => [el('a', { href: `/molibra/token/${o.key}` }, o.symbol), ' ']));
+
+  const host = $('deployments');
+  host.replaceChildren();
+  for (const d of T.deployments) {
+    const card = el('div', { class: 'card' });
+    card.append(el('h2', {}, `${t('chain')}: ${d.chainId === 1 ? 'Ethereum' : 'Molibra'} (chain ID ${d.chainId})`));
+    host.append(card);
+    if (d.native) {
+      const h = el('span', {}, '…');
+      card.append(row(t('nativeFacts'), h), el('p', {}, el('a', { href: '/molibra/connect' }, t('addNet'))));
+      fetch(NODE + '/molibra').then((r) => r.json()).then((j) => { h.textContent = Number(j.height).toLocaleString(); }).catch(() => { h.textContent = '?'; });
+      card.append(el('p', {}, el('a', { href: '/molibra/token/bmoli' }, 'bMOLI'), ' · ', el('a', { href: '/molibra/buy' }, t('buy') + ' bMOLI'), ' · ', el('a', { href: '/molibra/swap' }, t('swap'))));
+      continue;
+    }
+    if (!d.address) { card.append(el('p', { class: 'dim' }, t('notDeployed'))); continue; }
+    card.append(row(t('contract'), el('code', {}, d.address), copyBtn(d.address),
+      el('a', { href: explorerAddr(d.chainId, d.address), target: '_blank', rel: 'noopener' }, t('explorer'))));
+    const src = [...(d.verified || []).map((u) => el('a', { href: u, target: '_blank', rel: 'noopener' }, new URL(u).host))];
+    if (!src.length && d.source) src.push(el('a', { href: `https://github.com/BaronOdon/molibra/blob/main/${d.source}`, target: '_blank', rel: 'noopener' }, d.source));
+    if (src.length) card.append(row(t('source'), ...src));
+
+    card.append(el('h3', {}, t('supply')));
+    const sup = el('div'); card.append(sup); readContract(d, sup);
+    card.append(el('h3', {}, t('liquidity')));
+    const liq = el('div'); card.append(liq); readPool(d, liq);
+    card.append(el('h3', {}, t('holders')));
+    card.append(el('p', {}, d.chainId === 1
+      ? el('a', { href: `https://etherscan.io/token/${d.address}#balances`, target: '_blank', rel: 'noopener' }, t('holdersEth'))
+      : el('a', { href: explorerAddr(20226, d.address) }, t('holdersMoli'))));
+    const log = el('div', { class: 'log' });
+    const add = el('button', { type: 'button' }, t('add'));
+    add.onclick = () => addToWallet(d, log);
+    const links = el('div', { class: 'row' }, add);
+    if (d.buy) links.append(el('a', { href: d.buy }, d.chainId === 1 ? t('buy') : t('swap')));
+    card.append(links, log);
+  }
+}
+
+$('lang').onclick = () => {
+  lang = lang === 'pt' ? 'en' : 'pt';
+  try { localStorage.setItem('molibra.lang', lang); } catch (e) { /* storage blocked */ }
+  render();
+};
+render();
+</script>
+</body>
+</html>

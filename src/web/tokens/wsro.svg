@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="WSRO">
+  <!-- WSRO (Coinspirit): the Molibra M turned over into a W, black on a gold coin -
+       the co-author's coin in the chain's own two colours. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE04D"/>
+      <stop offset="1" stop-color="#d8a900"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="url(#g)"/>
+  <circle cx="128" cy="128" r="112" fill="none" stroke="#07070a" stroke-width="7"/>
+  <g transform="translate(128 126) scale(3.1) translate(-32 -33)">
+    <path d="M14 20 V46 L32 28 L50 46 V20" fill="none" stroke="#07070a" stroke-width="6.4" stroke-linecap="square" stroke-linejoin="miter"/>
+    <circle cx="32" cy="28" r="3.4" fill="#FFE04D" stroke="#07070a" stroke-width="2"/>
+  </g>
+</svg>

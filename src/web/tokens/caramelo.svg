@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="CARAMELO">
+  <!-- CARAMELO: the vira-lata caramelo, Brazil's street dog, wearing a
+       green-and-yellow sash. Original drawing; no flag, no text, no likeness. -->
+  <defs>
+    <clipPath id="coin"><circle cx="128" cy="128" r="116"/></clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="#5a3412"/>
+  <circle cx="128" cy="128" r="116" fill="#FFF1D2"/>
+  <g clip-path="url(#coin)">
+    <!-- chest and shoulders -->
+    <path d="M40 260 C44 196 78 166 128 164 C178 166 212 196 216 260 Z" fill="#D98B3A"/>
+    <path d="M100 168 C112 196 144 196 156 168 C150 210 106 210 100 168 Z" fill="#F7DDB0"/>
+    <!-- the sash: green edges, yellow middle, shoulder to hip -->
+    <path d="M58 166 L92 152 L214 252 L170 268 Z" fill="#009C3B"/>
+    <path d="M70 163 L84 157 L200 254 L184 260 Z" fill="#FFDF00"/>
+  </g>
+  <!-- ears, drooping -->
+  <path d="M78 66 C52 70 40 110 50 140 C56 156 74 150 80 134 C86 116 92 88 78 66 Z" fill="#9A5A22"/>
+  <path d="M178 66 C204 70 216 110 206 140 C200 156 182 150 176 134 C170 116 164 88 178 66 Z" fill="#9A5A22"/>
+  <!-- head -->
+  <ellipse cx="128" cy="108" rx="56" ry="54" fill="#E09A48"/>
+  <!-- muzzle -->
+  <ellipse cx="128" cy="134" rx="32" ry="24" fill="#F7DDB0"/>
+  <!-- light eyebrow spots, the caramelo's mark -->
+  <ellipse cx="106" cy="88" rx="8" ry="5" fill="#F7DDB0"/>
+  <ellipse cx="150" cy="88" rx="8" ry="5" fill="#F7DDB0"/>
+  <!-- eyes -->
+  <circle cx="106" cy="104" r="8.5" fill="#1f130a"/>
+  <circle cx="150" cy="104" r="8.5" fill="#1f130a"/>
+  <circle cx="109" cy="101" r="2.8" fill="#fff"/>
+  <circle cx="153" cy="101" r="2.8" fill="#fff"/>
+  <!-- nose and smile -->
+  <ellipse cx="128" cy="123" rx="12" ry="8.5" fill="#1f130a"/>
+  <path d="M128 131 V139 M114 140 C120 148 128 146 128 139 C128 146 136 148 142 140" fill="none" stroke="#1f130a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M121 146 C121 158 135 158 135 146 Z" fill="#E8657A"/>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="FAZOL">
+  <!-- FAZOL ("Faz o L"): an abstract hand making the L. Unofficial meme - no face,
+       no person, no party symbol, no flag. -->
+  <defs>
+    <clipPath id="coin"><circle cx="128" cy="128" r="116"/></clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="#7a0a14"/>
+  <circle cx="128" cy="128" r="116" fill="#D7263D"/>
+  <g clip-path="url(#coin)" fill="#FFFFFF">
+    <!-- index finger, up -->
+    <rect x="78" y="38" width="38" height="130" rx="19"/>
+    <!-- thumb, out to the side: the foot of the L -->
+    <rect x="96" y="146" width="122" height="36" rx="18"/>
+    <!-- palm with the curled fingers, and the wrist -->
+    <rect x="78" y="150" width="96" height="78" rx="26"/>
+    <rect x="94" y="200" width="70" height="80"/>
+  </g>
+  <!-- the knuckles of the curled fingers -->
+  <path d="M132 190 H170 M132 206 H168" stroke="#D7263D" stroke-width="5" stroke-linecap="round"/>
+</svg>

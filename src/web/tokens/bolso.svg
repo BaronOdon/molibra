@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="BOLSO">
+  <!-- BOLSO: an abstract hand making the "arminha" gesture - thumb up, index
+       pointing. Drawn exactly like FAZOL's "L" hand so the two read as a pair.
+       Unofficial meme - no face, no person, no weapon, no party mark, no flag. -->
+  <defs>
+    <clipPath id="coin"><circle cx="128" cy="128" r="116"/></clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="#FFDF00"/>
+  <circle cx="128" cy="128" r="116" fill="#009C3B"/>
+  <g clip-path="url(#coin)" fill="#FFFFFF">
+    <!-- thumb, up -->
+    <rect x="66" y="50" width="36" height="100" rx="18"/>
+    <!-- index finger, pointing -->
+    <rect x="66" y="104" width="160" height="38" rx="19"/>
+    <!-- palm with the curled fingers, and the wrist -->
+    <rect x="66" y="112" width="100" height="100" rx="26"/>
+    <rect x="80" y="190" width="74" height="90"/>
+  </g>
+  <!-- the knuckles of the curled fingers -->
+  <path d="M124 160 H160 M124 178 H158" stroke="#009C3B" stroke-width="5" stroke-linecap="round"/>
+</svg>

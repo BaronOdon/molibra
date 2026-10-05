@@ -47,6 +47,7 @@ function currentCommit() {
 }
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
 import { poolHistoryCache } from './poolhistory.js';
+import { buildTokenList, logoFile, tokenPageData, renderTokenPage } from './tokens.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
 import { checkPeerUrl } from './netguard.js';
 
@@ -1006,6 +1007,54 @@ async function handleAudit(node, req, res) {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
     res.end(readFileSync(file, 'utf8'));
     return;
+  }
+
+  /**
+   * The coins: a Uniswap-standard token list, one page per coin, and the logos.
+   * Metadata in src/web/tokens/tokens.json, not-yet-deployed addresses from
+   * src/web/markets.json - see src/tokens.js.
+   *
+   * ⛔ The token list is fetched cross-origin by wallets and DEX front ends, so
+   * it carries Access-Control-Allow-Origin: * (the standard asks for it).
+   * ⛔ /molibra/token/<symbol> answers the PAGE only for a symbol in tokens.json;
+   * anything else falls through to the registry JSON at /molibra/token/{id}
+   * further down, whose ids are 0x hashes and can never collide with a symbol.
+   */
+  if (path === '/tokenlist.json' || path === '/molibra/tokenlist.json') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=300',
+    });
+    res.end(JSON.stringify(buildTokenList(), null, 2));
+    return;
+  }
+  if (path.startsWith('/molibra/tokens/')) {
+    const logo = logoFile(path.slice('/molibra/tokens/'.length));
+    if (logo) {
+      res.writeHead(200, {
+        'Content-Type': logo.type,
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=86400',
+      });
+      res.end(readFileSync(logo.file));       // ⛔ bytes, not utf8
+      return;
+    }
+  }
+  {
+    const short = /^\/token\/([A-Za-z]+)\/?$/.exec(path);
+    if (short && tokenPageData(short[1])) {
+      res.writeHead(301, { Location: '/molibra/token/' + short[1].toLowerCase() + url.search });
+      return res.end();
+    }
+    const page = /^\/molibra\/token\/([A-Za-z]+)\/?$/.exec(path);
+    const data = page && tokenPageData(page[1]);
+    if (data) {
+      const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'token.html');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderTokenPage(readFileSync(file, 'utf8'), data));
+      return;
+    }
   }
 
   // The QR encoder the pay page draws with (Kazuhiko Arase, MIT), vendored and

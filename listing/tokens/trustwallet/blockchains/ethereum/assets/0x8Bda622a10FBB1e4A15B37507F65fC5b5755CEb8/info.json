@@ -1,0 +1,22 @@
+{
+    "name": "Coinspirit",
+    "type": "ERC20",
+    "symbol": "WSRO",
+    "decimals": 18,
+    "website": "https://molibra.org/molibra/token/wsro",
+    "description": "Coinspirit (WSRO) is the coin of the World Spiritual Responsibility Organization, co-author of the Molibra chain. OpenZeppelin ERC-20 with ownership renounced: the mint and pause functions can no longer be called by anyone.",
+    "explorer": "https://etherscan.io/token/0x8Bda622a10FBB1e4A15B37507F65fC5b5755CEb8",
+    "status": "active",
+    "id": "0x8Bda622a10FBB1e4A15B37507F65fC5b5755CEb8",
+    "links": [
+        {
+            "name": "github",
+            "url": "https://github.com/BaronOdon/molibra"
+        },
+        {
+            "name": "whitepaper",
+            "url": "https://molibra.org/molibra/whitepaper"
+        }
+    ],
+    "tags": []
+}

@@ -1,0 +1,24 @@
+{
+    "name": "Bridged MOLI",
+    "type": "ERC20",
+    "symbol": "bMOLI",
+    "decimals": 18,
+    "website": "https://molibra.org/molibra/token/bmoli",
+    "description": "bMOLI is MOLI, the native coin of the Molibra proof-of-work chain (chain ID 20226), on Ethereum. Units are minted only against a proof of MOLI burned on Molibra and return to MOLI through a keyless vault. No owner, no proxy, no pause, no blacklist, no transfer fee.",
+    "explorer": "https://etherscan.io/token/0xa302877eFB74f567F3605851194b46f1d5746822",
+    "status": "active",
+    "id": "0xa302877eFB74f567F3605851194b46f1d5746822",
+    "links": [
+        {
+            "name": "github",
+            "url": "https://github.com/BaronOdon/molibra"
+        },
+        {
+            "name": "whitepaper",
+            "url": "https://molibra.org/molibra/whitepaper"
+        }
+    ],
+    "tags": [
+        "wrapped"
+    ]
+}
