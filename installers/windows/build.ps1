@@ -65,10 +65,10 @@ Set-Content -Path (Join-Path $Stage 'app\COMMIT') -Value $commit -Encoding ASCII
 # ⛔ git archive, never `git show | Out-String`: PowerShell 5.1 re-encodes native
 #    output through the console code page and would corrupt every non-ASCII byte.
 $ltar = Join-Path $env:TEMP 'molibra-launcher.tar'
-git -C $Repo archive --format=tar -o $ltar HEAD installers/launcher/molibra-miner.mjs installers/launcher/status.html
+git -C $Repo archive --format=tar -o $ltar HEAD installers/launcher/molibra-miner.mjs installers/launcher/status.html installers/launcher/LEIA-ME.txt
 & (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $ltar -C $Stage --strip-components 2
 Remove-Item $ltar
-foreach ($f in 'molibra-miner.mjs', 'status.html') {
+foreach ($f in 'molibra-miner.mjs', 'status.html', 'LEIA-ME.txt') {
   if (-not (Test-Path (Join-Path $Stage $f))) { throw "staged $f is missing" }
 }
 Write-Host "app      $($commit.Substring(0,7))"

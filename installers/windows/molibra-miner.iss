@@ -54,6 +54,7 @@ Source: "stage\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs ignor
 Source: "stage\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs ignoreversion
 Source: "stage\molibra-miner.mjs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\status.html"; DestDir: "{app}"; Flags: ignoreversion
+Source: "stage\LEIA-ME.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\Molibra Miner.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\window-version.txt"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -63,6 +64,8 @@ Source: "stage\window-version.txt"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{userdesktop}\Molibra Miner"; Filename: "{app}\Molibra Miner.exe"; WorkingDir: "{app}"; Comment: "Molibra Miner"
 Name: "{group}\Molibra Miner"; Filename: "{app}\Molibra Miner.exe"; WorkingDir: "{app}"; Comment: "Molibra Miner"
 Name: "{group}\Uninstall Molibra Miner"; Filename: "{uninstallexe}"
+; The read-me says where a created wallet's key lives and how to back it up.
+Name: "{group}\Leia-me - carteira e backup"; Filename: "{app}\LEIA-ME.txt"
 
 [Run]
 ; 1. the wallet: an address typed on the wallet page, or a new wallet

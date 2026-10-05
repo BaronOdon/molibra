@@ -1,0 +1,67 @@
+MOLIBRA MINER - LEIA-ME / README
+================================
+
+PORTUGUES
+---------
+
+O que o Molibra Miner faz
+  Roda um no da rede Molibra no seu computador e minera MOLI para uma
+  carteira. Comeca com o computador e continua depois que voce sai da conta.
+  A primeira partida baixa a cadeia (30 a 60 minutos); a mineracao comeca
+  sozinha depois disso. A janela "Molibra Miner" mostra o andamento.
+
+Onde ficam os arquivos
+  Windows : %LOCALAPPDATA%\Molibra
+            (C:\Users\<seu usuario>\AppData\Local\Molibra)
+  Mac     : ~/Library/Application Support/Molibra
+
+SE O INSTALADOR CRIOU UMA CARTEIRA NOVA PARA VOCE
+  A chave secreta esta SO no seu computador, neste arquivo, na pasta acima:
+
+      MY-WALLET-KEEP-SECRET.txt
+
+  Ninguem mais tem uma copia - nem a Molibra. Se o arquivo se perder
+  (computador formatado, disco com defeito), os MOLI dessa carteira se perdem.
+
+  1. FACA UM BACKUP AGORA: copie o arquivo para um pendrive ou imprima-o e
+     guarde em lugar seguro.
+  2. Para ver e usar os seus MOLI:
+       MetaMask > Adicionar conta > Importar conta > cole a "Private key"
+       do arquivo. Confira se o endereco e o mesmo do arquivo ("Address").
+  3. Adicione a rede Molibra na carteira:
+       abra molibra.org/molibra/connect no navegador da carteira, ou manual:
+       rede Molibra - ID da cadeia 20226 - RPC https://molibra.org - simbolo MOLI.
+
+  NUNCA envie a chave privada a ninguem. A Molibra nunca pede a chave.
+  Nao desinstale o Miner para "consertar" algo antes de fazer o backup.
+
+Minerar para a sua propria carteira
+  Reinstale o Miner e digite o endereco da sua carteira (0x...) na tela da
+  carteira. O que ja foi minerado continua na carteira antiga; para mover,
+  importe a chave antiga uma vez e envie os MOLI.
+
+Mais informacoes: molibra.org - molibra.org/download
+
+
+ENGLISH
+-------
+
+What it does
+  Runs a Molibra node on this computer and mines MOLI to a wallet. It starts
+  with the computer and keeps running after you log off. The first start
+  downloads the chain (30 to 60 minutes); mining starts by itself after that.
+
+Where the files are
+  Windows : %LOCALAPPDATA%\Molibra
+  Mac     : ~/Library/Application Support/Molibra
+
+IF THE INSTALLER CREATED A NEW WALLET FOR YOU
+  Its secret key exists ONLY on this computer, in MY-WALLET-KEEP-SECRET.txt
+  in the folder above. Nobody else has a copy. If the file is lost, the MOLI
+  in that wallet are lost.
+  1. Back it up now (USB stick, or print it and keep it safe).
+  2. MetaMask > Add account > Import account > paste the "Private key".
+     Check the address matches the "Address" in the file.
+  3. Add the Molibra network: molibra.org/molibra/connect, or chain ID 20226,
+     RPC https://molibra.org, symbol MOLI.
+  Never send the private key to anyone. Molibra will never ask for it.

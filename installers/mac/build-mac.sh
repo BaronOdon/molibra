@@ -27,6 +27,8 @@ mkdir -p "$PAY/app" "$APPS"
 tar -xf "$APP_TAR" -C "$PAY/app"
 cp "$LAUNCHER" "$PAY/molibra-miner.mjs"
 cp "$(dirname "$LAUNCHER")/status.html" "$PAY/status.html"
+cp "$(dirname "$LAUNCHER")/LEIA-ME.txt" "$PAY/LEIA-ME.txt"
+cp "$(dirname "$LAUNCHER")/LEIA-ME.txt" "$APPS/Molibra Miner - LEIA-ME.txt"
 cp "$HERE/Uninstall Molibra Miner.command" "$APPS/"
 chmod 755 "$APPS/Uninstall Molibra Miner.command"
 # ---- the application window: native SwiftUI, Apple Silicon + Intel, signed

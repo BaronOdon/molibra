@@ -47,7 +47,7 @@ launchctl bootout "system/$LABEL" 2>/dev/null || true
 
 # ---- 1. files (keeping chain data, config and any wallet)
 mkdir -p "$ROOT/logs"
-cp -f "$PAYLOAD/molibra-miner.mjs" "$PAYLOAD/status.html" "$ROOT/"
+cp -f "$PAYLOAD/molibra-miner.mjs" "$PAYLOAD/status.html" "$PAYLOAD/LEIA-ME.txt" "$ROOT/"
 rm -rf "$ROOT/app-staged" && cp -R "$PAYLOAD/app" "$ROOT/app-staged"
 if [ -f "$ROOT/app/COMMIT" ]; then rm -rf "$ROOT/app-staged"; else rm -rf "$ROOT/app"; mv "$ROOT/app-staged" "$ROOT/app"; fi
 
