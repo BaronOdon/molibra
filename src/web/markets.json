@@ -1,0 +1,110 @@
+{
+  "about": "The one list of MOLI markets on Molibra that the pages read: /molibra/swap and /molibra/cotacao list every entry with a token AND a pool; /molibra/memes prefills its deploy plan from the meme entries. Served at /molibra/markets.json. A pool existing says nothing about whether an asset is worth anything.",
+  "updated": "2026-10-05",
+  "factory": null,
+  "markets": [
+    {
+      "key": "wsro",
+      "symbol": "WSRO",
+      "kind": "bridged",
+      "token": "0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a",
+      "pool": "0x4f34d9bc5db2396640d8eb564667e8701528b43d"
+    },
+    {
+      "key": "caramelo",
+      "symbol": "CARAMELO",
+      "kind": "meme",
+      "token": null,
+      "pool": null,
+      "meme": {
+        "name": "Caramelo",
+        "description": "CARAMELO é uma memecoin nativa da Molibra em homenagem ao vira-lata caramelo, o cão de rua do Brasil. É um meme: sem vínculo com o Dogecoin ou com seus criadores, sem dono, sem emissão futura e sem nenhuma promessa de valor. / A Molibra-native meme coin honouring Brazil's caramel street dog. A meme: not affiliated with Dogecoin, no owner, no further issuance, no promise of value.",
+        "supply": "100000000000",
+        "supplyNote": "100 bilhões: o teto original do Dogecoin em 2013 (hoje o DOGE não tem teto; ~171,9 bi emitidos).",
+        "counterpart": "dogecoin",
+        "options": [
+          "dogecoin"
+        ],
+        "seedMoli": "3000"
+      }
+    },
+    {
+      "key": "bolso",
+      "symbol": "BOLSO",
+      "kind": "meme",
+      "token": null,
+      "pool": null,
+      "meme": {
+        "name": "Bolsonaro",
+        "description": "BOLSO é um meme não oficial, sem vínculo com Jair Bolsonaro, sua família ou qualquer partido/campanha: nenhum deles o criou, o endossa ou tem relação com este token. Sem imagem, sem dono, sem emissão futura e sem nenhuma promessa de valor. / Unofficial meme, not affiliated with or endorsed by Jair Bolsonaro, his family or any party/campaign. No likeness, no owner, no further issuance, no promise of value.",
+        "supply": "1000000000",
+        "supplyNote": "1 bilhão, o mesmo total fixo do TRUMP.",
+        "counterpart": "official-trump",
+        "options": [
+          "official-trump"
+        ],
+        "seedMoli": "3000"
+      }
+    },
+    {
+      "key": "fazol",
+      "symbol": "FAZOL",
+      "kind": "bridged-meme",
+      "token": null,
+      "pool": null,
+      "meme": {
+        "name": "Faz o L",
+        "description": "FAZOL é um meme não oficial, inspirado no bordão popular \"Faz o L\". Não tem vínculo com Luiz Inácio Lula da Silva nem com nenhum partido ou campanha: nenhum deles o criou, o endossa ou tem relação com este token. Sem imagem, sem dono, sem emissão futura e sem nenhuma promessa de valor. / Unofficial meme inspired by the popular slogan \"Faz o L\". Not affiliated with or endorsed by Luiz Inácio Lula da Silva or any party or campaign. No likeness, no owner, no further issuance, no promise of value.",
+        "supply": "1000000000",
+        "supplyNote": "1 bilhão, o mesmo total fixo do MELANIA e do TRUMP. Emitido na Ethereum; chega à Molibra 1:1 pela ponte de queima.",
+        "counterpart": "melania-meme",
+        "options": [
+          "melania-meme",
+          "official-trump",
+          "dogwifcoin"
+        ],
+        "seedMoli": "3000",
+        "ethereum": {
+          "chainId": 1,
+          "token": null,
+          "v4Seed": "1000000",
+          "v4Fee": 2500,
+          "v4TickSpacing": 25,
+          "v4RangeMultiple": 5,
+          "bridgeIn": "1000",
+          "bridgeCap": "1000000",
+          "bridgedAsset": null
+        }
+      }
+    }
+  ],
+  "counterparts": {
+    "dogecoin": {
+      "symbol": "DOGE",
+      "chain": "Dogecoin (L1)",
+      "usd": "0.095008"
+    },
+    "official-trump": {
+      "symbol": "TRUMP",
+      "chain": "Solana (SPL)",
+      "usd": "2.03"
+    },
+    "melania-meme": {
+      "symbol": "MELANIA",
+      "chain": "Solana (SPL)",
+      "usd": "0.102346"
+    },
+    "dogwifcoin": {
+      "symbol": "WIF",
+      "chain": "Solana (SPL)",
+      "usd": "0.251978"
+    }
+  },
+  "snapshot": {
+    "at": "2026-10-05T14:35:20Z",
+    "counterpartSource": "CoinGecko /api/v3/coins/markets, last_updated 2026-10-05T14:35:20Z",
+    "moliUsd": "0.008173552228970883",
+    "ethUsd": "2724.4245",
+    "moliUsdSource": "Ethereum block 26126755: Uniswap v4 ETH/bMOLI StateView.getSlot0 (333,321.97 bMOLI per ETH) and Chainlink ETH/USD 2,724.4245 (updated 2026-10-05T13:52:11Z)"
+  }
+}

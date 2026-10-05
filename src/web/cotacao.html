@@ -318,6 +318,13 @@
   <details class="tbl"><summary data-i18n="tableShow">Ver os números</summary><div class="tbl-wrap"><table id="tb-moli"></table></div></details>
 </section>
 
+<section class="card" id="c-markets">
+  <h2 data-i18n="mktTitle">Mercados na Molibra</h2>
+  <p class="explain" data-i18n="mktEx">Cada token com mercado MOLI na própria Molibra, lido de /molibra/markets.json e das reservas de cada pool agora. Um mercado existir não diz nada sobre o valor do token.</p>
+  <div class="tbl-wrap"><table id="tb-markets"></table></div>
+  <p class="explain" id="mktNote" data-i18n="mktMeme">As memecoins são memes não oficiais, sem vínculo com as pessoas ou marcas citadas e sem nenhuma promessa de valor.</p>
+</section>
+
 <!-- ======================================================== HOW TO BUY -->
 <section class="card">
   <h2 data-i18n="howTitle">Como comprar</h2>
@@ -475,6 +482,10 @@ const T = {
     howReturn: 'Trazer bMOLI como MOLI', howReturnSub: 'A ponte de volta: 1 bMOLI vira 1 MOLI na Molibra',
     howPay: 'Pagar e receber com MOLI', howPaySub: 'QR code para lojas e clientes',
     howSwap: 'Trocar na Molibra', howSwapSub: 'MOLI e WSRO na página de trocas',
+    mktTitle: 'Mercados na Molibra',
+    mktEx: 'Cada token com mercado MOLI na própria Molibra, lido de /molibra/markets.json e das reservas de cada pool agora. Um mercado existir não diz nada sobre o valor do token.',
+    mktMeme: 'As memecoins são memes não oficiais, sem vínculo com as pessoas ou marcas citadas e sem nenhuma promessa de valor.',
+    mktHead: 'Token|MOLI por unidade|US$ por unidade|No pool|', mktTrade: 'Trocar', mktNone: 'Nenhum pool com liquidez ainda.',
     foot: 'Esta página só lê as redes. Nada é enviado sem a sua confirmação na carteira.', exchange: 'Trocar',
   },
   en: {
@@ -545,6 +556,10 @@ const T = {
     howReturn: 'Bring bMOLI back as MOLI', howReturnSub: 'The return bridge: 1 bMOLI becomes 1 MOLI on Molibra',
     howPay: 'Pay and get paid in MOLI', howPaySub: 'QR codes for shops and customers',
     howSwap: 'Swap on Molibra', howSwapSub: 'MOLI and WSRO on the swap page',
+    mktTitle: 'Markets on Molibra',
+    mktEx: 'Every token with a MOLI market on Molibra itself, read from /molibra/markets.json and from the reserves of each pool just now. A market existing says nothing about what the token is worth.',
+    mktMeme: 'The memecoins are unofficial memes, not affiliated with the people or brands they name, with no promise of value.',
+    mktHead: 'Token|MOLI per unit|US$ per unit|In the pool|', mktTrade: 'Swap', mktNone: 'No pool with liquidity yet.',
     foot: 'This page only reads the networks. Nothing is sent without your confirmation in your wallet.', exchange: 'Swap',
   },
 };
@@ -1399,6 +1414,7 @@ function renderCalc() {
 function renderAll() {
   renderCharts();
   renderCalc();
+  renderRegistry();
   $('status').textContent = readAt ? t('updated', fmtClock(readAt)) : t('reading');
 }
 
@@ -1445,8 +1461,48 @@ function readHistories() {
   return Promise.all(jobs);
 }
 
+/**
+ * ⭐ Every market in the one registry, /molibra/markets.json: a market added
+ * there appears here with no edit to this page.
+ */
+let REGM = [];
+async function readRegistry() {
+  const reg = await (await fetch(NODE + '/molibra/markets.json', { cache: 'no-store' })).json();
+  const live = (reg.markets || []).filter((m) => /^0x[0-9a-fA-F]{40}$/.test(m.token || '') && /^0x[0-9a-fA-F]{40}$/.test(m.pool || ''));
+  REGM = await Promise.all(live.map(async (m) => {
+    try {
+      const w = words(await molibraCall(m.pool, SEL.reserves));
+      return { symbol: m.symbol, kind: m.kind, rMoli: w[0], rTok: w[1] };
+    } catch (e) { return { symbol: m.symbol, kind: m.kind, rMoli: 0n, rTok: 0n }; }
+  }));
+}
+function renderRegistry() {
+  const tb = $('tb-markets'); if (!tb) return;
+  tb.textContent = '';
+  const head = document.createElement('tr');
+  for (const h of t('mktHead').split('|')) { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); }
+  tb.appendChild(head);
+  // MOLI in US$ = ETH/USD (Chainlink, 8 dp) / bMOLI per ETH (sqrtP^2 / 2^192), when both were read.
+  let moliUsd = null;
+  if (M.eth && M.v4) moliUsd = (Number(M.eth.answer) / 1e8) / (Number(M.v4.sqrtP) ** 2 / 2 ** 192);
+  const rows = REGM.filter((m) => m.rTok > 0n);
+  if (!rows.length) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 5; td.textContent = t('mktNone'); tr.appendChild(td); tb.appendChild(tr); return; }
+  for (const m of rows) {
+    const per = Number(m.rMoli) / Number(m.rTok);
+    const cells = [m.symbol, per.toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US', { maximumSignificantDigits: 6 }),
+      moliUsd ? (per * moliUsd).toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US', { maximumSignificantDigits: 4 }) : '—',
+      (Number(m.rMoli) / 1e18).toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: 0 }) + ' MOLI'];
+    const tr = document.createElement('tr');
+    for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
+    const td = document.createElement('td'); const a = document.createElement('a');
+    a.href = '/molibra/swap?from=' + encodeURIComponent(m.symbol); a.textContent = t('mktTrade'); td.appendChild(a); tr.appendChild(td);
+    tb.appendChild(tr);
+  }
+}
+
 async function refresh() {
   await readMarkets();
+  await readRegistry().catch(() => {});
   renderAll();
   await compute().catch(() => {});
 }

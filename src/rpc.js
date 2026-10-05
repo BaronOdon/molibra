@@ -513,7 +513,7 @@ async function handleAudit(node, req, res) {
     const m = /^\/(?:molibra\/)?([a-z]+)\/?$/i.exec(path);
     // ⛔ not 'download': /download is served as-is further down and is printed
     // on installers and the carousel.
-    const pages = ['pay', 'swap', 'buy', 'cotacao', 'connect', 'return', 'bridgedmoli', 'documents'];
+    const pages = ['pay', 'swap', 'buy', 'cotacao', 'connect', 'return', 'bridgedmoli', 'documents', 'memes'];
     const name = m && m[1].toLowerCase();
     if (name && pages.includes(name) && path !== '/molibra/' + name) {
       res.writeHead(301, { Location: '/molibra/' + name + url.search });
@@ -943,6 +943,30 @@ async function handleAudit(node, req, res) {
   if (path === '/molibra/cotacao') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'cotacao.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * The memecoin deploy plan (CARAMELO, BOLSO on Molibra; FAZOL on Ethereum,
+   * bridged in). An operator page: it holds no key, every step is signed in
+   * the operator's wallet and simulated against the live node first.
+   */
+  if (path === '/molibra/memes') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'memes.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * ⭐ The ONE registry of MOLI markets: swap, cotacao and memes read their
+   * addresses from here instead of each carrying its own copy. Read from disk
+   * on every request so an edit lands without a rebuild.
+   */
+  if (path === '/molibra/markets.json') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'markets.json');
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
     res.end(readFileSync(file, 'utf8'));
     return;
   }

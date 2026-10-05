@@ -763,6 +763,20 @@ async function discover() {
   const seen = new Map();
   for (const m of SEED_MARKETS) seen.set(m.token.toLowerCase(), Object.assign({}, m));
 
+  // ⭐ The one registry (/molibra/markets.json): every market with a token AND
+  // a pool, and the factory, so a new market is listed by editing one file
+  // rather than every page. SEED_MARKETS above stays as the fallback for a
+  // registry that cannot be read.
+  try {
+    const reg = await (await fetch(NODE + '/molibra/markets.json', { cache: 'no-store' })).json();
+    for (const m of reg.markets || []) {
+      if (isAddr(m.token) && isAddr(m.pool) && !seen.has(m.token.toLowerCase())) {
+        seen.set(m.token.toLowerCase(), { token: m.token.toLowerCase(), pool: m.pool.toLowerCase(), symbol: m.symbol || null });
+      }
+    }
+    if (isAddr(reg.factory) && !isAddr($('factoryAddr').value.trim())) $('factoryAddr').value = reg.factory;
+  } catch (e) { /* the seeds and the factory still list what they can */ }
+
   const f = $('factoryAddr').value.trim();
   if (isAddr(f)) {
     try {
