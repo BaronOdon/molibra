@@ -1,13 +1,16 @@
-<title>Coinspirit → Molibra · inbound</title>
+<title>Ethereum → Molibra · inbound</title>
 <!--
   OPERATOR page. It holds no key; every transaction is signed in your wallet.
 
   ⛔⛔ Signing REGISTER makes you this asset's HEADER AUTHORITY, permanently.
-  Every WSRO claim on Molibra will rest on Ethereum headers you attest. That is
-  the one thing on this page that cannot be undone by another transaction.
+  Every claim of the asset on Molibra will rest on Ethereum headers you attest.
+  That is the one thing on this page that cannot be undone by another transaction.
+
+  The asset is a parameter: ?token=0x<Ethereum ERC-20>, Coinspirit (WSRO) when
+  absent. Its symbol and decimals are read from Ethereum, never assumed.
 
   Payloads for the later steps arrive in the URL, never hand-edited in:
-    ?commit=0x…&claim=0x…
+    ?commit=0x…&claim=0x…[&register=0x…]
 -->
 <style>
   :root{--bg:#0b0b0c;--panel:#141416;--line:#26262b;--ink:#ececf0;--dim:#8b8b94;
@@ -33,7 +36,18 @@
   dt{color:var(--dim)} dd{margin:0;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
 </style>
 
-<h1>Coinspirit (WSRO) → Molibra · inbound</h1>
+<h1><span class="assetName">Coinspirit (WSRO)</span> → Molibra · inbound</h1>
+<div class="card">
+  <h2>0 · Asset</h2>
+  <p class="sub">Any ERC-20 on Ethereum can cross by burn proof once it is registered. Change it with
+    <code>?token=0x…</code> in the address; Coinspirit (WSRO) is the default.</p>
+  <dl>
+    <dt>Ethereum contract</dt><dd id="assetToken">—</dd>
+    <dt>symbol · decimals</dt><dd id="assetMeta">reading Ethereum…</dd>
+    <dt>on Molibra</dt><dd id="assetHere">—</dd>
+  </dl>
+  <div class="log" id="assetLog"></div>
+</div>
 <p class="sub" id="banner">not connected</p>
 
 <div class="card">
@@ -53,12 +67,15 @@
 <div class="card">
   <h2>2 · Register the asset</h2>
   <div class="note bad">
-    ⛔⛔ <b>Signing this makes you WSRO-on-Molibra's header authority, permanently.</b>
+    ⛔⛔ <b>Signing this makes you <span class="assetSym">WSRO</span>-on-Molibra's header authority, permanently.</b>
     Every claim will rest on Ethereum headers you attest, and no later transaction changes that.
     The asset id is derived from (chain 1, contract), so it cannot be squatted — but the
     authority slot is claimed once, by whoever signs first.
   </div>
-  <dl>
+  <p class="sub wsroOnly">The calldata below registers WSRO. For another asset, it arrives as
+    <code>?register=0x…</code> from <code>scripts-inbound/prove-burn.mjs --token</code>, with the
+    deployed BridgedAsset in place of its placeholder.</p>
+  <dl class="wsroOnly">
     <dt>origin</dt><dd>Ethereum chainId 1 · 0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8</dd>
     <dt>Molibra token</dt><dd>0x3f95fe48b15b54152f96490e8a1b7d12c3bc5a10e95b3e7491e5ad83748a33c1</dd>
     <dt>ERC-20 here</dt><dd>0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a</dd>
@@ -74,21 +91,24 @@
 </div>
 
 <div class="card">
-  <h2>2b · Burn the WSRO on Ethereum</h2>
+  <h2>2b · Burn the <span class="assetSym">WSRO</span> on Ethereum</h2>
   <div class="note bad">
+    ⛔⛔ <b>A burn is irreversible.</b> The units are destroyed on Ethereum; they come back only as
+    the Molibra asset, by the claim below.
+  </div>
+  <div class="note bad wsroOnly">
     ⛔⛔ <b>Irreversible, and uniquely so.</b> Ownership of the Coinspirit contract is
     <b>renounced</b> — <code>owner()</code> is the zero address — so <code>mint</code> is
     permanently unreachable. Burned WSRO can never be re-created, by you or anyone.
     Bridging is one-way and always will be.
   </div>
-  <p class="sub">⭐ The upside of the same fact: 21,000,000 is now a <b>ceiling</b>. What remains
+  <p class="sub wsroOnly">⭐ The upside of the same fact: 21,000,000 is now a <b>ceiling</b>. What remains
     on Ethereum plus what exists on Molibra is conserved by arithmetic, not by a promise.</p>
   <dl>
-    <dt>to</dt><dd>0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8 — Coinspirit</dd>
+    <dt>to</dt><dd id="burnTo">0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8 — Coinspirit</dd>
     <dt>function</dt><dd>burn(uint256)</dd>
-    <dt>after</dt><dd>supply 21,000,000 → 20,998,000 · +2,000 claimable here</dd>
   </dl>
-  <label>Amount to burn, in WSRO</label>
+  <label>Amount to burn, in <span class="assetSym">WSRO</span></label>
   <input id="burnAmount" value="2000">
   <div class="log" id="burnDecoded"></div>
   <button id="burn">Burn on Ethereum</button>
@@ -142,6 +162,107 @@ let account = null;
 
 // Run-specific payloads arrive in the URL — never hand-edited into this file.
 const params = new URLSearchParams(location.search);
+
+/* ASSET-BEGIN — pure functions, no DOM, no network. Run verbatim by test/inbound-page.mjs. */
+const WSRO_CONTRACT = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+/** The Molibra ERC-20 of WSRO: where payloads went before the page took an asset parameter. */
+const WSRO_HERE = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
+const BURN_SELECTOR = '0x42966c68';   // burn(uint256) — verified against keccak
+const DECIMALS_SELECTOR = '0x313ce567';   // decimals()
+const SYMBOL_SELECTOR = '0x95d89b41';     // symbol()
+/** ?token=0x… or WSRO; anything that is not an address is refused, not guessed. */
+function pickToken(raw) {
+  if (raw === null || raw === undefined || raw === '') return WSRO_CONTRACT;
+  const t = String(raw).trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(t)) throw new Error('?token must be an Ethereum contract address');
+  return t;
+}
+/** A whole-unit decimal string to base units, exactly. ⛔ No floating point near an amount. */
+function toUnits(s, decimals) {
+  const t = String(s ?? '').trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(t)) throw new Error('the amount must be a positive number');
+  const [w, f = ''] = t.split('.');
+  if (f.length > decimals) throw new Error(`at most ${decimals} decimal places`);
+  const v = BigInt(w) * 10n ** BigInt(decimals) + BigInt((f + '0'.repeat(decimals)).slice(0, decimals) || '0');
+  if (v <= 0n) throw new Error('the amount must be positive');
+  return v;
+}
+function fromUnits(v, decimals) {
+  const n = BigInt(v); const base = 10n ** BigInt(decimals);
+  const frac = decimals ? (n % base).toString().padStart(decimals, '0').replace(/0+$/, '') : '';
+  return (n / base).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac ? '.' + frac : '');
+}
+const burnData = (units) => BURN_SELECTOR + BigInt(units).toString(16).padStart(64, '0');
+/** ABI string, or a legacy bytes32 symbol. */
+function decodeSymbol(hex) {
+  const h = String(hex || '').replace(/^0x/, '');
+  const txt = (x) => decodeURIComponent(x.replace(/../g, '%$&'));
+  try {
+    if (h.length === 64) return txt(h).replace(/\0+$/, '') || null;
+    const len = parseInt(h.slice(64, 128), 16);
+    return len > 0 && len <= 64 ? txt(h.slice(128, 128 + len * 2)) : null;
+  } catch (e) { return null; }
+}
+/** The registered asset whose origin is (chain 1, token), from /molibra/bridge. */
+function findAsset(bridge, token) {
+  return (bridge && bridge.assets || []).find((a) => a.origin && String(a.origin.chainId) === '1'
+    && String(a.origin.contract).toLowerCase() === token) || null;
+}
+/**
+ * Where a native payload is addressed. Consensus decodes it before the EVM, so
+ * the address is never called; it must only be a contract (MetaMask refuses
+ * calldata to an account it manages). The asset's own Molibra contract is the
+ * natural choice; a REGISTER names that contract inside its own payload.
+ */
+function payloadTarget(kind, data, asset) {
+  if (kind === 'BRIDGE_REGISTER') {
+    const h = String(data).replace(/^0x/, '');
+    if (h.slice(0, 8) === '3ff035a7' && h.length >= 152) return '0x' + h.slice(112, 152).toLowerCase();
+  }
+  return asset && asset.assetContract ? String(asset.assetContract).toLowerCase() : WSRO_HERE;
+}
+/* ASSET-END */
+
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+let TOKEN = WSRO_CONTRACT;
+let ASSET = { symbol: 'WSRO', decimals: 18, registered: null };
+try { TOKEN = pickToken(params.get('token')); } catch (e) { say('assetLog', e.message, true); }
+
+async function ethCall(to, data) {
+  const r = await fetch(ETH_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+async function loadAsset() {
+  $('assetToken').textContent = TOKEN + (TOKEN === WSRO_CONTRACT ? ' — Coinspirit (default)' : '');
+  for (const e of document.querySelectorAll('.wsroOnly')) e.hidden = TOKEN !== WSRO_CONTRACT;
+  try {
+    const d = await ethCall(TOKEN, DECIMALS_SELECTOR);
+    if (!d || d === '0x') throw new Error('no decimals(): not an ERC-20 on Ethereum');
+    ASSET.decimals = Number(BigInt(d));
+    ASSET.symbol = (decodeSymbol(await ethCall(TOKEN, SYMBOL_SELECTOR).catch(() => null)) || TOKEN.slice(0, 8)).toUpperCase();
+    $('assetMeta').textContent = ASSET.symbol + ' · ' + ASSET.decimals;
+    if (ASSET.decimals !== 18) {
+      say('assetLog', `⚠ ${ASSET.symbol} has ${ASSET.decimals} decimals; BridgedAsset has 18. Units cross 1:1 in base units, `
+        + 'so it needs a Molibra contract with the same decimals before it is registered.', true);
+    }
+  } catch (e) {
+    $('assetMeta').textContent = 'could not read Ethereum: ' + e.message;
+    ASSET.decimals = null;
+  }
+  for (const e of document.querySelectorAll('.assetSym')) e.textContent = ASSET.symbol;
+  for (const e of document.querySelectorAll('.assetName')) e.textContent = TOKEN === WSRO_CONTRACT ? 'Coinspirit (WSRO)' : ASSET.symbol;
+  $('burnTo').textContent = TOKEN + ' — ' + ASSET.symbol;
+  try {
+    ASSET.registered = findAsset(await (await fetch(NODE + '/molibra/bridge')).json(), TOKEN);
+    $('assetHere').textContent = ASSET.registered
+      ? `registered · ERC-20 here ${ASSET.registered.assetContract} · registrar ${ASSET.registered.registrar}`
+      : 'not registered yet — step 2 registers it';
+  } catch (e) { $('assetHere').textContent = 'could not read the node: ' + e.message; }
+  showBurn();
+}
 for (const [k, f] of Object.entries({ commit: 'commitData', claim: 'claimData', register: 'registerData' })) {
   if (params.get(k)) $(f).value = params.get(k);
 }
@@ -228,12 +349,12 @@ async function requireMolibra() {
  * real deployed contract — the payload registered, the EVM was not invoked,
  * and the contract's code was untouched.
  */
-const PAYLOAD_TO = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';   // the Coinspirit ERC-20
-
 async function sendNative(data, logId, label) {
   await requireMolibra();
   const hex = data.trim();
   if (!/^0x[0-9a-fA-F]+$/.test(hex)) throw new Error('that is not calldata');
+  // The asset's own Molibra contract (WSRO's when nothing else is known).
+  const PAYLOAD_TO = payloadTarget(label, hex, ASSET.registered);
   if (PAYLOAD_TO.toLowerCase() === (account ?? '').toLowerCase()) {
     throw new Error('the payload address must not be one of your own accounts');
   }
@@ -268,25 +389,20 @@ async function sendNative(data, logId, label) {
 
 /* ------------------------------------------------------ the burn, on Ethereum */
 
-const WSRO_CONTRACT = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
-const BURN_SELECTOR = '0x42966c68';   // burn(uint256) — verified against keccak
-
 /** Show the exact calldata, so what is signed is read rather than trusted. */
 function burnCalldata() {
-  const n = Number($('burnAmount').value);
-  if (!(n > 0)) throw new Error('the amount must be positive');
-  const wei = BigInt(Math.round(n * 1e18));
-  return { wei, data: BURN_SELECTOR + wei.toString(16).padStart(64, '0') };
+  if (ASSET.decimals === null) throw new Error('the token\'s decimals could not be read from Ethereum; nothing to sign');
+  const wei = toUnits($('burnAmount').value, ASSET.decimals);
+  return { wei, data: burnData(wei) };
 }
 function showBurn() {
   try {
     const { wei, data } = burnCalldata();
     say('burnDecoded', `calldata ${data}\ndecodes as burn(${wei}) = `
-      + `${(Number(wei) / 1e18).toLocaleString()} WSRO — destroyed permanently`);
+      + `${fromUnits(wei, ASSET.decimals)} ${ASSET.symbol} — destroyed permanently`);
   } catch (e) { say('burnDecoded', e.message, true); }
 }
 $('burnAmount').oninput = showBurn;
-showBurn();
 
 $('burn').onclick = async () => {
   try {
@@ -301,12 +417,19 @@ $('burn').onclick = async () => {
       id = Number(await eth().request({ method: 'eth_chainId' }));
       if (id !== 1) throw new Error('still not on Ethereum mainnet');
     }
-    if (!confirm(`Burn ${(Number(wei) / 1e18).toLocaleString()} WSRO on Ethereum?\n\n`
-      + 'Minting is RENOUNCED on that contract. This can never be undone by anyone.')) return;
+    if (!confirm(`Burn ${fromUnits(wei, ASSET.decimals)} ${ASSET.symbol} on Ethereum?\n\n`
+      + (TOKEN === WSRO_CONTRACT ? 'Minting is RENOUNCED on that contract. ' : '')
+      + 'This can never be undone by anyone.')) return;
+    // ⛔ Pre-simulated against Ethereum: a burn above the balance is refused here, not on chain.
+    try {
+      await fetch(ETH_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ from: account, to: TOKEN, data }, 'latest'] }) })
+        .then((r) => r.json()).then((j) => { if (j.error) throw new Error(j.error.message); });
+    } catch (e) { throw new Error('⛔ the burn would revert (' + e.message + '). Nothing was sent.'); }
     say('burnLog', 'awaiting signature…');
     const hash = await eth().request({
       method: 'eth_sendTransaction',
-      params: [{ from: account, to: WSRO_CONTRACT, value: '0x0', data }],
+      params: [{ from: account, to: TOKEN, value: '0x0', data }],
     });
     say('burnLog', `sent: ${hash}\nwaiting to be mined…`);
     for (let i = 0; i < 90; i++) {
@@ -325,7 +448,7 @@ $('burn').onclick = async () => {
 
 $('register').onclick = async () => {
   try {
-    if (!confirm('This makes you WSRO-on-Molibra\'s header authority PERMANENTLY.\n\n'
+    if (!confirm('This makes you the header authority of the asset in this payload, on Molibra, PERMANENTLY.\n\n'
       + 'Every claim will rest on Ethereum headers you attest. Continue?')) return;
     await sendNative($('registerData').value, 'registerLog', 'BRIDGE_REGISTER');
   } catch (e) { say('registerLog', e.message, true); }
@@ -351,7 +474,7 @@ $('refresh').onclick = async () => {
   try {
     const j = await (await fetch(NODE + '/molibra/bridge')).json();
     const n = await (await fetch(NODE + '/molibra')).json();
-    const a = j.assets[0];
+    const a = findAsset(j, TOKEN);
     say('status', `node height ${n.height}\n`
       + `registered assets ${j.assets.length} · claims honoured ${j.claimsHonoured} · headers ${j.headers.length}`
       + (a ? `\n\n${a.symbol}: minted ${(Number(BigInt(a.minted)) / 1e18).toLocaleString()} of cap `
@@ -359,4 +482,5 @@ $('refresh').onclick = async () => {
   } catch (e) { say('status', e.message, true); }
 };
 $('refresh').onclick();
+loadAsset();
 </script>

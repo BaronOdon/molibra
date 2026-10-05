@@ -1,7 +1,8 @@
 /**
  * Molibra - build a REAL inbound proof from a REAL Ethereum burn.
  *
- * Given the Ethereum transaction hash of a WSRO burn, this produces the two
+ * Given the Ethereum transaction hash of a burn of a registered asset (WSRO by
+ * default; any ERC-20 with --token), this produces the two
  * payloads Molibra needs to mint against it:
  *
  *     HEADER_COMMIT   the block's receiptsRoot, attested by the registrar
@@ -21,6 +22,10 @@
  * a root somebody published. This builder is claimant-side tooling.
  *
  *   node scripts-inbound/prove-burn.mjs <ethTxHash> [recipientOnMolibra]
+ *        [--token 0x<Ethereum ERC-20>] [--cap <whole units, for the REGISTER template>]
+ *
+ * The token defaults to WSRO; its symbol and decimals are read on chain
+ * (scripts-inbound/burn-asset.mjs).
  */
 
 import { RLP } from '@ethereumjs/rlp';
@@ -31,15 +36,16 @@ import { foreignTokenId } from '../src/foreign.js';
 import {
   bridgeAuthority, encodeHeaderCommit, encodeBridgeClaim, encodeBridgeRegister,
 } from '../src/bridgemint.js';
+import { parseArgs, resolveBurnAsset, formatUnits, parseUnits } from './burn-asset.mjs';
 
 const ETH_RPC = process.env.ETH_RPC ?? 'https://ethereum-rpc.publicnode.com';
-const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
 const ETH_CHAIN = 1n;
 
-const TX = process.argv[2];
-const RECIPIENT = process.argv[3] ?? null;
+const { pos, flags } = parseArgs(process.argv.slice(2));
+const TX = pos[0];
+const RECIPIENT = pos[1] ?? null;
 if (!/^0x[0-9a-fA-F]{64}$/.test(TX ?? '')) {
-  console.error('usage: node scripts-inbound/prove-burn.mjs <ethTxHash> [recipientOnMolibra]');
+  console.error('usage: node scripts-inbound/prove-burn.mjs <ethTxHash> [recipientOnMolibra] [--token 0x..] [--cap N]');
   process.exit(2);
 }
 
@@ -52,6 +58,22 @@ const rpc = async (method, params = []) => {
   if (j.error) throw new Error(`${method}: ${j.error.message}`);
   return j.result;
 };
+
+// The asset is a parameter (WSRO by default); symbol and decimals come from the chain.
+const ASSET = await resolveBurnAsset({
+  token: flags.token,
+  call: (to, data) => rpc('eth_call', [{ to, data }, 'latest']),
+});
+const TOKEN = ASSET.contract;
+const SYMBOL = ASSET.symbol;
+const CAP = parseUnits(flags.cap ?? '1000000', ASSET.decimals);
+if (ASSET.decimals !== 18) {
+  // ⛔ Units cross 1:1 in BASE units. contracts/BridgedAsset.sol reports 18
+  // decimals, so a 6-decimal origin would show 1e-12 of its real amount there.
+  // Such an asset needs a Molibra-side contract with the origin's decimals
+  // (contracts/VaultAsset.sol has that shape) before it is registered.
+  console.warn(`⚠ ${SYMBOL} has ${ASSET.decimals} decimals; BridgedAsset has 18. Register it against a contract with ${ASSET.decimals}.\n`);
+}
 
 /* ------------------------------------------------------- receipt encoding */
 
@@ -167,7 +189,7 @@ function proofFor(root, key) {
 
 /* ------------------------------------------------------------------ run */
 
-console.log('Molibra inbound - proving an Ethereum burn\n');
+console.log(`Molibra inbound - proving an Ethereum burn of ${SYMBOL} (${TOKEN}, ${ASSET.decimals} decimals)\n`);
 
 const receipt = await rpc('eth_getTransactionReceipt', [TX]);
 if (!receipt) throw new Error('no receipt: is the transaction mined?');
@@ -200,25 +222,25 @@ const proved = proveBurn({
   receiptsRoot: computed,
   txIndex,
   proof,
-  contract: WSRO,
+  contract: TOKEN,
   ethTxHash: TX,
   recipient: RECIPIENT ?? undefined,
 });
 console.log('burn proved by the same code consensus runs:');
 console.log('  burnedBy   ', proved.burnedBy);
-console.log('  amount     ', proved.amount.toString(), '=', (Number(proved.amount) / 1e18).toLocaleString(), 'WSRO');
+console.log('  amount     ', proved.amount.toString(), '=', formatUnits(proved.amount, ASSET.decimals), SYMBOL);
 console.log('  recipient  ', proved.recipient, RECIPIENT ? '(named)' : '(defaults to the burner)');
 console.log('  proof      ', proof.length, 'node(s)\n');
 
-const tokenId = foreignTokenId(ETH_CHAIN, WSRO);
+const tokenId = foreignTokenId(ETH_CHAIN, TOKEN);
 
 console.log('=== 1. BRIDGE_REGISTER — once per asset, by the header authority ===');
 console.log(encodeBridgeRegister({
   originChainId: ETH_CHAIN,
-  contract: WSRO,
+  contract: TOKEN,
   assetContract: '0x' + '11'.repeat(20),   // ⛔ replace with the deployed BridgedAsset
-  cap: 1_000_000n * 10n ** 18n,
-  symbol: 'WSRO',
+  cap: CAP,
+  symbol: SYMBOL,
 }));
 console.log('   ⛔ assetContract above is a PLACEHOLDER — deploy BridgedAsset first, with');
 console.log('      constructor bridge_ =', bridgeAuthority(tokenId), '(keyless)\n');
@@ -239,4 +261,4 @@ console.log(`\n   (${(claim.length - 2) / 2} bytes)`);
 console.log('\nsummary');
 console.log('  Molibra token id :', tokenId);
 console.log('  mint authority   :', bridgeAuthority(tokenId));
-console.log('  will mint        :', (Number(proved.amount) / 1e18).toLocaleString(), 'WSRO to', proved.recipient);
+console.log('  will mint        :', formatUnits(proved.amount, ASSET.decimals), SYMBOL, 'to', proved.recipient);

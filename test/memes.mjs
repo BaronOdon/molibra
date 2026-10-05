@@ -307,6 +307,25 @@ for (const key of ['caramelo', 'bolso', 'fazol']) {
   }
   check(`  ${m.symbol}: its counterpart has a price`, !!REG.counterparts[m.meme.counterpart]?.usd);
 }
+{
+  // Operator, 5 Oct: FAZOL pairs with TRUMP, like BOLSO, so both open at one price.
+  const fz = REG.markets.find((x) => x.key === 'fazol');
+  const bo = REG.markets.find((x) => x.key === 'bolso');
+  check('FAZOL and BOLSO share the TRUMP parity, and TRUMP is the dropdown default',
+    fz.meme.counterpart === 'official-trump' && bo.meme.counterpart === 'official-trump'
+    && fz.meme.options[0] === 'official-trump');
+  // ⛔ Upper tick STRICTLY below the initial tick, including the edge where the
+  // initial tick is itself a multiple of the spacing.
+  const TOK = '0x1234567890abcdef1234567890abcdef12345678';
+  for (const T of [100000n, 100013n, -50000n, -49990n]) {
+    const s = L.sqrtAtTick(T);
+    const v = L.v4Plan({ token: TOK, ethUsdE18: s * s, tokenUsdE18: 1n << 192n, amount1: 10n ** 24n,
+      owner: OPERATOR, deadline: 1n });
+    check(`  v4Plan at initial tick ${T}: upper ${v.tickUpper} < ${v.tick}, lower = upper − ln5 ticks, spacing 25`,
+      v.tick === T && v.tickUpper < v.tick && v.tick - v.tickUpper <= 25n && v.tickUpper % 25n === 0n
+      && v.tickUpper - v.tickLower === 16100n && v.needed <= 10n ** 24n);
+  }
+}
 const bolso = REG.markets.find((x) => x.key === 'bolso');
 check('BOLSO names the person it is NOT affiliated with, and the family and parties',
   bolso.symbol === 'BOLSO' && bolso.meme.name === 'Bolsonaro' && /Jair Bolsonaro, sua família ou qualquer partido\/campanha/.test(bolso.meme.description));

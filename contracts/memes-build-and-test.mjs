@@ -139,8 +139,8 @@ check('memes.html deploys exactly the BridgedAsset from artifacts/pool.json (the
     check('page v4Plan initializePool == ethers', v.init === initE.toLowerCase());
     check('page v4Plan modifyLiquidities(MINT_POSITION, SETTLE_PAIR) == ethers', v.modify === modE.toLowerCase());
     check('page v4Plan multicall == ethers', v.data === mcE.toLowerCase(), `${(v.data.length - 2) / 2} bytes`);
-    check('page v4Plan: tickUpper <= tick, asks only, multiples of 25',
-      v.tickUpper <= v.tick && v.tickLower < v.tickUpper && v.tickUpper % 25n === 0n && v.tickLower % 25n === 0n);
+    check('page v4Plan: tickUpper STRICTLY below the initial tick, asks only, multiples of 25',
+      v.tickUpper < v.tick && v.tickLower < v.tickUpper && v.tickUpper % 25n === 0n && v.tickLower % 25n === 0n);
     check('page v4Plan never asks for more than amount1', v.needed <= 10n ** 24n, v.needed.toString());
     const p2 = new ethers.Interface(['function approve(address token, address spender, uint160 amount, uint48 expiration)']);
     check('page encPermit2Approve == ethers', lib.encPermit2Approve(TOK, OP, 10n ** 24n, 1800000000n)

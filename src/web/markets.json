@@ -56,11 +56,11 @@
         "name": "Faz o L",
         "description": "FAZOL é um meme não oficial, inspirado no bordão popular \"Faz o L\". Não tem vínculo com Luiz Inácio Lula da Silva nem com nenhum partido ou campanha: nenhum deles o criou, o endossa ou tem relação com este token. Sem imagem, sem dono, sem emissão futura e sem nenhuma promessa de valor. / Unofficial meme inspired by the popular slogan \"Faz o L\". Not affiliated with or endorsed by Luiz Inácio Lula da Silva or any party or campaign. No likeness, no owner, no further issuance, no promise of value.",
         "supply": "1000000000",
-        "supplyNote": "1 bilhão, o mesmo total fixo do MELANIA e do TRUMP. Emitido na Ethereum; chega à Molibra 1:1 pela ponte de queima.",
-        "counterpart": "melania-meme",
+        "supplyNote": "1 bilhão, o mesmo total fixo do TRUMP. Paridade com o TRUMP, como o BOLSO: os dois abrem no mesmo preço. Emitido na Ethereum; chega à Molibra 1:1 pela ponte de queima.",
+        "counterpart": "official-trump",
         "options": [
-          "melania-meme",
           "official-trump",
+          "melania-meme",
           "dogwifcoin"
         ],
         "seedMoli": "3000",

@@ -251,9 +251,10 @@ function decString(hex) {
 function isqrt(n) {
   n = BigInt(n);
   if (n < 2n) return n;
-  let x = BigInt(Math.floor(Math.sqrt(Number(n))));
-  if (x === 0n) x = 1n;
-  for (;;) { const y = (x + n / x) >> 1n; if (y >= x) { while (x * x > n) x--; while ((x + 1n) * (x + 1n) <= n) x++; return x; } x = y; }
+  // ⛔ Newton from ABOVE only. A float seed below the root (precision is lost
+  // past 2^53) made an earlier version walk up one unit at a time - forever.
+  let x = 1n << (BigInt(n.toString(2).length + 1) >> 1n);   // 2^ceil(bits/2) >= sqrt(n)
+  for (;;) { const y = (x + n / x) >> 1n; if (y >= x) return x; x = y; }
 }
 /** Decimal string -> integer scaled by 10^places. No floating point near an amount. */
 function parseDec(s, places = 18) {
@@ -330,8 +331,11 @@ function v4Plan({ token, ethUsdE18, tokenUsdE18, amount1, fee = 2500n, tickSpaci
   const tick = tickAtSqrt(sqrtPriceX96);
   // ⛔ Asks only: the range sits entirely BELOW the current tick, where a
   // position is all token1. Buying the token with ETH moves the price down
-  // into it. tickUpper <= tick guarantees no ETH is ever asked for.
-  const tickUpper = floorTo(tick, key.tickSpacing);
+  // into it. tickUpper < tick guarantees no ETH is ever asked for.
+  // ⛔ STRICTLY below the initial tick (operator, 5 Oct): on a tick that is
+  // itself a multiple of the spacing, step one spacing down.
+  let tickUpper = floorTo(tick, key.tickSpacing);
+  if (tickUpper === tick) tickUpper -= key.tickSpacing;
   const tickLower = tickUpper - ticksFor(multiple, key.tickSpacing);
   const sA = sqrtAtTick(tickLower); const sB = sqrtAtTick(tickUpper);
   // Round DOWN so the rounded-UP amount the pool asks for never exceeds amount1.

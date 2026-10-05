@@ -115,14 +115,15 @@ const txs = [
   { step: 'E5 FAZOL.burn(bridgeIn)', from: OP, to: predicted, data: sel('burn(uint256)') + L.word(BURN) },
 ];
 const KEYT = L.addr32('0x' + '00'.repeat(20)) + L.addr32(predicted) + L.word(E.v4Fee) + L.word(E.v4TickSpacing) + L.addr32('0x' + '00'.repeat(20));
-// quoteExactInputSingle(((PoolKey),bool zeroForOne,uint128 exactAmount,bytes hookData)) - 0.001 ETH in
-const QUOTE_IN = 10n ** 15n;
-const quoteData = sel('quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))')
-  + L.word(32) + KEYT + L.word(1) + L.word(QUOTE_IN) + L.word(32 * 8) + L.word(0);
+// quoteExactInputSingle(((PoolKey),bool zeroForOne,uint128 exactAmount,bytes hookData))
+const QUOTES = [10n ** 15n, 10n ** 16n];   // 0.001 and 0.01 ETH in
+const quoteData = (amt) => sel('quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))')
+  + L.word(32) + KEYT + L.word(1) + L.word(amt) + L.word(32 * 8) + L.word(0);
 const reads = [
   { step: 'read getSlot0', from: OP, to: STATE_VIEW, data: sel('getSlot0(bytes32)') + poolId.slice(2) },
   { step: 'read PoolManager FAZOL balance', from: OP, to: predicted, data: sel('balanceOf(address)') + L.addr32(POOL_MANAGER) },
-  { step: 'read V4Quoter 0.001 ETH -> FAZOL', from: OP, to: V4_QUOTER, data: quoteData },
+  { step: 'read V4Quoter 0.001 ETH -> FAZOL', from: OP, to: V4_QUOTER, data: quoteData(QUOTES[0]) },
+  { step: 'read V4Quoter 0.01 ETH -> FAZOL', from: OP, to: V4_QUOTER, data: quoteData(QUOTES[1]) },
 ];
 const order = [txs[0], txs[1], txs[2], txs[3], ...reads, txs[4]];
 const sim = await eth('eth_simulateV1', [{
@@ -146,14 +147,23 @@ check('the pool is initialised at the parity sqrtPriceX96', simSqrt === v.sqrtPr
 check('  and its tick is the page\'s tickAtSqrt (TickMath port agrees with the chain)', simTick === v.tick, `tick ${simTick}`);
 const pmBal = BigInt(res[5].returnData);
 check('the PoolManager holds the FAZOL the page said the position needs', pmBal === v.needed, `${f18(pmBal, 4)} FAZOL`);
-const qOut = BigInt('0x' + res[6].returnData.slice(2, 66));
-const parityOut = (QUOTE_IN * ethUsdE18) / tokUsdE18;
-check('a 0.001 ETH buy is quoted near parity, less the 0.25% fee and the 25-tick gap',
-  qOut < parityOut && qOut * 1000n > parityOut * 990n, `${f18(qOut, 4)} FAZOL vs ${f18(parityOut, 4)} at parity`);
-const burnLog = res[7].logs?.find((l) => l.topics?.[2] === '0x' + '00'.repeat(32));
+const quotes = QUOTES.map((amt, i) => {
+  const out = BigInt('0x' + res[6 + i].returnData.slice(2, 66));
+  const atParity = (amt * ethUsdE18) / tokUsdE18;
+  // avg price paid over parity, bp: fee 0.25% + the gap to tickUpper + the move inside the range
+  const bp = Number(((atParity - out) * 1_000_000n) / atParity) / 10000;   // percent
+  check(`a ${f18(amt, 3)} ETH buy is quoted below parity by the fee, the tick gap and its own impact`,
+    out < atParity && out * 100n > atParity * 98n, `${f18(out, 6)} FAZOL vs ${f18(atParity, 6)} at parity (${bp.toFixed(2)}% less)`);
+  return { ethIn: f18(amt, 3), fazolOut: f18(out, 6), atParity: f18(atParity, 6), belowParityPct: bp.toFixed(3) };
+});
+const burnLog = res[8].logs?.find((l) => l.topics?.[2] === '0x' + '00'.repeat(32));
 check('E5 burn emits Transfer(operator, 0x0, amount) from FAZOL - what src/burnproof.js proves',
   !!burnLog && burnLog.address.toLowerCase() === predicted && BigInt(burnLog.data) === BURN && burnLog.topics[1].endsWith(OP.slice(2)));
 
+console.log(`
+  starting price: US$ ${cpUsd} = ${f18((tokUsdE18 * 10n ** 18n) / moliUsdE18, 4)} MOLI = ${(Number(tokUsdE18) / Number(ethUsdE18)).toPrecision(6)} ETH (${f18((ethUsdE18 * 10n ** 18n) / tokUsdE18, 4)} FAZOL per ETH)`);
+console.log(`  ticks: initial ${v.tick}, position [${v.tickLower}, ${v.tickUpper}) - upper strictly below initial: ${v.tickUpper < v.tick}`);
+check('the position\'s upper tick is strictly below the initial tick', v.tickUpper < v.tick && simTick > v.tickUpper);
 // Fees: what each signature costs at today's base fee, worst case 2×base + tip.
 const gasOf = (c) => (BigInt(c.sim.gasUsed) * 125n) / 100n;
 let worst = 0n; let likely = 0n;
@@ -200,6 +210,9 @@ const plan = {
     counterpart: fz.meme.counterpart, counterpartUsd: cpUsd, counterpartSource: cpSrc, operatorEthNonce: Number(nonce), operatorEth: f18(ethBal, 6) },
   ethereum: {
     fazol: { predictedAddress: predicted, validOnlyIfNextTxFromOperatorIsTheDeploy: true, name: fz.meme.name, symbol: 'FAZOL', supply: fz.meme.supply },
+    startingPrice: { usd: cpUsd, moli: f18((tokUsdE18 * 10n ** 18n) / moliUsdE18, 4), eth: (Number(tokUsdE18) / Number(ethUsdE18)).toPrecision(6),
+      fazolPerEth: f18((ethUsdE18 * 10n ** 18n) / tokUsdE18, 6) },
+    quotes,
     pool: { key: v.key, poolId, sqrtPriceX96: v.sqrtPriceX96.toString(), tick: Number(v.tick), tickLower: Number(v.tickLower), tickUpper: Number(v.tickUpper),
       liquidity: v.liquidity.toString(), fazolIn: v.needed.toString(), fazolPerEth: f18((ethUsdE18 * 10n ** 18n) / tokUsdE18, 4) },
     txs: txs.map((c) => ({ step: c.step, to: c.to ?? null, data: c.data, simulatedGasUsed: Number(BigInt(c.sim.gasUsed)), gas: Number(c.gas),
