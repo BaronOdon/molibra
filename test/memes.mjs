@@ -45,7 +45,7 @@ function check(label, ok, detail = '') {
 const region = page.match(/\/\* ABI-BEGIN[\s\S]*?\*\/([\s\S]*?)\/\* ABI-END \*\//);
 check('memes.html has an ABI-BEGIN/ABI-END region', !!region);
 const L = new Function(region[1] + `
-return { word, addr32, encCtor, decString, isqrt, parseDec, parityTokens, openingPrice, seedMoliFor, MAX_OPENING_PRICE, quoteOut, impactBp, firstShares };`)();
+return { word, addr32, encCtor, decString, isqrt, parseDec, parityTokens, openingPrices, curveTargetWei, seedMoliFor, MAX_OPENING_PRICE, quoteOut, impactBp, firstShares };`)();
 const pageConst = (name) => { const m = page.match(new RegExp(`const ${name} = '([^']*)';`)); return m && m[1]; };
 const MEME_BYTECODE = pageConst('MEME_BYTECODE');
 const FACTORY_BYTECODE = pageConst('FACTORY_BYTECODE');
@@ -161,7 +161,22 @@ const factory = await deploy(OPERATOR, FACTORY_BYTECODE, '', 'factory deploy');
 check('the factory deploys', state.hasCode(factory), factory);
 const report = [];
 
+// The page's scale (5 Oct 2026): parity = the ratio between the coins; buying out all
+// three curves costs 30 days of MOLI mining.
 const anchorUsdE18 = L.parseDec(REG.counterparts['official-trump'].usd);
+const MEME_KEYS = ['caramelo', 'bolso', 'fazol'];
+const memeRows = MEME_KEYS.map((k) => REG.markets.find((x) => x.key === k));
+const PRICES = Object.fromEntries(L.openingPrices(
+  memeRows.map((m) => ({ curve: BigInt(m.meme.allocation.curve), cpUsdE18: L.parseDec(REG.counterparts[m.meme.counterpart].usd) })),
+  anchorUsdE18, L.curveTargetWei()).map((p, i) => [MEME_KEYS[i], p]));
+const PRICE_BY_SYMBOL = Object.fromEntries(memeRows.map((m) => [m.symbol, PRICES[m.key]]));
+{
+  const buyout = memeRows.reduce((sum, m) => sum + 3n * L.parseDec(m.meme.allocation.curve) * PRICES[m.key] / UNIT, 0n);
+  const target = L.curveTargetWei();
+  check('buying out all three curves costs 30 days of MOLI mining (2 MOLI x 86,400 s / 22.37 s x 30)',
+    target === 231738n * UNIT && buyout <= target && target - buyout < UNIT / 1000n, `${fmt(buyout, 2)} of ${fmt(target, 2)} MOLI`);
+  check('BOLSO and FAZOL open at the same price (same reference)', PRICES.bolso === PRICES.fazol);
+}
 async function market(sym, token, seedMoli, seedTok, cpUsd) {
   let r = await send(OPERATOR, factory, sel('create(address)') + addr(token), 0n, `${sym} create pool`);
   check(`${sym}: the factory creates its MOLI market`, !r.failed);
@@ -174,7 +189,7 @@ async function market(sym, token, seedMoli, seedTok, cpUsd) {
   const res = toHex(await view(pool, sel('reserves()'))).slice(2);
   const rm = BigInt('0x' + res.slice(0, 64)); const rt = BigInt('0x' + res.slice(64, 128));
   const spot = (rm * UNIT) / rt;                       // MOLI per token, 18 dp
-  const parity = L.openingPrice(L.parseDec(cpUsd), anchorUsdE18);
+  const parity = PRICE_BY_SYMBOL[sym];
   const err = spot > parity ? spot - parity : parity - spot;
   check(`${sym}: the pool's spot price IS the parity`, err * 1_000_000n <= parity,
     `${fmt(spot, 6)} MOLI vs parity ${fmt(parity, 6)}`);
@@ -229,7 +244,7 @@ async function distribute(m, token, pool, { vesting }) {
     check(`${sym}: vesting deployed and funded with 4% (${fmt(vAmt, 0)})`, !r.failed && await bal(token, vest) === vAmt);
     const wallet = L.parseDec(m.meme.allocation.wallet);
     const opBal = await bal(token, OPERATOR);
-    // 5 Oct 2026: the seed IS the operator's whole 1% (operator's scale, 1 MOLI = 1,000,000 BOLSO).
+    // 5 Oct 2026: the seed IS the operator's whole 1% (operator's scale: all three curves = 30 days of mining).
     check(`${sym}: the whole 1% seeded the pool, so the operator holds no free tokens`,
       opBal === 0n && wallet === L.parseDec(m.meme.supply) / 100n, `${fmt(opBal, 2)} ${sym}`);
     check(`${sym}: 95 + 4 + 1 = the whole supply`,
@@ -253,18 +268,16 @@ for (const key of ['caramelo', 'bolso', 'fazol']) {
     `${Number(m.meme.supply).toLocaleString('en-US')} ${m.symbol}`);
   check(`${m.symbol}: the on-chain description is the registry's, disclaimer included`,
     await str(token, sel('description()')) === m.meme.description);
-  const price = L.openingPrice(L.parseDec(cp.usd), anchorUsdE18);
+  const price = PRICES[key];
   const seedTok = L.parseDec(m.meme.allocation.wallet);
   const seedMoli = L.seedMoliFor(seedTok, price);
   // ⛔ The 5 Oct failure, as a test: a memecoin opens at a tiny fraction of a MOLI,
   // and the whole supply is worth far less than the MOLI that exists.
   check(`${m.symbol}: opens far below 1 MOLI (${fmt(price, 12)} MOLI; 1 MOLI = ${(UNIT / price).toLocaleString('en-US')} ${m.symbol})`,
     price > 0n && price < L.MAX_OPENING_PRICE);
-  check(`${m.symbol}: whole-supply value at the opening is under 10,000 MOLI`,
-    (supply * price) / UNIT < 10_000n * UNIT, `${fmt((supply * price) / UNIT, 0)} MOLI`);
-  if (m.meme.counterpart === 'official-trump') {
-    check(`${m.symbol}: 1 MOLI = 1,000,000 ${m.symbol} exactly (operator's scale)`, price === UNIT / 1_000_000n);
-  }
+  // ~299,500 MOLI exist at block 149,729: every coin's whole supply opens well under that.
+  check(`${m.symbol}: whole-supply value at the opening is under 20% of today's MOLI (60,000)`,
+    (supply * price) / UNIT < 60_000n * UNIT, `${fmt((supply * price) / UNIT, 0)} MOLI`);
   used[key] = seedMoli;
   const pool = await market(m.symbol, token, seedMoli, seedTok, cp.usd);
   await distribute(m, token, pool, { vesting: true });

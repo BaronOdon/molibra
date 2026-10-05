@@ -440,10 +440,13 @@ console.log('\n6. the three coins at their parities\n');
   // 1 MOLI = 1,000,000 of a TRUMP-referenced coin; the seed is the whole 1%.
   const e18 = (s) => BigInt(Math.round(Number(s) * 1e6)) * 10n ** 12n;
   const anchorUsd = e18(REG.counterparts['official-trump'].usd);
-  for (const key of ['caramelo', 'bolso', 'fazol']) {
-    const m = REG.markets.find((x) => x.key === key);
-    const cp = REG.counterparts[m.meme.counterpart];
-    const p0 = (e18(cp.usd) * UNIT) / (anchorUsd * 1_000_000n);
+  // Scale: buying out all three curves = 30 days of mining (2 MOLI x 86,400 s / 22.37 s x 30).
+  const target = ((30n * 86400n * 100n) / 2237n) * 2n * UNIT;
+  const rows = ['caramelo', 'bolso', 'fazol'].map((k) => REG.markets.find((x) => x.key === k));
+  const ratio = (m) => (e18(REG.counterparts[m.meme.counterpart].usd) * UNIT) / anchorUsd;
+  const weight = rows.reduce((sum, m) => sum + BigInt(m.meme.allocation.curve) * ratio(m), 0n);
+  for (const m of rows) {
+    const p0 = (target * ratio(m)) / (3n * weight);
     const supply = BigInt(m.meme.supply) * UNIT;
     const curveAmt = BigInt(m.meme.allocation.curve) * UNIT;
     const seedMoli = ((supply / 100n) * p0) / UNIT;

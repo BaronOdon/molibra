@@ -14,8 +14,9 @@
   MOLI goes into the MolibraPool as LP shares the CURVE holds, LOCKED until
   2026-10-26T00:00Z; after that the operator may withdraw them, as protection
   against manipulation, not as a plan to sell), the operator's whole 1% seeding the pool at the opening price - parity is the
-  RATIO between the coins at 1 MOLI = 1,000,000 BOLSO = 1,000,000 FAZOL, CARAMELO
-  by DOGE:TRUMP (operator, 5 Oct 2026) - as the OPERATOR's LP shares (NOT locked,
+  RATIO between the coins (BOLSO = FAZOL, CARAMELO by DOGE:TRUMP), scaled so that
+  buying out all three curves costs 30 days of MOLI mining (operator, 5 Oct
+  2026) - as the OPERATOR's LP shares (NOT locked,
   withdrawable at any time),
   4% in the operator's TokenVesting. Each declares a
   reference pair (CARAMELO-DOGE, BOLSO-TRUMP, FAZOL-TRUMP) for display only.
@@ -86,12 +87,16 @@
 
 <div class="card">
   <h2>1 · Paridades</h2>
-  <p class="sub">Preço inicial de cada pool = preço em US$ da moeda de referência ÷ preço do MOLI em US$
-    (pool v4 ETH/bMOLI × Chainlink ETH/USD). O primeiro depósito <b>define</b> o preço; depois só trocas o movem.</p>
+  <p class="sub">Paridade = a <b>proporção entre as moedas</b>: BOLSO = FAZOL, e CARAMELO : BOLSO = DOGE : TRUMP
+    (CoinGecko). A <b>escala</b> vem do dinheiro do próprio MOLI: comprar as três curvas inteiras custa 30 dias de
+    mineração (2 MOLI por bloco, média medida de 22,37 s). Uma memecoin abre a uma fração mínima do MOLI. O preço
+    fica fixo em MOLI; em US$, R$ e ETH ele acompanha o bMOLI contra o ETH (pool v4 ETH/bMOLI × Chainlink ETH/USD).
+    O primeiro depósito <b>define</b> o preço; depois só trocas o movem.</p>
   <button id="live" class="ghost">Ler preços ao vivo</button>
   <div class="log" id="priceLog">—</div>
   <div class="wrap"><table id="parity"><thead><tr>
     <th>Moeda</th><th>Referência</th><th>US$</th><th>MOLI por moeda</th><th>Semente MOLI</th><th>Semente moeda</th>
+    <th>Valor de abertura (supply inteiro)</th><th>Comprar a curva inteira</th>
     <th>Compra 10 MOLI</th><th>100 MOLI</th><th>1.000 MOLI</th><th>Par de referência (só exibição)</th></tr></thead><tbody></tbody></table></div>
   <p class="sub" style="margin-top:8px">Impacto = preço médio pago acima da paridade, já com a taxa de 0,3% do pool.</p>
 </div>
@@ -213,16 +218,30 @@ function parityTokens(seedMoliWei, moliUsdE18, tokenUsdE18) {
   return (BigInt(seedMoliWei) * BigInt(moliUsdE18)) / BigInt(tokenUsdE18);
 }
 /**
- * Opening price, in MOLI wei per whole token. "Parity" is the RATIO between the
- * coins - BOLSO = FAZOL, CARAMELO : BOLSO = DOGE : TRUMP - never dollar equality
- * with the reference coin. The scale is the operator's (5 Oct 2026):
- * 1 MOLI = 1,000,000 BOLSO. A memecoin opens at a tiny fraction of the coin of
- * the chain it lives on; pricing 1 BOLSO at 1 TRUMP (~248 MOLI) was the failure
- * this replaces.
+ * Opening prices, in MOLI wei per whole token, anchored to MOLI's own money
+ * (operator, 5 Oct 2026). "Parity" is the RATIO between the coins - BOLSO =
+ * FAZOL, CARAMELO : BOLSO = DOGE : TRUMP - never dollar equality with the
+ * reference coin; pricing 1 BOLSO at 1 TRUMP (~248 MOLI) was the failure this
+ * replaces. The SCALE is MOLI's mining rate: buying out all three curves costs
+ * CURVE_DAYS of block rewards. The curves are fixed in MOLI forever, so the
+ * anchor is MOLI; their US$/ETH value follows bMOLI against ETH by itself.
+ *
+ *   rewards/day = 86,400 s / 22.37 s (measured mean) x 2 MOLI  ~ 7,725 MOLI
+ *   a linear curve from p0 to 5 p0 sells out at 3 p0 on average
+ *   k = target / (3 x sum(curve_i x ratio_i)),  p_i = k x ratio_i
  */
-const MEMES_PER_MOLI = 1000000n;
-function openingPrice(cpUsdE18, anchorUsdE18) {
-  return (BigInt(cpUsdE18) * 10n ** 18n) / (BigInt(anchorUsdE18) * MEMES_PER_MOLI);
+const CURVE_DAYS = 30n;
+const BLOCK_REWARD_WEI = 2n * 10n ** 18n;
+const MEAN_BLOCK_CENTISECONDS = 2237n;
+function curveTargetWei() {
+  return ((CURVE_DAYS * 86400n * 100n) / MEAN_BLOCK_CENTISECONDS) * BLOCK_REWARD_WEI;
+}
+/** `coins`: [{ curve: whole tokens for sale, cpUsdE18 }] -> opening price of each, same order. */
+function openingPrices(coins, anchorUsdE18, targetWei) {
+  const E18 = 10n ** 18n;
+  const ratios = coins.map((c) => (BigInt(c.cpUsdE18) * E18) / BigInt(anchorUsdE18));
+  const weight = coins.reduce((sum, c, i) => sum + BigInt(c.curve) * ratios[i], 0n);
+  return ratios.map((r) => (BigInt(targetWei) * r) / (3n * weight));
 }
 /** MOLI wei that sit opposite `seedTokWei` at `priceWei` MOLI per whole token. */
 function seedMoliFor(seedTokWei, priceWei) {
@@ -401,6 +420,19 @@ const guard = (logId, fn) => async () => {
 };
 
 /* ============================================================== prices */
+/** MOLI's money as read live: M1 = blocks x 2 MOLI (no premine; burns ignored), and US$ -> R$. */
+let m1Wei = null, usdBrl = null;
+/** A MOLI amount (wei) in MOLI · US$ · R$ · ETH, at the live bMOLI/ETH pool price. */
+function money(wei) {
+  const moli = Number(wei) / 1e18;
+  const parts = [fmt(wei, 2) + ' MOLI'];
+  const u = Number(moliUsd); const e = Number(ethUsd);
+  if (u) parts.push('US$ ' + (moli * u).toLocaleString('pt-BR', { maximumFractionDigits: 2 }));
+  if (u && usdBrl) parts.push('R$ ' + (moli * u * usdBrl).toLocaleString('pt-BR', { maximumFractionDigits: 2 }));
+  if (u && e) parts.push((moli * u / e).toLocaleString('pt-BR', { maximumSignificantDigits: 3 }) + ' ETH');
+  if (m1Wei) parts.push((Number(wei) * 100 / Number(m1Wei)).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '% do M1');
+  return parts.join(' · ');
+}
 async function readLive() {
   say('priceLog', 'lendo…');
   const slot = await erpc('eth_call', [{ to: STATE_VIEW, data: SEL.getSlot0 + BMOLI_POOL_ID.slice(2) }, 'latest']);
@@ -414,14 +446,21 @@ async function readLive() {
   moliUsd = (Number(moliE18) / 1e18).toFixed(18);
   let cg = '';
   try {
-    const ids = Object.keys(REG.counterparts).join(',');
-    const j = await (await fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids + '&vs_currencies=usd')).json();
+    const ids = Object.keys(REG.counterparts).concat('ethereum').join(',');
+    const j = await (await fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids + '&vs_currencies=usd,brl')).json();
     for (const id of Object.keys(REG.counterparts)) if (j[id] && j[id].usd) usd[id] = String(j[id].usd);
+    if (j.ethereum && j.ethereum.usd && j.ethereum.brl) usdBrl = j.ethereum.brl / j.ethereum.usd;
     cg = 'CoinGecko ao vivo';
   } catch (e) { cg = 'CoinGecko indisponível — mantido o instantâneo de ' + REG.snapshot.at; }
+  try { m1Wei = BigInt(await mrpc('eth_blockNumber', [])) * BLOCK_REWARD_WEI; } catch (e) { m1Wei = null; }
   liveAt = Date.now();
   await readPools();
-  say('priceLog', 'MOLI US$ ' + moliUsd + ' (v4 ETH/bMOLI × Chainlink, ETH US$ ' + ethUsd + ') · ' + cg, 'ok');
+  const perDay = (86400n * 100n / MEAN_BLOCK_CENTISECONDS) * BLOCK_REWARD_WEI;
+  say('priceLog', 'MOLI US$ ' + moliUsd + ' (v4 ETH/bMOLI × Chainlink, ETH US$ ' + ethUsd + ') · ' + cg
+    + '\nM1 (MOLI existente): ' + (m1Wei ? money(m1Wei) : '—')
+    + '\nmineração: ' + money(perDay) + ' por dia'
+    + '\nescala: comprar as 3 curvas inteiras = ' + CURVE_DAYS + ' dias de mineração = ' + money(curveTargetWei())
+    + '\nO preço das curvas é fixo em MOLI; o valor em US$/ETH acompanha o bMOLI contra o ETH.', 'ok');
   renderAll();
 }
 
@@ -430,15 +469,24 @@ function plan(key) {
   const m = memeOf(key); const s = (saved[key] = saved[key] || {});
   const cp = s.counterpart || m.meme.counterpart;
   const cpUsd = usd[cp] || REG.counterparts[cp].usd;
-  const anchorUsd = usd[ANCHOR] || REG.counterparts[ANCHOR].usd;
-  const priceMoli = openingPrice(parseDec(cpUsd), parseDec(anchorUsd));
+  const priceMoli = scalePrices()[key];
   // The seed is the operator's whole 1% wallet share, opposite the MOLI it is worth at the opening price.
   const seedTok = parseDec(m.meme.allocation.wallet);
   const seedMoli = seedMoliFor(seedTok, priceMoli);
   return { m, s, cp, cpUsd, seedMoli, seedTok, priceMoli };
 }
-/** The reference the scale is set against: 1 MOLI = 1,000,000 of a TRUMP-referenced coin. */
+/** The reference the ratios are taken against: a TRUMP-referenced coin is ratio 1. */
 const ANCHOR = 'official-trump';
+/** key -> opening price (MOLI wei per token): all three curves together = CURVE_DAYS of mining. */
+function scalePrices() {
+  const coins = COINS.map((key) => {
+    const m = memeOf(key); const s = saved[key] || {};
+    const cp = s.counterpart || m.meme.counterpart;
+    return { curve: BigInt(m.meme.allocation.curve), cpUsdE18: parseDec(usd[cp] || REG.counterparts[cp].usd) };
+  });
+  const prices = openingPrices(coins, parseDec(usd[ANCHOR] || REG.counterparts[ANCHOR].usd), curveTargetWei());
+  return Object.fromEntries(COINS.map((key, i) => [key, prices[i]]));
+}
 /** ⛔ Refuses any price-setting step whose opening price is not a tiny fraction of a MOLI. */
 function saneOrThrow(p) {
   if (p.priceMoli <= 0n || p.priceMoli >= MAX_OPENING_PRICE) {
@@ -459,7 +507,9 @@ function renderParity() {
     }
     sel.value = p.cp;
     sel.onchange = () => { p.s.counterpart = sel.value; persist(); renderAll(); };
-    const cells = [p.m.symbol, sel, p.cpUsd, fmt(p.priceMoli, 12), fmt(p.seedMoli, 4), fmt(p.seedTok, 0)];
+    const fdv = parseDec(p.m.meme.supply) * p.priceMoli / UNIT;
+    const buyout = 3n * parseDec(p.m.meme.allocation.curve) * p.priceMoli / UNIT;
+    const cells = [p.m.symbol, sel, p.cpUsd, fmt(p.priceMoli, 12), fmt(p.seedMoli, 4), fmt(p.seedTok, 0), money(fdv), money(buyout)];
     for (const x of [10n, 100n, 1000n]) cells.push(pct(impactBp(x * UNIT, p.seedMoli, p.seedTok)));
     cells.push(pairText(key));
     cells.forEach((c, i) => { const td = document.createElement('td'); if (typeof c === 'string') td.textContent = c; else td.appendChild(c); if (i >= 2 && i !== 4) td.className = 'n'; tr.appendChild(td); });
