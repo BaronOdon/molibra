@@ -13,9 +13,11 @@
   distributed the same way: 95% in a MoliSaleCurve (sold for MOLI only; every
   MOLI goes into the MolibraPool as LP shares the CURVE holds, LOCKED until
   2026-10-26T00:00Z; after that the operator may withdraw them, as protection
-  against manipulation, not as a plan to sell), a 3,000 MOLI pool seed at parity (the OPERATOR's LP shares: NOT
-  locked, withdrawable at any time),
-  4% in the operator's TokenVesting, 1% in the operator wallet. Each declares a
+  against manipulation, not as a plan to sell), the operator's whole 1% seeding the pool at the opening price - parity is the
+  RATIO between the coins at 1 MOLI = 1,000,000 BOLSO = 1,000,000 FAZOL, CARAMELO
+  by DOGE:TRUMP (operator, 5 Oct 2026) - as the OPERATOR's LP shares (NOT locked,
+  withdrawable at any time),
+  4% in the operator's TokenVesting. Each declares a
   reference pair (CARAMELO-DOGE, BOLSO-TRUMP, FAZOL-TRUMP) for display only.
 
   ⛔ Every coin is a MEME: unofficial, not affiliated with or endorsed by any
@@ -210,6 +212,24 @@ function parseDec(s, places = 18) {
 function parityTokens(seedMoliWei, moliUsdE18, tokenUsdE18) {
   return (BigInt(seedMoliWei) * BigInt(moliUsdE18)) / BigInt(tokenUsdE18);
 }
+/**
+ * Opening price, in MOLI wei per whole token. "Parity" is the RATIO between the
+ * coins - BOLSO = FAZOL, CARAMELO : BOLSO = DOGE : TRUMP - never dollar equality
+ * with the reference coin. The scale is the operator's (5 Oct 2026):
+ * 1 MOLI = 1,000,000 BOLSO. A memecoin opens at a tiny fraction of the coin of
+ * the chain it lives on; pricing 1 BOLSO at 1 TRUMP (~248 MOLI) was the failure
+ * this replaces.
+ */
+const MEMES_PER_MOLI = 1000000n;
+function openingPrice(cpUsdE18, anchorUsdE18) {
+  return (BigInt(cpUsdE18) * 10n ** 18n) / (BigInt(anchorUsdE18) * MEMES_PER_MOLI);
+}
+/** MOLI wei that sit opposite `seedTokWei` at `priceWei` MOLI per whole token. */
+function seedMoliFor(seedTokWei, priceWei) {
+  return (BigInt(seedTokWei) * BigInt(priceWei)) / 10n ** 18n;
+}
+/** ⛔ The sanity bound: no memecoin opens at 0.001 MOLI or more. */
+const MAX_OPENING_PRICE = 10n ** 15n;
 /** MolibraPool.quote, verbatim: 0.3% fee on the input. */
 function quoteOut(amountIn, rIn, rOut) {
   if (amountIn === 0n || rIn === 0n || rOut === 0n) return 0n;
@@ -264,9 +284,23 @@ let moliUsd = null, ethUsd = null;
 let liveAt = null;
 const needLive = () => { if (!liveAt) throw new Error('⛔ leia os preços ao vivo primeiro (passo 1): o depósito define o preço e não pode usar o instantâneo.'); };
 const usd = {};          // counterpart id -> usd decimal string
-const LS = 'molibra.memes.v1';
+// v2 (5 Oct 2026): v1 priced each coin at its reference coin's US$ price. The
+// CARAMELO deployed under v1 is abandoned; carried over are only the factory and
+// tokens whose market was never created (a token alone has no price).
+const LS = 'molibra.memes.v2';
 let saved = {};
-try { saved = JSON.parse(localStorage.getItem(LS) || '{}'); } catch (e) { saved = {}; }
+try { saved = JSON.parse(localStorage.getItem(LS) || 'null') || migrateV1(); } catch (e) { saved = {}; }
+function migrateV1() {
+  let v1 = {};
+  try { v1 = JSON.parse(localStorage.getItem('molibra.memes.v1') || '{}'); } catch (e) { v1 = {}; }
+  const out = {};
+  if (v1.factory) out.factory = v1.factory;
+  for (const key of ['caramelo', 'bolso', 'fazol']) {
+    const s = v1[key];
+    if (s && s.token && !s.pool) out[key] = { token: s.token };
+  }
+  return out;
+}
 const persist = () => { try { localStorage.setItem(LS, JSON.stringify(saved)); } catch (e) {} };
 const memeOf = (key) => REG.markets.find((m) => m.key === key);
 const COINS = ['caramelo', 'bolso', 'fazol'];
@@ -292,7 +326,7 @@ function pairText(key) {
   const m = memeOf(key); const ref = m.meme.referencePair;
   const refUsd = Number(usd[ref.counterpart] || REG.counterparts[ref.counterpart].usd);
   const live = POOLR[key];
-  if (!live) return '1 ' + m.symbol + ' = 1 ' + ref.symbol + ' na abertura (pool ainda não semeado)';
+  if (!live) return 'pool ainda não semeado · a proporção entre as moedas segue ' + ref.symbol + ' / TRUMP';
   const coinUsd = (Number(live.rM) / Number(live.rT)) * Number(moliUsd);
   return '1 ' + m.symbol + ' = ' + (coinUsd / refUsd).toLocaleString('pt-BR', { maximumSignificantDigits: 5 }) + ' ' + ref.symbol
     + ' (US$ ' + coinUsd.toLocaleString('pt-BR', { maximumSignificantDigits: 5 }) + ' vs US$ ' + refUsd + ')';
@@ -396,9 +430,21 @@ function plan(key) {
   const m = memeOf(key); const s = (saved[key] = saved[key] || {});
   const cp = s.counterpart || m.meme.counterpart;
   const cpUsd = usd[cp] || REG.counterparts[cp].usd;
-  const seedMoli = parseDec(s.seedMoli || m.meme.seedMoli);
-  const seedTok = parityTokens(seedMoli, parseDec(moliUsd), parseDec(cpUsd));
-  return { m, s, cp, cpUsd, seedMoli, seedTok, priceMoli: (parseDec(cpUsd) * UNIT) / parseDec(moliUsd) };
+  const anchorUsd = usd[ANCHOR] || REG.counterparts[ANCHOR].usd;
+  const priceMoli = openingPrice(parseDec(cpUsd), parseDec(anchorUsd));
+  // The seed is the operator's whole 1% wallet share, opposite the MOLI it is worth at the opening price.
+  const seedTok = parseDec(m.meme.allocation.wallet);
+  const seedMoli = seedMoliFor(seedTok, priceMoli);
+  return { m, s, cp, cpUsd, seedMoli, seedTok, priceMoli };
+}
+/** The reference the scale is set against: 1 MOLI = 1,000,000 of a TRUMP-referenced coin. */
+const ANCHOR = 'official-trump';
+/** ⛔ Refuses any price-setting step whose opening price is not a tiny fraction of a MOLI. */
+function saneOrThrow(p) {
+  if (p.priceMoli <= 0n || p.priceMoli >= MAX_OPENING_PRICE) {
+    throw new Error('⛔ preço de abertura absurdo: ' + fmt(p.priceMoli, 12) + ' MOLI por ' + p.m.symbol
+      + '. Uma memecoin abre a uma fração mínima do MOLI. Nada foi enviado.');
+  }
 }
 
 function renderParity() {
@@ -413,9 +459,7 @@ function renderParity() {
     }
     sel.value = p.cp;
     sel.onchange = () => { p.s.counterpart = sel.value; persist(); renderAll(); };
-    const seed = document.createElement('input'); seed.value = p.s.seedMoli || p.m.meme.seedMoli; seed.style.width = '90px';
-    seed.onchange = () => { p.s.seedMoli = seed.value; persist(); renderAll(); };
-    const cells = [p.m.symbol, sel, p.cpUsd, fmt(p.priceMoli, 4), seed, fmt(p.seedTok, 4)];
+    const cells = [p.m.symbol, sel, p.cpUsd, fmt(p.priceMoli, 12), fmt(p.seedMoli, 4), fmt(p.seedTok, 0)];
     for (const x of [10n, 100n, 1000n]) cells.push(pct(impactBp(x * UNIT, p.seedMoli, p.seedTok)));
     cells.push(pairText(key));
     cells.forEach((c, i) => { const td = document.createElement('td'); if (typeof c === 'string') td.textContent = c; else td.appendChild(c); if (i >= 2 && i !== 4) td.className = 'n'; tr.appendChild(td); });
@@ -454,9 +498,9 @@ function coinCard(key, host) {
   const ref = p.m.meme.referencePair;
   const rows = [['nome', p.m.meme.name], ['símbolo', sym], ['supply', Number(p.m.meme.supply).toLocaleString('pt-BR') + ' ' + sym + ' → ' + OPERATOR],
     ['descrição (on-chain)', p.m.meme.description], ['token', tokenAddr() || '—'], ['pool', p.s.pool || p.m.pool || '—'],
-    ['semente', fmt(p.seedMoli, 2) + ' MOLI + ' + fmt(p.seedTok, 6) + ' ' + sym], ['preço inicial', fmt(p.priceMoli, 4) + ' MOLI por ' + sym],
+    ['semente', fmt(p.seedMoli, 2) + ' MOLI + ' + fmt(p.seedTok, 6) + ' ' + sym], ['preço inicial', fmt(p.priceMoli, 12) + ' MOLI por ' + sym + ' (1 MOLI = ' + (UNIT / p.priceMoli).toLocaleString('pt-BR') + ' ' + sym + ')'],
     ['distribuição', '95% curva (' + Number(p.m.meme.allocation.curve).toLocaleString('pt-BR') + ') · 4% vesting · 1% carteira (inclui a semente)'],
-    ['curva', (p.s.curve || '—') + ' · fim da venda a ' + fmt(5n * p.priceMoli, 4) + ' MOLI por ' + sym],
+    ['curva', (p.s.curve || '—') + ' · fim da venda a ' + fmt(5n * p.priceMoli, 12) + ' MOLI por ' + sym],
     ['vesting', p.s.vesting || '—'],
     ['par de referência (só exibição)', pairText(key) + ' · ' + ref.symbol + ' é a moeda de comparação, não um lastro']];
   for (const [k, v] of rows) { const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; dl.append(dt, dd); }
@@ -494,14 +538,14 @@ function coinCard(key, host) {
   btn('approve').onclick = run('approve', async (out) => {
     const pool = p.s.pool; if (!isAddr(pool)) throw new Error('crie o mercado primeiro');
     needLive();
-    const pl = plan(key);
+    const pl = plan(key); saneOrThrow(pl);
     await molibraSend(id('approve'), { to: tokenAddr(), data: SEL.approve + addr32(pool) + word(pl.seedTok) }, 80000n);
     out('⭐ aprovado: ' + fmt(pl.seedTok, 6) + ' ' + sym, 'ok');
   });
   btn('seed').onclick = run('seed', async (out) => {
     const pool = p.s.pool; if (!isAddr(pool)) throw new Error('crie o mercado primeiro');
     needLive();
-    const pl = plan(key);
+    const pl = plan(key); saneOrThrow(pl);
     // ⛔ The first deposit sets the price. If anybody deposited first, the
     // ratio is theirs and this must not follow it blindly.
     const ts = BigInt(await mrpc('eth_call', [{ to: pool, data: SEL.totalShares }, 'latest']));
@@ -522,11 +566,12 @@ function coinCard(key, host) {
     const rM = BigInt('0x' + res.slice(2, 66)); const rT = BigInt('0x' + res.slice(66, 130));
     if (rT === 0n) throw new Error('o pool ainda não foi semeado');
     const p0 = (rM * UNIT) / rT;
+    saneOrThrow({ priceMoli: p0, m: p.m });
     const data = CURVE_BYTECODE + addr32(tokenAddr()) + addr32(pool) + word(curveSupply()) + word(p0)
       + addr32(OPERATOR) + word(CURVE_UNLOCK_AT);
     const r = await molibraSend(id('curve'), { data }, 2500000n);
     p.s.curve = lc(r.contractAddress); persist();
-    out('⭐ curva em ' + p.s.curve + ' · abre a ' + fmt(p0, 4) + ' MOLI, termina a ' + fmt(5n * p0, 4) + ' · gas ' + BigInt(r.gasUsed), 'ok'); renderAll();
+    out('⭐ curva em ' + p.s.curve + ' · abre a ' + fmt(p0, 12) + ' MOLI, termina a ' + fmt(5n * p0, 12) + ' · gas ' + BigInt(r.gasUsed), 'ok'); renderAll();
   });
   btn('fundCurve').onclick = run('fundCurve', async (out) => {
     if (!isAddr(p.s.curve)) throw new Error('implante a curva primeiro');

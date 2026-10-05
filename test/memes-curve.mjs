@@ -436,19 +436,22 @@ console.log('\n5. nobody controls it\n');
 /* ===================================================== 6. the real coins */
 console.log('\n6. the three coins at their parities\n');
 {
-  const snapMoliUsd = Number(REG.snapshot.moliUsd);
+  // The page's pricing (5 Oct 2026): parity is the RATIO between the coins, at
+  // 1 MOLI = 1,000,000 of a TRUMP-referenced coin; the seed is the whole 1%.
+  const e18 = (s) => BigInt(Math.round(Number(s) * 1e6)) * 10n ** 12n;
+  const anchorUsd = e18(REG.counterparts['official-trump'].usd);
   for (const key of ['caramelo', 'bolso', 'fazol']) {
     const m = REG.markets.find((x) => x.key === key);
     const cp = REG.counterparts[m.meme.counterpart];
-    const usd = BigInt(Math.round(Number(cp.usd) * 1e6)) * 10n ** 12n;
-    const moliUsd = BigInt(Math.round(snapMoliUsd * 1e18));
-    const p0 = (usd * UNIT) / moliUsd;
+    const p0 = (e18(cp.usd) * UNIT) / (anchorUsd * 1_000_000n);
     const supply = BigInt(m.meme.supply) * UNIT;
     const curveAmt = BigInt(m.meme.allocation.curve) * UNIT;
-    c = await setup({ supply, p0, curveShare: (curveAmt * 100n) / supply });
+    const seedMoli = ((supply / 100n) * p0) / UNIT;
+    check(`${m.symbol}: opens far below 1 MOLI (1 MOLI = ${(UNIT / p0).toLocaleString('en-US')} ${m.symbol})`, p0 > 0n && p0 < 10n ** 15n);
+    c = await setup({ supply, p0, seedMoli, curveShare: (curveAmt * 100n) / supply });
     const r = await buy(c, ALICE, 100n * UNIT); if (r.failed) console.log("    revert:", m.symbol, errName(r.returnValue), r.error, toHex(r.returnValue).slice(0, 200));
     const got = await bal(c.token, ALICE);
-    check(`${m.symbol}: curve of ${f(curveAmt, 0)} opens at ${f(p0, 4)} MOLI (US$ ${cp.usd}) and sells out at ${f(5n * p0, 4)} MOLI`,
+    check(`${m.symbol}: curve of ${f(curveAmt, 0)} opens at ${f(p0, 12)} MOLI and sells out at ${f(5n * p0, 12)} MOLI`,
       !r.failed && await curveView(c, 'priceAt(uint256)', 0n) === p0 && await curveView(c, 'priceAt(uint256)', c.S) === 5n * p0,
       `100 MOLI buys ${f(got, 6)} ${m.symbol}, gas ${r.gasUsed}`);
   }

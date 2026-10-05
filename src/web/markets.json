@@ -25,9 +25,9 @@
         "options": [
           "dogecoin"
         ],
-        "seedMoli": "3000",
+        "seedMoli": "derivado: 1% do supply × preço de abertura",
         "allocation": {
-          "note": "Molibra: 95% vendido só por MOLI na MoliSaleCurve (preço sobe da paridade a 5x); 4% em TokenVesting do operador (6 meses de carência, 24 meses linear); 1% na carteira do operador (operações e a semente do pool).",
+          "note": "Molibra: 95% vendido só por MOLI na MoliSaleCurve (preço sobe da paridade a 5x); 4% em TokenVesting do operador (6 meses de carência, 24 meses linear); 1% do operador, que vira inteiro a semente do pool no preço de abertura (1 MOLI = 1.000.000 BOLSO/FAZOL; CARAMELO pela proporção DOGE:TRUMP).",
           "curve": "95000000000",
           "vesting": "4000000000",
           "wallet": "1000000000"
@@ -61,9 +61,9 @@
         "options": [
           "official-trump"
         ],
-        "seedMoli": "3000",
+        "seedMoli": "derivado: 1% do supply × preço de abertura",
         "allocation": {
-          "note": "Molibra: 95% vendido só por MOLI na MoliSaleCurve (preço sobe da paridade a 5x); 4% em TokenVesting do operador (6 meses de carência, 24 meses linear); 1% na carteira do operador (operações e a semente do pool).",
+          "note": "Molibra: 95% vendido só por MOLI na MoliSaleCurve (preço sobe da paridade a 5x); 4% em TokenVesting do operador (6 meses de carência, 24 meses linear); 1% do operador, que vira inteiro a semente do pool no preço de abertura (1 MOLI = 1.000.000 BOLSO/FAZOL; CARAMELO pela proporção DOGE:TRUMP).",
           "curve": "950000000",
           "vesting": "40000000",
           "wallet": "10000000"
@@ -92,16 +92,16 @@
         "name": "Faz o L",
         "description": "FAZOL é um meme não oficial, inspirado no bordão popular \"Faz o L\", sem vínculo com Luiz Inácio Lula da Silva ou qualquer partido/campanha: nenhum deles o criou, o endossa ou tem relação com este token. Sem imagem, sem dono, sem emissão futura e sem nenhuma promessa de valor. / Unofficial meme inspired by the popular slogan \"Faz o L\", not affiliated with or endorsed by Luiz Inácio Lula da Silva or any party/campaign. No likeness, no owner, no further issuance, no promise of value.",
         "supply": "1000000000",
-        "supplyNote": "1 bilhão, o mesmo total fixo do TRUMP. Paridade com o TRUMP, como o BOLSO: os dois abrem no mesmo preço.",
+        "supplyNote": "1 bilhão, o mesmo total fixo do TRUMP. Mesma referência do BOLSO: os dois abrem no mesmo preço, 1 MOLI = 1.000.000.",
         "counterpart": "official-trump",
         "options": [
           "official-trump",
           "melania-meme",
           "dogwifcoin"
         ],
-        "seedMoli": "3000",
+        "seedMoli": "derivado: 1% do supply × preço de abertura",
         "allocation": {
-          "note": "Molibra: 95% vendido só por MOLI na MoliSaleCurve (preço sobe da paridade a 5x); 4% em TokenVesting do operador (6 meses de carência, 24 meses linear); 1% na carteira do operador (operações e a semente do pool).",
+          "note": "Molibra: 95% vendido só por MOLI na MoliSaleCurve (preço sobe da paridade a 5x); 4% em TokenVesting do operador (6 meses de carência, 24 meses linear); 1% do operador, que vira inteiro a semente do pool no preço de abertura (1 MOLI = 1.000.000 BOLSO/FAZOL; CARAMELO pela proporção DOGE:TRUMP).",
           "curve": "950000000",
           "vesting": "40000000",
           "wallet": "10000000"

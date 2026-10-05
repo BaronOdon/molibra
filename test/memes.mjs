@@ -45,7 +45,7 @@ function check(label, ok, detail = '') {
 const region = page.match(/\/\* ABI-BEGIN[\s\S]*?\*\/([\s\S]*?)\/\* ABI-END \*\//);
 check('memes.html has an ABI-BEGIN/ABI-END region', !!region);
 const L = new Function(region[1] + `
-return { word, addr32, encCtor, decString, isqrt, parseDec, parityTokens, quoteOut, impactBp, firstShares };`)();
+return { word, addr32, encCtor, decString, isqrt, parseDec, parityTokens, openingPrice, seedMoliFor, MAX_OPENING_PRICE, quoteOut, impactBp, firstShares };`)();
 const pageConst = (name) => { const m = page.match(new RegExp(`const ${name} = '([^']*)';`)); return m && m[1]; };
 const MEME_BYTECODE = pageConst('MEME_BYTECODE');
 const FACTORY_BYTECODE = pageConst('FACTORY_BYTECODE');
@@ -161,6 +161,7 @@ const factory = await deploy(OPERATOR, FACTORY_BYTECODE, '', 'factory deploy');
 check('the factory deploys', state.hasCode(factory), factory);
 const report = [];
 
+const anchorUsdE18 = L.parseDec(REG.counterparts['official-trump'].usd);
 async function market(sym, token, seedMoli, seedTok, cpUsd) {
   let r = await send(OPERATOR, factory, sel('create(address)') + addr(token), 0n, `${sym} create pool`);
   check(`${sym}: the factory creates its MOLI market`, !r.failed);
@@ -173,7 +174,7 @@ async function market(sym, token, seedMoli, seedTok, cpUsd) {
   const res = toHex(await view(pool, sel('reserves()'))).slice(2);
   const rm = BigInt('0x' + res.slice(0, 64)); const rt = BigInt('0x' + res.slice(64, 128));
   const spot = (rm * UNIT) / rt;                       // MOLI per token, 18 dp
-  const parity = (L.parseDec(cpUsd) * UNIT) / moliUsdE18;
+  const parity = L.openingPrice(L.parseDec(cpUsd), anchorUsdE18);
   const err = spot > parity ? spot - parity : parity - spot;
   check(`${sym}: the pool's spot price IS the parity`, err * 1_000_000n <= parity,
     `${fmt(spot, 6)} MOLI vs parity ${fmt(parity, 6)}`);
@@ -228,8 +229,9 @@ async function distribute(m, token, pool, { vesting }) {
     check(`${sym}: vesting deployed and funded with 4% (${fmt(vAmt, 0)})`, !r.failed && await bal(token, vest) === vAmt);
     const wallet = L.parseDec(m.meme.allocation.wallet);
     const opBal = await bal(token, OPERATOR);
-    check(`${sym}: the operator keeps the 1% less what seeded the pool, and holds under 1% of supply`,
-      opBal < wallet && opBal > wallet - L.parseDec('1000000'), `${fmt(opBal, 2)} ${sym}`);
+    // 5 Oct 2026: the seed IS the operator's whole 1% (operator's scale, 1 MOLI = 1,000,000 BOLSO).
+    check(`${sym}: the whole 1% seeded the pool, so the operator holds no free tokens`,
+      opBal === 0n && wallet === L.parseDec(m.meme.supply) / 100n, `${fmt(opBal, 2)} ${sym}`);
     check(`${sym}: 95 + 4 + 1 = the whole supply`,
       curveAmt + vAmt + wallet === L.parseDec(m.meme.supply));
   }
@@ -251,8 +253,18 @@ for (const key of ['caramelo', 'bolso', 'fazol']) {
     `${Number(m.meme.supply).toLocaleString('en-US')} ${m.symbol}`);
   check(`${m.symbol}: the on-chain description is the registry's, disclaimer included`,
     await str(token, sel('description()')) === m.meme.description);
-  const seedMoli = L.parseDec(m.meme.seedMoli);
-  const seedTok = L.parityTokens(seedMoli, moliUsdE18, L.parseDec(cp.usd));
+  const price = L.openingPrice(L.parseDec(cp.usd), anchorUsdE18);
+  const seedTok = L.parseDec(m.meme.allocation.wallet);
+  const seedMoli = L.seedMoliFor(seedTok, price);
+  // ⛔ The 5 Oct failure, as a test: a memecoin opens at a tiny fraction of a MOLI,
+  // and the whole supply is worth far less than the MOLI that exists.
+  check(`${m.symbol}: opens far below 1 MOLI (${fmt(price, 12)} MOLI; 1 MOLI = ${(UNIT / price).toLocaleString('en-US')} ${m.symbol})`,
+    price > 0n && price < L.MAX_OPENING_PRICE);
+  check(`${m.symbol}: whole-supply value at the opening is under 10,000 MOLI`,
+    (supply * price) / UNIT < 10_000n * UNIT, `${fmt((supply * price) / UNIT, 0)} MOLI`);
+  if (m.meme.counterpart === 'official-trump') {
+    check(`${m.symbol}: 1 MOLI = 1,000,000 ${m.symbol} exactly (operator's scale)`, price === UNIT / 1_000_000n);
+  }
   used[key] = seedMoli;
   const pool = await market(m.symbol, token, seedMoli, seedTok, cp.usd);
   await distribute(m, token, pool, { vesting: true });
