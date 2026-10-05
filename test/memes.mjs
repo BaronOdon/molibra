@@ -340,6 +340,9 @@ check('⛔ the first deposit refuses a pool that already has liquidity', page.in
 }
 check('⛔ a price-setting step refuses to run on the snapshot prices',
   (page.match(/needLive\(\);/g) || []).length >= 2);
+check('⛔ no innerHTML assignment anywhere on the page (audit, 5 Oct 2026)', !/\.innerHTML\s*=/.test(page));
+check('⛔ the page never calls the operator\'s seed "locked": it says the seed is withdrawable and only the curve\'s liquidity is permanent',
+  page.includes('A semente NÃO fica travada') && !/semente[^.]{0,40}travada(?! )/.test(page.replace('A semente NÃO fica travada', '')));
 check('⛔ only the operator account may run a step', page.includes("if (account !== OPERATOR)"));
 
 console.log(`\n${passed} passed, ${failed} failed`);

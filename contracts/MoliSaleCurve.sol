@@ -41,10 +41,14 @@ pragma solidity ^0.8.20;
  *        - pool below the band: buy in the pool, it is cheaper;
  *        - pool above the band: anyone may sell into the pool down to the
  *          band and buy here - the arbitrage that fills the curve.
- *   3. Reentrancy: a lock on every state-changing function, state written
- *      before any external call, and the only external parties are the token,
- *      the pool (both fixed at construction) and the buyer's refund, which
- *      comes after everything else is settled.
+ *   3. Reentrancy and ordering: a lock on buy(); state written first; the
+ *      deposit made while no outside code has run, against the exact pool
+ *      reserves the band check saw (re-checked to the wei before
+ *      addLiquidity); the buyer's pending refund excluded from the deposit;
+ *      and the buyer called LAST (tokens, then the refund). The first version
+ *      refunded BEFORE depositing, which let a buyer contract move the pool
+ *      from its refund callback - found by audit, 5 Oct 2026, fixed before
+ *      any deployment, and kept as a regression test.
  *
  * ## What is absent by construction
  *
@@ -202,17 +206,30 @@ contract MoliSaleCurve {
         uint256 paid; uint256 refund;
         (out, paid, , refund) = quote(msg.value);
         if (out < minOut || priceAt(sold + out) > maxPrice) revert Slippage();
+        // The pool exactly as the band check saw it. The deposit must happen
+        // against THESE reserves and no others.
+        (uint256 rM0, uint256 rT0) = pool.reserves();
 
-        // Effects, then interactions.
+        // ⛔⛔ Checks, effects, then interactions - and the buyer is called
+        // LAST. (Audit, 5 Oct 2026: the refund used to go out BEFORE the
+        // deposit. A contract buyer moved the pool from inside its refund
+        // callback, between the band check and addLiquidity, and the deposit
+        // went in at the pumped ratio - a profitable sandwich that drained the
+        // pool below its seed. Regression: test/memes-curve.mjs.)
         uint256 x = sold;
         sold = x + out;
         moliRaised += paid;
+        // 1. The deposit, while nothing outside this contract has run. The
+        //    refund is still held here, so it is excluded from the budget.
+        _deepen(paid, refund, rM0, rT0);
+        // 2. The buyer's tokens. MemeToken and BridgedAsset have no hooks.
         if (!token.transfer(msg.sender, out)) revert TransferFailed();
+        // 3. The refund, last. Re-entering buy() is refused by the lock; moving
+        //    the pool now changes nothing the curve has already done.
         if (refund > 0) {
             (bool ok, ) = msg.sender.call{value: refund}("");
             if (!ok) revert TransferFailed();
         }
-        _deepen(paid);
         emit Bought(msg.sender, paid, out, priceAt(sold));
     }
 
@@ -223,13 +240,20 @@ contract MoliSaleCurve {
      * shares on both sides, so MolibraPool's balance check always passes.
      * Any rounding dust (a few wei) stays here and joins the next deposit.
      */
-    function _deepen(uint256 budget) private {
+    function _deepen(uint256 budget, uint256 reserved, uint256 rM0, uint256 rT0) private {
         (uint256 rM, uint256 rT) = pool.reserves();
+        // ⛔ Re-checked immediately before addLiquidity: the pool must be the
+        // pool the band check approved, to the wei. Nothing external runs in
+        // between any more, so an honest buy always passes; anything else is
+        // refused rather than deposited at a ratio somebody chose.
+        if (rM != rM0 || rT != rT0) revert OutOfBand(poolPrice(), priceAt(sold));
         uint256 ts = pool.totalShares();
         uint256 left = supplyForSale - sold;
+        // The buyer's pending refund is still in this contract: never deposit it.
+        uint256 bal = address(this).balance - reserved;
         // Rounding dust from earlier deposits (wei) rides along when it fits.
-        (uint256 m, uint256 t, uint256 s) = _depositFor(address(this).balance, rM, rT, ts);
-        if (t > left || address(this).balance - budget > 1e9) {
+        (uint256 m, uint256 t, uint256 s) = _depositFor(bal, rM, rT, ts);
+        if (t > left || bal - budget > 1e9) {
             (m, t, s) = _depositFor(budget, rM, rT, ts);
         }
         if (s == 0 || t > left) return;

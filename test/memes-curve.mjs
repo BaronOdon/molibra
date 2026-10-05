@@ -25,6 +25,8 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const CURVE = JSON.parse(read('contracts/artifacts/MoliSaleCurve.json'));
 const MEME = JSON.parse(read('contracts/artifacts/MemeToken.json'));
 const ATTACK = JSON.parse(read('contracts/artifacts/CurveReenter.test.json'));
+const SANDWICH = JSON.parse(read('contracts/artifacts/CurveSandwich.test.json'));
+const CURVE_V1 = JSON.parse(read('contracts/artifacts/MoliSaleCurve.v1-vulnerable.test.json'));
 const page = read('src/web/memes.html');
 const REG = JSON.parse(read('src/web/markets.json'));
 const FACTORY = page.match(/const FACTORY_BYTECODE = '([^']*)';/)[1];
@@ -86,7 +88,7 @@ const encCtor = (name, sym, desc, supply, holder) => {
 };
 
 /** One coin, set up the way /molibra/memes does it: token, pool at parity, curve funded with 95%. */
-async function setup({ supply, p0, seedMoli = 3000n * UNIT, fund = true, curveShare = 95n }) {
+async function setup({ supply, p0, seedMoli = 3000n * UNIT, fund = true, curveShare = 95n, bytecode = CURVE.bytecode }) {
   state = new State();
   for (const a of [OP, ALICE, BOB, EVE]) state.credit(a, 10n ** 30n);
   const token = await deploy(OP, MEME.bytecode, encCtor('Test Meme', 'TST', 'meme', supply, OP));
@@ -99,7 +101,7 @@ async function setup({ supply, p0, seedMoli = 3000n * UNIT, fund = true, curveSh
   const r = await tx(OP, pool, sel('addLiquidity(uint256,uint256)') + word(seedTok) + word(sq(seedMoli * seedTok) - 1000n), seedMoli);
   if (r.failed) throw new Error('seed failed ' + errName(r.returnValue));
   const S = (supply * curveShare) / 100n;
-  const curve = await deploy(OP, CURVE.bytecode, addr(token) + addr(pool) + word(S) + word(p0));
+  const curve = await deploy(OP, bytecode, addr(token) + addr(pool) + word(S) + word(p0));
   if (fund) await tx(OP, token, sel('transfer(address,uint256)') + addr(curve) + word(S));
   return { token, pool, curve, S, p0 };
 }
@@ -257,6 +259,79 @@ console.log('\n4. manipulation\n');
   const r = await tx(EVE, atk, sel('attack()'), whole * 2n);
   check('⛔ re-entering buy() from the refund is refused, and the whole purchase unwinds',
     r.failed && await sold(c) === 0n, errName(r.returnValue));
+}
+
+/* =========================== 4b. the audit finding, as a regression test */
+console.log('\n4b. audit regression: moving the pool from inside the refund callback\n');
+/**
+ * The auditor's PoC (5 Oct 2026). A buyer CONTRACT buys from the curve and,
+ * inside the refund it receives, pumps the pool with `A` MOLI; then it sells
+ * everything back. In v1 the refund went out BEFORE the deposit, so the curve
+ * deposited at the pumped ratio and the attacker profited. Its P&L is compared
+ * with the same buyer doing an honest buy-and-sell (mode 0).
+ */
+async function sandwichRun(bytecode, mode, A, V) {
+  const c = await setup({ supply: 1_000_000_000n * UNIT, p0: BOLSO_P0, bytecode });
+  const atk = await deploy(EVE, SANDWICH.bytecode, addr(c.curve) + addr(c.pool) + addr(c.token));
+  state.credit(atk, 10n ** 28n);
+  const m0 = state.balanceOf(atk);
+  const r = await tx(EVE, atk, sel('go(uint256,uint256,uint256,bool)') + word(V + 7n) + word(mode) + word(A) + word(1n));
+  const [rm] = await reserves(c.pool);
+  return { failed: r.failed, err: r.failed ? errName(r.returnValue) : null, pnl: state.balanceOf(atk) - m0, poolMoli: rm };
+}
+{
+  const V = 10_000n * UNIT;
+  const amounts = [V / 2n, V, 2n * V, 4n * V, 8n * V];
+  for (const [label, code] of [['v1 (vulnerable)', CURVE_V1.bytecode], ['fixed', CURVE.bytecode]]) {
+    const honest = await sandwichRun(code, 0n, 0n, V);
+    let best = null;
+    for (const A of amounts) {
+      const r = await sandwichRun(code, 1n, A, V);
+      if (!r.failed && (!best || r.pnl > best.pnl)) best = { ...r, A };
+    }
+    const gain = best ? best.pnl - honest.pnl : null;
+    if (label.startsWith('v1')) {
+      check('⛔ BEFORE the fix the PoC works: pumping in the refund callback beats an honest buy, and drains the pool below its 3,000 MOLI seed',
+        best && gain > 0n && best.poolMoli < 3000n * UNIT,
+        `gain ${f(gain ?? 0n, 2)} MOLI at A=${f(best?.A ?? 0n, 0)}, pool ${f(best?.poolMoli ?? 0n, 2)} MOLI`);
+    } else {
+      check('⭐ AFTER the fix the same attack gains nothing over an honest buy, at every pump size',
+        !honest.failed && (best === null || gain <= 0n),
+        best ? `best attack ${f(best.pnl, 2)} vs honest ${f(honest.pnl, 2)} MOLI (gain ${f(gain, 2)})` : 'every attack variant reverted');
+      check('  and an honest contract buyer (mode 0, with a refund) still buys', !honest.failed);
+    }
+  }
+}
+{
+  // Order inside buy(): the deposit happens before ANY outside code runs.
+  const src = read('contracts/MoliSaleCurve.sol');
+  const body = src.slice(src.indexOf('function buy('), src.indexOf('/* ----------------------------------------------------------- deposit */'));
+  const iDeepen = body.indexOf('_deepen(paid, refund, rM0, rT0);');
+  const iTransfer = body.indexOf('token.transfer(msg.sender, out)');
+  const iRefund = body.indexOf('msg.sender.call{value: refund}');
+  check('⛔ buy(): deposit, then the buyer\'s tokens, then the refund LAST (checks-effects-interactions)',
+    iDeepen > 0 && iDeepen < iTransfer && iTransfer < iRefund);
+  check('⛔ _deepen re-checks the pool reserves against what the band check saw, to the wei',
+    /if \(rM != rM0 \|\| rT != rT0\) revert OutOfBand/.test(src));
+  check('⛔ the pending refund is excluded from what gets deposited',
+    src.includes('uint256 bal = address(this).balance - reserved;'));
+}
+{
+  // Malicious buyers: re-entering buy() from the refund, and a refund that reverts.
+  const c = await setup({ supply: 10_000n * UNIT, p0: 2n * UNIT, seedMoli: 30n * UNIT });
+  const atk = await deploy(EVE, ATTACK.bytecode, addr(c.curve));
+  const over = (await curveView(c, 'cost(uint256,uint256)', 0n, c.S)) * 2n;   // forces a large refund
+  const r = await tx(EVE, atk, sel('attack()'), over);
+  check('⛔ a buyer re-entering buy() from its refund is refused, the purchase unwinds, nothing deposited',
+    r.failed && await sold(c) === 0n && state.balanceOf(c.curve) === 0n);
+  const before = await reserves(c.pool);
+  const sw = await deploy(EVE, SANDWICH.bytecode, addr(c.curve) + addr(c.pool) + addr(c.token));
+  state.credit(sw, 10n ** 24n);
+  const r2 = await tx(EVE, sw, sel('go(uint256,uint256,uint256,bool)') + word(over) + word(1n) + word(3n * UNIT) + word(0n));
+  const after = await reserves(c.pool);
+  const pp = (x) => (x[0] * UNIT) / x[1];
+  check('  a buyer pumping the pool inside its refund: the deposit already went in at the approved price',
+    !r2.failed && pp(after) > pp(before), `pool price after the pump ${f(pp(after), 4)} (the curve's deposit was at ${f(pp(before), 4)})`);
 }
 
 /* ========================================================== 5. no owner */

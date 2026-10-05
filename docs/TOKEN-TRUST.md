@@ -146,7 +146,8 @@ Every scanner flags a deployer or single wallet holding most of the supply
 (TokenSniffer: creator < 5%, no holder > 5%). Tokens sitting in a pool do not
 count against this: bMOLI shows creator 0% because 99.999% is in the v4
 PoolManager. So **the distribution plan is: put almost everything in the pool,
-lock the pool, and vest the rest.**
+lock the pool, and vest the rest.** (For the Molibra memecoins: the curve's liquidity
+is permanent; the operator's 3,000 MOLI seed is not locked - see below.)
 
 ### FAZOL, CARAMELO and BOLSO: all Molibra-native (operator, 5 Oct 2026)
 
@@ -156,8 +157,8 @@ distribution for all three, none of it in the creator wallet beyond 1%:
 
 | slice | share | where |
 |---|---|---|
-| sale | **95%** | `contracts/MoliSaleCurve.sol`: sold for MOLI only, price from the parity to 5x; every MOLI paid goes into the coin's MolibraPool as liquidity locked in the curve forever |
-| pool seed | 3,000 MOLI | MolibraPool at the parity, coins taken from the 1% below |
+| sale | **95%** | `contracts/MoliSaleCurve.sol`: sold for MOLI only, price from the parity to 5x; every MOLI paid goes into the coin's MolibraPool; those LP shares are held by the curve, which has no function to withdraw them (permanent) |
+| pool seed | 3,000 MOLI | MolibraPool at the parity, coins taken from the 1% below. ⛔ **Not locked:** the seed's LP shares belong to the operator, who can withdraw them at any time. Only the curve's LP shares are permanent |
 | operator reserve | **4%** | `contracts/TokenVesting.sol` (180-day cliff, linear to 720 days, no owner) |
 | operations | **1%** | operator wallet |
 

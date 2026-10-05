@@ -105,6 +105,12 @@ writeFileSync(join(HERE, 'etherscan', 'MoliSaleCurve.standard-input.json'), JSON
   for (const e of atkOut.errors ?? []) if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
   const a = atkOut.contracts['contracts/test/CurveReenter.sol'].CurveReenter;
   writeFileSync(join(HERE, 'artifacts', 'CurveReenter.test.json'), JSON.stringify({ abi: a.abi, bytecode: '0x' + a.evm.bytecode.object }, null, 2) + '\n');
+  // The auditor's sandwich PoC (moves the pool from inside the refund callback).
+  const swOut = JSON.parse(solc.compile(JSON.stringify({ ...input,
+    sources: { 'contracts/test/CurveSandwich.sol': { content: readFileSync(join(HERE, 'test', 'CurveSandwich.sol'), 'utf8') } } })));
+  for (const e of swOut.errors ?? []) if (e.severity === 'error') { console.error(e.formattedMessage); process.exit(1); }
+  const sw = swOut.contracts['contracts/test/CurveSandwich.sol'].Sandwich;
+  writeFileSync(join(HERE, 'artifacts', 'CurveSandwich.test.json'), JSON.stringify({ abi: sw.abi, bytecode: '0x' + sw.evm.bytecode.object }, null, 2) + '\n');
 }
 const vestingBytecode = JSON.parse(readFileSync(join(HERE, 'artifacts', 'trust.json'), 'utf8')).contracts.TokenVesting.bytecode;
 
