@@ -52,6 +52,9 @@ const LOCAL_ONLY = new Set(['fund.html', 'mint-giz.html']);
 // pairs and draws them. It was in this list by proximity to two pages that do
 // touch funds, not by the rule the list exists to enforce. fund.html and
 // mint-giz.html stay, because for them the rule applies exactly.
+// chart.html itself was retired on 5 Oct 2026: it plotted the SushiSwap WSRO
+// pool, empty since that day. /molibra/chart now redirects to /molibra/cotacao
+// (checked below).
 
 /**
  * The route table, read out of the source: every `'web', 'name.html'` join.
@@ -170,6 +173,27 @@ for (const name of pages) {
     html.includes(GUARD) ? '' : 'it will dead-end on every phone');
 }
 
+
+/* ------------------- a short address must land on a page that exists */
+
+// molibra.org/pay, /Cotacao, /molibra/buy/ redirect to /molibra/<name> for the
+// names listed in rpc.js. A name in that list with no page behind it turns a
+// typed address into a redirect to a 404, so every name must be a route here.
+const shortList = rpc.match(/const pages = \[([^\]]*)\];/);
+const shortNames = shortList ? [...shortList[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]) : [];
+check('the short-address list is readable', shortNames.length > 0, shortNames.join(' '));
+for (const n of shortNames) {
+  check(`  /${n} redirects to /molibra/${n}, which is a route`, routes.has('/molibra/' + n),
+    routes.has('/molibra/' + n) ? '' : 'the redirect would land on nothing');
+}
+check('  molibra.org/cotacao is one of them', shortNames.includes('cotacao'));
+const movedList = rpc.match(/const moved = \{([^}]*)\};/);
+const moved = movedList ? Object.fromEntries([...movedList[1].matchAll(/([a-z]+): '([a-z]+)'/g)].map((m) => [m[1], m[2]])) : {};
+for (const [from, to] of Object.entries(moved)) {
+  check(`  retired /molibra/${from} redirects to /molibra/${to}, which is a route`, routes.has('/molibra/' + to));
+  check(`    and nothing still serves /molibra/${from}`, !routes.has('/molibra/' + from));
+}
+check('  /molibra/chart is one of them, sent to the cotação page', moved.chart === 'cotacao' && !existsSync(join(ROOT, 'src/web/chart.html')));
 
 /* ------------------------ no route may shadow another */
 

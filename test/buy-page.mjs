@@ -67,7 +67,11 @@ check('the Transfer topic is keccak of Transfer(address,address,uint256)',
 // ⛔⛔ From the Initialize event of tx 0xb87eb11e6c236e7f61ad597e44569da0a3cf992c11eb823dcd80c3c8a46f5f67
 // (block 26,044,855): id topic, currency0, currency1, and (fee, tickSpacing, hooks) from data.
 const POOL_ID_ONCHAIN = '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312';
-const pk = page.match(/const POOL_KEY = \{ currency0: ETH_ADDR, currency1: BMOLI, fee: (\d+)n, tickSpacing: (\d+)n, hooks: ETH_ADDR \};/);
+// ⛔⛔ ETH/WSRO, from the Initialize event of tx 0x41956f008bf7cc64f794fa08b7a94f321eec492043a64ef1787c9e7402a9102f
+// (block 26,125,858): same fee, spacing and hooks; currency1 is WSRO. Bought with ?out=wsro.
+const WSRO_POOL_ID_ONCHAIN = '0x0a6dc02a1171887ace334623cff297e0aab91d90a2a2ea7973503200896562c3';
+const WSRO_ADDR = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+const pk = page.match(/const POOL_KEY = \{ currency0: ETH_ADDR, currency1: OUT\.token, fee: (\d+)n, tickSpacing: (\d+)n, hooks: ETH_ADDR \};/);
 const bm = page.match(/const BMOLI = '(0x[0-9a-f]{40})';/);
 const ethAddr = page.match(/const ETH_ADDR = '(0x[0-9a-f]{40})';/);
 check('the PoolKey is written out in full', Boolean(pk && bm && ethAddr));
@@ -81,7 +85,22 @@ if (pk && bm && ethAddr) {
   check('  currency1 is bMOLI', bm[1] === '0xa302877efb74f567f3605851194b46f1d5746822');
   check('  fee 2500 (0.25%), tickSpacing 25 (read, not guessed), no hooks', pk[1] === '2500' && pk[2] === '25');
 }
-check('  and the page carries that same poolId', page.includes(`const POOL_ID = '${POOL_ID_ONCHAIN}';`));
+check('  and the page carries that same poolId for bMOLI', page.includes(`bmoli: { token: BMOLI, symbol: 'bMOLI', poolId: '${POOL_ID_ONCHAIN}' }`));
+const wm = page.match(/const WSRO = '(0x[0-9a-f]{40})';/);
+check('the WSRO token is the one the ETH/WSRO pool names', Boolean(wm) && wm[1] === WSRO_ADDR);
+if (pk && ethAddr) {
+  const encW = a32(ethAddr[1]) + a32(WSRO_ADDR) + w32(pk[1]) + w32(pk[2]) + a32(ethAddr[1]);
+  check('⛔⛔ with WSRO as currency1 the same key hashes to the live ETH/WSRO poolId', toHex(keccak256(fromHex('0x' + encW))) === WSRO_POOL_ID_ONCHAIN);
+}
+check('  and the page carries that poolId for WSRO', page.includes(`wsro:  { token: WSRO,  symbol: 'WSRO',  poolId: '${WSRO_POOL_ID_ONCHAIN}' }`));
+check('⛔ bMOLI unless the link says ?out=wsro; anything else is bMOLI',
+  page.includes("const OUT = POOLS[String(new URLSearchParams(location.search).get('out') || '').toLowerCase()] || POOLS.bmoli;")
+  && page.includes('const POOL_ID = OUT.poolId;'));
+check('⛔ "received" counts the token actually bought', page.includes("if (String(l.address).toLowerCase() !== OUT.token || !l.topics"));
+check('  with ?out=wsro every label names WSRO: the words, the output pill, the minimum, the receipt',
+  page.includes('if (OUT !== POOLS.bmoli) s = s.replace(/\\bb?MOLI\\b/g, OUT.symbol);') && page.includes("$('outUnit').textContent = OUT.symbol;")
+  && !/' bMOLI'/.test(page));
+check('  WSRO is never offered the 1:1 return to MOLI', /if \(OUT === POOLS\.wsro\) \{[\s\S]{0,400}\$\('toReturn'\)\.hidden = true;\s*\$\('returnFoot'\)\.hidden = true;/.test(page));
 
 /* ------------------------------------------------- the contracts it calls */
 
@@ -97,13 +116,13 @@ const CONTRACTS = {
 for (const [k, a] of Object.entries(CONTRACTS)) {
   check(`${k} is ${a}`, page.includes(`const ${k} = '${a}';`));
 }
-const ALLOWED = new Set([...Object.values(CONTRACTS), '0xa302877efb74f567f3605851194b46f1d5746822', '0x' + '0'.repeat(40)]);
+const ALLOWED = new Set([...Object.values(CONTRACTS), '0xa302877efb74f567f3605851194b46f1d5746822', WSRO_ADDR, '0x' + '0'.repeat(40)]);
 const named = [...new Set([...page.matchAll(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].map((m) => m[0].toLowerCase()))];
 const stray = named.filter((a) => !ALLOWED.has(a));
 check('⛔ no address but the public contracts is written into the page', stray.length === 0, stray.join(', '));
 const longHex = [...new Set([...page.matchAll(/0x[0-9a-fA-F]{64}(?![0-9a-fA-F])/g)].map((m) => m[0].toLowerCase()))];
-check('⛔ the only 32-byte hex values are the poolId and the Transfer topic',
-  longHex.every((h) => h === POOL_ID_ONCHAIN || h === kec('Transfer(address,address,uint256)')), longHex.length + ' found');
+check('⛔ the only 32-byte hex values are the two poolIds and the Transfer topic',
+  longHex.every((h) => h === POOL_ID_ONCHAIN || h === WSRO_POOL_ID_ONCHAIN || h === kec('Transfer(address,address,uint256)')), longHex.length + ' found');
 
 /* ------------------------------------------- command and action bytes */
 
@@ -125,8 +144,8 @@ const names = ['word', 'addr32', 'pad32', 'bytesEnc', 'bytesArrayEnc', 'poolKeyE
 const src = names.map(grab);
 check('the encoder and the money functions can be lifted out of the page', src.every(Boolean),
   names.filter((n, i) => !src[i]).join(', '));
-const consts = ['ETH_ADDR', 'BMOLI'].map((n) => page.match(new RegExp(`const ${n} = [^\\n]+;`))[0])
-  .concat([page.match(/const POOL_KEY = [^\n]+;/)[0], selBlock, page.match(/const CMD = [^\n]+;/)[0],
+const consts = ['ETH_ADDR', 'BMOLI', 'WSRO'].map((n) => page.match(new RegExp(`const ${n} = [^\\n]+;`))[0])
+  .concat(["const OUT = { token: BMOLI };", page.match(/const POOL_KEY = [^\n]+;/)[0], selBlock, page.match(/const CMD = [^\n]+;/)[0],
     page.match(/const ACT = [^\n]+;/)[0], page.match(/const TIP = [^\n]+;/)[0]]);
 const ctx = vm.createContext({ BigInt, Number, String, Math, Array });
 vm.runInContext(`const UNIT = 10n ** 18n; let LANG = 'en';\n${consts.join('\n')}\n${src.join('\n')}\n`
@@ -218,6 +237,27 @@ if (!ethers) {
     lib.quoteData(sel(SIGS.quoteExactInSingle), IN) === qi.encodeFunctionData('quoteExactInputSingle', [[key, true, IN, '0x']]));
   check('  and (exact out)',
     lib.quoteData(sel(SIGS.quoteExactOutSingle), out) === qi.encodeFunctionData('quoteExactOutputSingle', [[key, true, out, '0x']]));
+}
+
+/* --------------------- ⛔⛔ ?out=wsro: the same swap, against the ETH/WSRO pool */
+
+{
+  const ctxW = vm.createContext({ BigInt, Number, String, Math, Array });
+  vm.runInContext(`const UNIT = 10n ** 18n; let LANG = 'en';\n${consts.join('\n').replace('const OUT = { token: BMOLI };', 'const OUT = { token: WSRO };')}\n${src.join('\n')}\n`
+    + `this.lib = { executeData };`, ctxW);
+  const dataW = ctxW.lib.executeData(IN, MIN, BUYER, DL);
+  if (!ethers) { skip++; console.log('  SKIP  WSRO round-trip decode: ethers v6 is not importable'); }
+  else {
+    const coder = ethers.AbiCoder.defaultAbiCoder();
+    const ur = new ethers.Interface(['function execute(bytes commands, bytes[] inputs, uint256 deadline) payable']);
+    const dec = ur.decodeFunctionData('execute', dataW);
+    const [actions, prms] = coder.decode(['bytes', 'bytes[]'], dec.inputs[0]);
+    const [sw] = coder.decode(['tuple(tuple(address,address,uint24,int24,address),bool,uint128,uint128,bytes)'], prms[0]);
+    const keyHash = ethers.keccak256(coder.encode(['address', 'address', 'uint24', 'int24', 'address'], [...sw[0]]));
+    check('⛔⛔ with ?out=wsro the swap names the live ETH/WSRO pool', keyHash === WSRO_POOL_ID_ONCHAIN && actions === '0x060c0f' && dec.commands === '0x1004');
+    const [tc] = coder.decode(['address', 'uint256'], prms[2]);
+    check('  and TAKE_ALL takes WSRO, ETH still in with SWEEP back', tc.toLowerCase() === WSRO_ADDR && sw[1] === true && sw[2] === IN);
+  }
 }
 
 /* ------------------------------------- ⛔⛔ it refuses rather than sends */

@@ -58,6 +58,8 @@ export const ROUTE_COSTS = [
   ['/molibra/headers-rlp', 20],
   // Executes a transaction proof against a block.
   ['/molibra/proof/', 10],
+  // One pass over the receipts on a cache miss; cached per head after that.
+  ['/molibra/pool-history', 5],
   ['/molibra/block/', 3],
   ['/molibra/header-rlp/', 3],
 ];

@@ -1,0 +1,1483 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
+<title>MOLIBRA · Cotação do MOLI em reais</title>
+<!--
+  What a real is worth in MOLI, step by step, for people in Brazil:
+  R$ -> US$ -> ETH -> bMOLI -> MOLI, each step with its live number, where it
+  came from and when, and the charts of every pair on the way.
+
+  A PUBLIC page that only READS. It holds no key and touches no wallet. Each
+  "Converta agora" opens the page or the wallet that does that step, with the
+  amount filled in; the person confirms there, or nothing happens.
+
+  ⛔⛔ Every number is read when it is drawn, from the chain that owns it:
+    R$/US$     Chainlink BRL/USD on Ethereum   0x3126…7Df1  (description() == "BRL / USD")
+    US$/ETH    Chainlink ETH/USD on Ethereum   0x5f4e…8419
+    bMOLI/ETH  Uniswap v4 pool 0x200f…c312     StateView.getSlot0, V4Quoter
+    WSRO/ETH   Uniswap v4 pool 0x0a6d…62c3     StateView.getSlot0, V4Quoter
+    MOLI/WSRO  Molibra pool 0x4f34…b43d        reserves(), quote()
+  History: Chainlink rounds (getRoundData through Multicall3), the pools' own
+  Initialize/Swap events, and the Molibra pool's events from this node's
+  /molibra/pool-history (the node has no eth_getLogs).
+
+  ⛔ WSRO's Ethereum market moved on 5 Oct 2026: the SushiSwap V3 pool
+  0xfcae…c47e has no active liquidity, and an ETH/WSRO Uniswap v4 pool opened
+  with the same price and shape as ETH/bMOLI. Both v4 pools have native ETH as
+  currency0, so sqrtPriceX96^2 / 2^192 is tokens per ETH in both. The Sushi
+  pool is read only for the note that it is empty (liquidity() == 0).
+
+  ⛔ Amounts in the calculator are BigInt end to end. Floats appear only where
+  a chart needs a pixel position.
+
+  ⛔ No external script, font or stylesheet: the charts are hand-drawn SVG.
+-->
+<script>
+  (function () {
+    var l = null;
+    try { l = localStorage.getItem('molibra.lang'); } catch (e) { l = null; }
+    // Portuguese by default: this page is for people in Brazil.
+    document.documentElement.lang = l === 'en' ? 'en' : 'pt-BR';
+  })();
+</script>
+<style>
+  :root{
+    --void:#07070a; --card:#121210; --box:#1b1a16; --box-hi:#24221c;
+    --ink:#f5f3ea; --dim:#b3ae9c; --dimmer:#858170; --line:#2e2c24; --grid:#24231d;
+    --gold:#FFD100; --gold-wash:rgba(255,209,0,.10); --gold-glow:rgba(255,209,0,.30); --edge:rgba(255,209,0,.20);
+    --bad:#ff7a7a; --ok:#6dffa6; --warn:#ffbe55;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;color:var(--ink);background:var(--void);font:16px/1.5 var(--sans);
+       padding:16px 16px 64px;overflow-x:hidden;min-height:100vh}
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(120% 70% at 50% -10%, rgba(255,209,0,.12), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px),
+      repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,209,0,.04) 38px 39px), var(--void)}
+  .wrap{max-width:560px;margin:0 auto}
+  a{color:var(--gold)}
+  button,input{font:inherit;color:inherit}
+  button{cursor:pointer}
+  [hidden]{display:none !important}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 18px}
+  .mark{font:700 20px/1 var(--mono);letter-spacing:.2em;color:var(--gold);text-decoration:none;text-shadow:0 0 16px var(--gold-glow)}
+  .lang{display:flex;border:1px solid var(--edge);border-radius:999px;overflow:hidden;flex:none}
+  .lang button{background:transparent;border:0;color:var(--dim);padding:7px 10px;font:600 13px/1 var(--sans)}
+  .lang button.on{background:var(--gold);color:#0a0a0a}
+
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:20px;padding:16px;margin:0 0 14px;
+        box-shadow:0 20px 60px -30px rgba(0,0,0,.9);min-width:0}
+  h1,h2,h3{margin:0;font:700 20px/1.25 var(--sans)}
+  h1{font-size:22px}
+  h2{font-size:18px}
+  h3{font-size:16px}
+  .lead{color:var(--dim);margin:8px 0 0;font-size:15px}
+  .section{margin:26px 4px 10px;font:700 13px/1.2 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--dimmer)}
+  .status{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 0;color:var(--dim);font-size:14px;flex-wrap:wrap}
+  .small{background:transparent;border:1px solid var(--edge);color:var(--gold);border-radius:8px;padding:6px 10px;font:700 14px/1.2 var(--sans)}
+
+  /* ------------------------------------------------------------ charts */
+  .hero{font:650 32px/1.15 var(--sans);margin:8px 0 0;word-break:break-word}
+  .hero small{font:600 15px/1 var(--sans);color:var(--dim);margin-left:6px}
+  .sub2{color:var(--dim);font-size:15px;margin:4px 0 0;word-break:break-word}
+  .chart{position:relative;margin:12px 0 0;min-height:190px;touch-action:pan-y}
+  .chart svg{display:block;width:100%;height:190px;overflow:visible}
+  .chart svg:focus{outline:2px solid var(--edge);outline-offset:4px;border-radius:6px}
+  .chart .empty{display:flex;align-items:center;justify-content:center;height:190px;color:var(--dimmer);font-size:14px;
+                border:1px solid var(--grid);border-radius:12px}
+  .tip{position:absolute;top:0;pointer-events:none;background:var(--box-hi);border:1px solid var(--line);border-radius:10px;
+       padding:6px 10px;font-size:13px;line-height:1.35;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .tip b{display:block;font:650 15px/1.3 var(--sans);color:var(--ink)}
+  .tip span{color:var(--dim)}
+  .src{color:var(--dimmer);font-size:13px;margin:10px 0 0;word-break:break-word}
+  .src a{color:var(--dim)}
+  .explain{color:var(--dim);font-size:15px;margin:8px 0 0}
+  .note{margin:10px 0 0;padding:10px 12px;border-radius:12px;font-size:14px;line-height:1.5;background:var(--box);
+        border-left:3px solid var(--gold);word-break:break-word}
+  .note.warn{border-left-color:var(--warn)}
+  details.tbl{margin:10px 0 0}
+  details.tbl summary{cursor:pointer;color:var(--gold);font-size:14px;font-weight:600}
+  .tbl-wrap{max-height:260px;overflow:auto;margin:8px 0 0;border:1px solid var(--grid);border-radius:10px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--grid)}
+  td:last-child,th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  th{color:var(--dimmer);font-weight:600;position:sticky;top:0;background:var(--card)}
+
+  /* -------------------------------------------------------- calculator */
+  .box{background:var(--box);border:1px solid transparent;border-radius:16px;padding:14px;margin:14px 0 0}
+  .box:focus-within{border-color:var(--edge)}
+  .box-top{color:var(--dim);font-size:15px;margin:0 0 6px}
+  .box-mid{display:flex;align-items:center;gap:10px}
+  .amt{flex:1;min-width:0;width:100%;background:transparent;border:0;outline:none;color:var(--ink);font:600 28px/1.2 var(--mono);padding:2px 0}
+  .unit{flex:none;color:var(--gold);font:700 16px/1 var(--sans);background:var(--box-hi);border:1px solid var(--edge);border-radius:999px;padding:10px 14px}
+  .steps{position:relative;margin:14px 0 0}
+  .step{background:var(--box);border-radius:16px;padding:14px;margin:0 0 10px;position:relative}
+  .step + .step::before{content:"";position:absolute;left:28px;top:-11px;width:2px;height:12px;background:var(--edge)}
+  .step-h{display:flex;align-items:center;gap:10px}
+  .num{flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--edge);color:var(--gold);
+       display:flex;align-items:center;justify-content:center;font:700 14px/1 var(--sans)}
+  .step-t{color:var(--dim);font-size:15px;font-weight:600}
+  .res{font:650 24px/1.2 var(--sans);margin:8px 0 0;word-break:break-word}
+  .res.muted{color:var(--dimmer)}
+  .step .explain{margin-top:6px}
+  .go{display:block;width:100%;margin:12px 0 0;background:var(--gold);color:#0a0a0a;border:0;border-radius:14px;
+      padding:14px 16px;font:700 17px/1.2 var(--sans);text-align:center;text-decoration:none}
+  .go:hover{box-shadow:0 0 24px var(--gold-glow)}
+  .go.off{background:var(--box-hi);color:var(--dimmer);pointer-events:none}
+  .go-note{color:var(--dim);font-size:14px;margin:6px 2px 0}
+  .alt{display:inline-block;margin:6px 2px 0;font-size:14px;font-weight:600}
+  .final{border-color:var(--gold)}
+  .final .res{font-size:28px;color:var(--gold)}
+  .inv{font:600 18px/1.3 var(--sans);margin:6px 0 0}
+  ul.ex{list-style:none;margin:10px 0 0;padding:0}
+  ul.ex li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:15px}
+  ul.ex li span:first-child{color:var(--dim)}
+  ul.ex li span:last-child{text-align:right;font-weight:600}
+  details.route{margin:0 0 14px}
+  details.route > summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;
+                          font:700 17px/1.3 var(--sans)}
+  details.route > summary::-webkit-details-marker{display:none}
+  details.route > summary::after{content:"▾";color:var(--gold);font-size:18px}
+  details.route[open] > summary::after{content:"▴"}
+
+  ul.ways{list-style:none;margin:10px 0 0;padding:0}
+  ul.ways a{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 2px;border-top:1px solid var(--line);
+            text-decoration:none;color:var(--ink)}
+  ul.ways small{display:block;color:var(--dim);font-size:14px}
+  ul.ways .arw{color:var(--gold);font-size:20px;flex:none}
+  footer{text-align:center;color:var(--dimmer);font-size:14px;margin:18px 0 0}
+  footer a{color:var(--dim)}
+  @media (min-width:700px){ body{padding-top:32px} .card{padding:20px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <a class="mark" href="/">MOLIBRA</a>
+  <div class="lang" role="group" aria-label="Language">
+    <button id="langPt" type="button">PT</button><button id="langEn" type="button">EN</button>
+  </div>
+</header>
+
+<section class="card">
+  <h1 data-i18n="title">Quanto vale o MOLI em reais</h1>
+  <p class="lead" data-i18n="lead">Do real ao MOLI, passo a passo. Todos os números são lidos agora das redes Ethereum e Molibra, cada um com a sua fonte e o seu horário.</p>
+  <div class="status"><span id="status" data-i18n="reading">Lendo as redes…</span>
+    <button class="small" id="refresh" type="button" data-i18n="refresh">Atualizar</button></div>
+  <div class="note warn" id="netNote" hidden></div>
+</section>
+
+<!-- ======================================================= CALCULATOR -->
+<div class="section" data-i18n="calcSection">Calculadora</div>
+<section class="card" id="calc">
+  <h2 data-i18n="calcTitle">De Real para MOLI</h2>
+  <p class="lead" data-i18n="calcLead">Digite um valor em reais. Cada passo mostra a conta e de onde vem cada número.</p>
+  <div class="box">
+    <div class="box-top" data-i18n="youHave">Você tem</div>
+    <div class="box-mid">
+      <input id="brlIn" class="amt" value="50" inputmode="decimal" autocomplete="off" spellcheck="false" aria-label="R$">
+      <span class="unit">R$</span>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="step" id="step1">
+      <div class="step-h"><span class="num">1</span><span class="step-t" data-i18n="s1Title">Real → dólar</span></div>
+      <div class="res" id="r1">—</div>
+      <p class="explain" id="e1"></p>
+      <p class="go-note" data-i18n="s1No">Este passo é só a taxa de câmbio e não tem botão: o real vira ETH de verdade no passo 2.</p>
+    </div>
+    <div class="step" id="step2">
+      <div class="step-h"><span class="num">2</span><span class="step-t" data-i18n="s2Title">Dólar → ETH</span></div>
+      <div class="res" id="r2">—</div>
+      <p class="explain" id="e2"></p>
+      <a class="go" id="go2" href="#" target="_blank" rel="noopener" data-i18n="goNow">Converta agora</a>
+      <p class="go-note" id="n2"></p>
+      <a class="alt" id="go2trust" href="#" target="_blank" rel="noopener" data-i18n="s2Trust">Usa a Trust Wallet? Comprar ETH na Trust</a>
+    </div>
+    <div class="step" id="step3">
+      <div class="step-h"><span class="num">3</span><span class="step-t" data-i18n="s3Title">ETH → bMOLI</span></div>
+      <div class="res" id="r3">—</div>
+      <p class="explain" id="e3"></p>
+      <div class="note warn" id="w3" hidden></div>
+      <a class="go" id="go3" href="/molibra/buy" data-i18n="goNow">Converta agora</a>
+      <p class="go-note" id="n3"></p>
+    </div>
+    <div class="step" id="step4">
+      <div class="step-h"><span class="num">4</span><span class="step-t" data-i18n="s4Title">bMOLI → MOLI</span></div>
+      <div class="res" id="r4">—</div>
+      <p class="explain" data-i18n="s4Ex">Aqui não há troca nem preço: é uma ponte. O bMOLI é o próprio MOLI do lado da Ethereum. Você envia o bMOLI ao cofre de volta e a mesma quantidade sai como MOLI na rede Molibra, no mesmo endereço: 1 por 1.</p>
+      <a class="go" id="go4" href="/molibra/return" data-i18n="goNow">Converta agora</a>
+      <p class="go-note" id="n4"></p>
+    </div>
+    <div class="step final" id="final">
+      <div class="step-h"><span class="num">=</span><span class="step-t" data-i18n="finalTitle">Resultado</span></div>
+      <div class="res" id="rF">—</div>
+      <div class="inv" id="rInv"></div>
+      <p class="explain" id="rPer"></p>
+      <h3 style="margin-top:14px" data-i18n="payTitle">O que dá para pagar</h3>
+      <ul class="ex">
+        <li><span data-i18n="coffee">Um cafezinho, R$ 6</span><span id="exCoffee">—</span></li>
+        <li><span data-i18n="lunch">Um almoço, R$ 35</span><span id="exLunch">—</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<details class="card route" id="wsroRoute">
+  <summary data-i18n="wsroRoute">Outro caminho: pela WSRO</summary>
+  <p class="explain" id="wA"></p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-h"><span class="num">3</span><span class="step-t" data-i18n="w2Title">ETH → WSRO</span></div>
+      <div class="res" id="wr2">—</div>
+      <p class="explain" id="we2"></p>
+      <a class="go" id="goW2" href="/molibra/buy?out=wsro" data-i18n="goNow">Converta agora</a>
+      <p class="go-note" id="wn2"></p>
+    </div>
+    <div class="step">
+      <div class="step-h"><span class="num">4</span><span class="step-t" data-i18n="w3Title">WSRO → rede Molibra</span></div>
+      <p class="explain" data-i18n="w3Ex">A WSRO entra na rede Molibra pela ponte de entrada. Hoje esse passo é feito pelo operador (a página da ponte de entrada é de uso dele), por isso não há botão aqui: fale com o operador para trazer a sua WSRO.</p>
+    </div>
+    <div class="step">
+      <div class="step-h"><span class="num">5</span><span class="step-t" data-i18n="w4Title">WSRO → MOLI</span></div>
+      <div class="res" id="wr4">—</div>
+      <p class="explain" id="we4"></p>
+      <a class="go" id="goW4" href="/molibra/swap" data-i18n="goNow">Converta agora</a>
+      <p class="go-note" id="wn4"></p>
+    </div>
+    <div class="step final">
+      <div class="step-h"><span class="num">=</span><span class="step-t" data-i18n="finalTitle">Resultado</span></div>
+      <div class="res" id="wrF">—</div>
+      <p class="explain" id="wCmp"></p>
+    </div>
+  </div>
+</details>
+
+<!-- =========================================================== CHARTS -->
+<div class="section" data-i18n="chartsSection">Os preços, par a par</div>
+
+<section class="card" id="c-brl">
+  <h2 data-i18n="brlTitle">R$ por US$</h2>
+  <div class="hero" id="v-brl">—</div>
+  <div class="sub2" id="s-brl"></div>
+  <div class="chart" id="ch-brl"></div>
+  <p class="src" id="src-brl"></p>
+  <p class="explain" data-i18n="brlEx">Quantos reais compram 1 dólar americano. Vem do Chainlink, um serviço que publica cotações dentro da rede Ethereum; ele atualiza pelo menos uma vez por dia, ou antes se o câmbio mexer 0,5%.</p>
+  <details class="tbl"><summary data-i18n="tableShow">Ver os números</summary><div class="tbl-wrap"><table id="tb-brl"></table></div></details>
+</section>
+
+<section class="card" id="c-eth">
+  <h2 data-i18n="ethTitle">US$ por ETH</h2>
+  <div class="hero" id="v-eth">—</div>
+  <div class="sub2" id="s-eth"></div>
+  <div class="chart" id="ch-eth"></div>
+  <p class="src" id="src-eth"></p>
+  <p class="explain" data-i18n="ethEx">Quantos dólares custa 1 ether (ETH), a moeda da rede Ethereum. Também do Chainlink, atualizado pelo menos a cada hora, ou antes se o preço mexer 0,5%.</p>
+  <details class="tbl"><summary data-i18n="tableShow">Ver os números</summary><div class="tbl-wrap"><table id="tb-eth"></table></div></details>
+</section>
+
+<section class="card" id="c-bmoli">
+  <h2 data-i18n="bmoliTitle">bMOLI por ETH</h2>
+  <div class="hero" id="v-bmoli">—</div>
+  <div class="sub2" id="s-bmoli"></div>
+  <div class="chart" id="ch-bmoli"></div>
+  <p class="src" id="src-bmoli"></p>
+  <p class="explain" data-i18n="bmoliEx">Quantos bMOLI 1 ETH compra no pool Uniswap v4 bMOLI/ETH. O bMOLI é o MOLI do lado da Ethereum (1 bMOLI volta como 1 MOLI). Este é o preço do momento no pool; numa compra, quanto maior a quantia, mais caro sai cada MOLI (impacto no preço).</p>
+  <details class="tbl"><summary data-i18n="tableShow">Ver os números</summary><div class="tbl-wrap"><table id="tb-bmoli"></table></div></details>
+</section>
+
+<section class="card" id="c-wsro">
+  <h2 data-i18n="wsroTitle">WSRO por ETH</h2>
+  <div class="hero" id="v-wsro">—</div>
+  <div class="sub2" id="s-wsro"></div>
+  <div class="chart" id="ch-wsro"></div>
+  <p class="src" id="src-wsro"></p>
+  <p class="explain" data-i18n="wsroEx">Quantos WSRO 1 ETH compra no pool Uniswap v4 ETH/WSRO, na rede Ethereum. É um pool com o mesmo formato do pool bMOLI/ETH.</p>
+  <p class="explain" id="d-wsro"></p>
+  <details class="tbl"><summary data-i18n="tableShow">Ver os números</summary><div class="tbl-wrap"><table id="tb-wsro"></table></div></details>
+</section>
+
+<section class="card" id="c-moli">
+  <h2 data-i18n="moliTitle">MOLI por WSRO</h2>
+  <div class="hero" id="v-moli">—</div>
+  <div class="sub2" id="s-moli"></div>
+  <div class="chart" id="ch-moli"></div>
+  <p class="src" id="src-moli"></p>
+  <p class="explain" data-i18n="moliEx">Quantos MOLI 1 WSRO compra no pool MOLI/WSRO da própria rede Molibra. É uma troca dentro da Molibra, com taxa de 0,3%.</p>
+  <details class="tbl"><summary data-i18n="tableShow">Ver os números</summary><div class="tbl-wrap"><table id="tb-moli"></table></div></details>
+</section>
+
+<!-- ======================================================== HOW TO BUY -->
+<section class="card">
+  <h2 data-i18n="howTitle">Como comprar</h2>
+  <ul class="ways">
+    <li><a href="/molibra/buy"><span><span data-i18n="howBuy">Comprar bMOLI com ETH</span><small data-i18n="howBuySub">Direto no pool da Ethereum, numa só transação</small></span><span class="arw">&#8594;</span></a></li>
+    <li><a href="/molibra/return"><span><span data-i18n="howReturn">Trazer bMOLI como MOLI</span><small data-i18n="howReturnSub">A ponte de volta: 1 bMOLI vira 1 MOLI na Molibra</small></span><span class="arw">&#8594;</span></a></li>
+    <li><a href="/molibra/pay"><span><span data-i18n="howPay">Pagar e receber com MOLI</span><small data-i18n="howPaySub">QR code para lojas e clientes</small></span><span class="arw">&#8594;</span></a></li>
+    <li><a href="/molibra/swap"><span><span data-i18n="howSwap">Trocar na Molibra</span><small data-i18n="howSwapSub">MOLI e WSRO na página de trocas</small></span><span class="arw">&#8594;</span></a></li>
+  </ul>
+</section>
+
+<footer>
+  <span data-i18n="foot">Esta página só lê as redes. Nada é enviado sem a sua confirmação na carteira.</span><br>
+  <a href="/molibra/buy" data-i18n="howBuy">Comprar bMOLI com ETH</a> ·
+  <a href="/molibra/swap" data-i18n="exchange">Trocar</a> ·
+  <a href="/">molibra.org</a>
+</footer>
+</div>
+
+<script>
+// The origin that SERVED this page; the literal is only the fallback for opening the file from disk.
+const NODE = location.protocol.startsWith('http') ? location.origin : 'https://molibra.org';
+const MOLIBRA_RPC = NODE + '/molibra';
+
+/**
+ * Ethereum reads. Calls try publicnode first (as buy.html does); history needs
+ * eth_getLogs over old blocks, which publicnode refuses without a token, so
+ * logs go to Tenderly's public gateway with MEV Blocker as the fallback (the
+ * bridge bot's choice). All three answer a browser's CORS preflight.
+ */
+const CALL_RPCS = ['https://ethereum-rpc.publicnode.com', 'https://gateway.tenderly.co/public/mainnet', 'https://rpc.mevblocker.io'];
+const LOG_RPCS = ['https://gateway.tenderly.co/public/mainnet', 'https://rpc.mevblocker.io'];
+
+/** ⛔ Each verified with eth_getCode and by name; test/cotacao-page.mjs names the sources. */
+const CHAINLINK_BRL_USD = '0x3126e7f38d5f60f4e2b6ec3511c7bdbd79317df1';
+const CHAINLINK_ETH_USD = '0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419';
+const MULTICALL3 = '0xca11bde05977b3631167028862be2a173976ca11';
+const POOL_MANAGER = '0x000000000004444c5dc75cb358380d2e3de08a90';
+const STATE_VIEW = '0x7ffe42c4a5deea5b0fec41c94c136cf115597227';
+const V4_QUOTER = '0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203';
+const ETH_ADDR = '0x0000000000000000000000000000000000000000';
+const BMOLI = '0xa302877efb74f567f3605851194b46f1d5746822';
+const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
+const MOLI_POOL = '0x4f34d9bc5db2396640d8eb564667e8701528b43d';
+/** WSRO's old Ethereum market, kept only for the note that it has no active liquidity since 5 Oct 2026. */
+const SUSHI_POOL = '0xfcaee25dd24c129a9069fcd2bedc7cd05798c47e';
+
+/**
+ * ⛔⛔ The two Uniswap v4 pools, each read from its Initialize event, and
+ * keccak256(abi.encode(key)) == poolId is checked by the test. currency0 is
+ * native ETH, so buying the token is zeroForOne. Same fee, spacing and shape.
+ *   ETH/bMOLI  tx 0xb87eb11e…5f67, block 26,044,855
+ *   ETH/WSRO   tx 0x41956f00…102f, block 26,125,858
+ */
+const POOL_KEY = { currency0: ETH_ADDR, currency1: BMOLI, fee: 2500n, tickSpacing: 25n, hooks: ETH_ADDR };
+const POOL_ID = '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312';
+const WSRO_POOL_KEY = { currency0: ETH_ADDR, currency1: WSRO, fee: 2500n, tickSpacing: 25n, hooks: ETH_ADDR };
+const WSRO_POOL_ID = '0x0a6dc02a1171887ace334623cff297e0aab91d90a2a2ea7973503200896562c3';
+const V4_INIT_BLOCK = 26044855;
+const WSRO_INIT_BLOCK = 26125858;
+
+/** ⛔ Checked against keccak256 of each signature by test/cotacao-page.mjs. */
+const SEL = {
+  latestRoundData:     '0xfeaf968c',   // latestRoundData()
+  getRoundData:        '0x9a6fc8f5',   // getRoundData(uint80)
+  aggregate3:          '0x82ad56cb',   // aggregate3((address,bool,bytes)[])
+  getSlot0:            '0xc815641c',   // getSlot0(bytes32)
+  quoteExactInSingle:  '0xaa9d21cb',   // quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
+  quoteExactOutSingle: '0x58733073',   // quoteExactOutputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))
+  liquidity:           '0x1a686502',   // liquidity()
+  reserves:           '0x75172a8b',   // reserves()
+  quote:               '0xad615dec',   // quote(uint256,uint256,uint256)
+};
+/** Event topics (keccak of the signatures, checked by the test). */
+const TOPIC = {
+  v4Initialize: '0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438',
+  v4Swap:       '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f',
+};
+const ERR = { notEnoughLiquidity: '0x7a5ed734' };   // NotEnoughLiquidity(bytes32)
+
+/** Chainlink history window and the most points a chart draws. */
+const DAYS = 30;
+const POINTS = 100;
+/** The two everyday examples, in centavos. */
+const EXAMPLES = [['exCoffee', 600n], ['exLunch', 3500n]];
+
+/* ============================================================ language */
+
+const T = {
+  pt: {
+    title: 'Quanto vale o MOLI em reais',
+    lead: 'Do real ao MOLI, passo a passo. Todos os números são lidos agora das redes Ethereum e Molibra, cada um com a sua fonte e o seu horário.',
+    reading: 'Lendo as redes…', refresh: 'Atualizar', updated: 'Atualizado às {0}',
+    nodeDown: 'Não foi possível ler {0} agora. Tente atualizar.',
+    calcSection: 'Calculadora', chartsSection: 'Os preços, par a par',
+    calcTitle: 'De Real para MOLI',
+    calcLead: 'Digite um valor em reais. Cada passo mostra a conta e de onde vem cada número.',
+    youHave: 'Você tem', enterBrl: 'Digite um valor em reais',
+    s1Title: 'Real → dólar',
+    s1Ex: 'O Chainlink informa que R$ 1 vale US$ {0}, ou seja, US$ 1 = R$ {1}. R$ {2} ÷ {1} = US$ {3}.',
+    s1No: 'Este passo é só a taxa de câmbio e não tem botão: o real vira ETH de verdade no passo 2.',
+    s2Title: 'Dólar → ETH',
+    s2Ex: 'O ETH está a US$ {0} (Chainlink). US$ {1} ÷ {0} = {2} ETH.',
+    s2Note: 'Abre a compra de ETH dentro da MetaMask, já com R$ {0}. PIX ou cartão: os meios de pagamento são os que a carteira oferece. Você só confirma lá. O provedor da compra cobra a taxa dele, então chega um pouco menos de ETH.',
+    s2Trust: 'Usa a Trust Wallet? Comprar ETH na Trust',
+    s3Title: 'ETH → bMOLI',
+    s3Ex: 'Cotação do próprio pool Uniswap v4 bMOLI/ETH para {0} ETH, já com as taxas do pool ({3}) e o impacto desta quantia no preço ({1}). Cada MOLI sai por {2} ETH.',
+    s3Cannot: 'O pool não vende {0} ETH de bMOLI de uma vez agora. Ele vende no máximo ≈ {1} ETH (≈ R$ {2}); a conta segue com esse máximo.',
+    s3Failed: 'Não foi possível cotar no pool agora. Tente atualizar.',
+    s3Note: 'Abre a página de compra com {0} ETH já preenchido: ela conecta a carteira, muda para a rede Ethereum e você confirma uma vez. Paga-se também a taxa de rede da Ethereum.',
+    s4Title: 'bMOLI → MOLI',
+    s4Ex: 'Aqui não há troca nem preço: é uma ponte. O bMOLI é o próprio MOLI do lado da Ethereum. Você envia o bMOLI ao cofre de volta e a mesma quantidade sai como MOLI na rede Molibra, no mesmo endereço: 1 por 1.',
+    s4Note: 'Abre a página de volta com {0} bMOLI já preenchido; você confirma o envio na carteira, na rede Ethereum. Os MOLI chegam na Molibra quando a volta é processada: o robô da ponte faz isso sozinho até 5.000 MOLI a cada 5.760 blocos; acima disso, quem processa é o operador.',
+    goNow: 'Converta agora',
+    finalTitle: 'Resultado', finalLine: 'R$ {0} ≈ {1} MOLI', finalInv: '1 MOLI ≈ R$ {0}',
+    finalPer: 'Ou seja, R$ 1 ≈ {0} MOLI nesta compra, já com taxas do pool e impacto no preço; fora as taxas de rede e do provedor do PIX/cartão.',
+    finalPartial: 'R$ {0} ≈ {1} MOLI (o máximo que o pool vende de uma vez agora)',
+    payTitle: 'O que dá para pagar', coffee: 'Um cafezinho, R$ 6', lunch: 'Um almoço, R$ 35',
+    exVal: '≈ {0} MOLI', exCannot: 'acima do que o pool vende de uma vez agora',
+    wsroRoute: 'Outro caminho: pela WSRO',
+    wA: 'Os passos 1 e 2 são os mesmos: R$ {0} = {1} ETH. Daí, em vez do pool bMOLI/ETH, o caminho passa pela WSRO.',
+    w2Title: 'ETH → WSRO',
+    w2Ex: 'Cotação do pool Uniswap v4 ETH/WSRO para {0} ETH, já com as taxas do pool ({2}). Impacto desta quantia no preço: {1}.',
+    w2Note: 'Abre a página de compra, agora para WSRO, com {0} ETH já preenchido: ela conecta a carteira, muda para a rede Ethereum e você confirma uma vez.',
+    w2Failed: 'O pool ETH/WSRO não cotou esta quantia agora.',
+    w3Title: 'WSRO → rede Molibra',
+    w3Ex: 'A WSRO entra na rede Molibra pela ponte de entrada. Hoje esse passo é feito pelo operador (a página da ponte de entrada é de uso dele), por isso não há botão aqui: fale com o operador para trazer a sua WSRO.',
+    w4Title: 'WSRO → MOLI',
+    w4Ex: 'Cotação do pool MOLI/WSRO da Molibra (taxa 0,3%) para {0} WSRO. Impacto desta quantia no preço: {1}.',
+    w4Note: 'Abre a página de trocas com {0} WSRO já preenchido; você confirma na carteira, na rede Molibra.',
+    wResult: 'Pela WSRO: R$ {0} ≈ {1} MOLI',
+    wCompare: 'Os dois caminhos começam no mesmo preço: agora 1 ETH vale {0} bMOLI ou {1} WSRO nos dois pools Uniswap v4, que têm o mesmo formato. O resultado muda no fim: o bMOLI volta 1 por 1 pela ponte, enquanto a WSRO entra pela ponte de entrada (feita pelo operador) e passa pelo pool MOLI/WSRO da Molibra (taxa de 0,3% mais o impacto desta quantia).',
+    brlTitle: 'R$ por US$', brlSub: 'US$ 1 = R$ {0} · R$ 1 = US$ {1}',
+    brlEx: 'Quantos reais compram 1 dólar americano. Vem do Chainlink, um serviço que publica cotações dentro da rede Ethereum; ele atualiza pelo menos uma vez por dia, ou antes se o câmbio mexer 0,5%.',
+    ethTitle: 'US$ por ETH', ethSub: '1 ETH ≈ R$ {0}',
+    ethEx: 'Quantos dólares custa 1 ether (ETH), a moeda da rede Ethereum. Também do Chainlink, atualizado pelo menos a cada hora, ou antes se o preço mexer 0,5%.',
+    bmoliTitle: 'bMOLI por ETH', bmoliSub: '1 MOLI = {0} ETH ≈ US$ {1} ≈ R$ {2}',
+    bmoliEx: 'Quantos bMOLI 1 ETH compra no pool Uniswap v4 bMOLI/ETH. O bMOLI é o MOLI do lado da Ethereum (1 bMOLI volta como 1 MOLI). Este é o preço do momento no pool; numa compra, quanto maior a quantia, mais caro sai cada MOLI (impacto no preço).',
+    wsroTitle: 'WSRO por ETH', wsroSub: '1 WSRO = {0} ETH ≈ US$ {1}',
+    wsroEx: 'Quantos WSRO 1 ETH compra no pool Uniswap v4 ETH/WSRO, na rede Ethereum. É um pool com o mesmo formato do pool bMOLI/ETH.',
+    sushiOld: 'O mercado antigo da WSRO, o pool SushiSwap V3 WSRO/WETH ({0}), está sem liquidez ativa (lido agora).',
+    moliTitle: 'MOLI por WSRO', moliSub: '1 MOLI = {0} WSRO',
+    moliEx: 'Quantos MOLI 1 WSRO compra no pool MOLI/WSRO da própria rede Molibra. É uma troca dentro da Molibra, com taxa de 0,3%.',
+    moliDepth: 'O pool guarda {0} MOLI e {1} WSRO.',
+    srcFeed: 'Fonte: Chainlink {0} na Ethereum ({1}), rodada {2}, publicada em {3}. Gráfico: {4} rodadas dos últimos {5} dias.',
+    srcPool: 'Fonte: {0} ({1}), lido em {2}.',
+    trades0: 'Sem negociações ainda: o preço é o de abertura do pool, em {0}.',
+    tradesN: '{0} negociação(ões) desde a abertura do pool, em {1}.',
+    moliEvents: '{0} negociação(ões) e {1} depósito(s) de liquidez desde {2}.',
+    histMissing: 'Histórico indisponível agora; o gráfico mostra só o valor atual.',
+    histMismatch: 'As reservas refeitas a partir do histórico não batem com as do contrato; o gráfico pode estar incompleto.',
+    tableShow: 'Ver os números', colDate: 'Data', colValue: 'Valor', noData: 'Sem dados ainda',
+    howTitle: 'Como comprar',
+    howBuy: 'Comprar bMOLI com ETH', howBuySub: 'Direto no pool da Ethereum, numa só transação',
+    howReturn: 'Trazer bMOLI como MOLI', howReturnSub: 'A ponte de volta: 1 bMOLI vira 1 MOLI na Molibra',
+    howPay: 'Pagar e receber com MOLI', howPaySub: 'QR code para lojas e clientes',
+    howSwap: 'Trocar na Molibra', howSwapSub: 'MOLI e WSRO na página de trocas',
+    foot: 'Esta página só lê as redes. Nada é enviado sem a sua confirmação na carteira.', exchange: 'Trocar',
+  },
+  en: {
+    title: 'What MOLI is worth in reais',
+    lead: 'From the Brazilian real to MOLI, step by step. Every number is read live from the Ethereum and Molibra networks, each with its source and time.',
+    reading: 'Reading the networks…', refresh: 'Refresh', updated: 'Updated at {0}',
+    nodeDown: 'Could not read {0} just now. Try refreshing.',
+    calcSection: 'Calculator', chartsSection: 'The prices, pair by pair',
+    calcTitle: 'From reais to MOLI',
+    calcLead: 'Type an amount in reais. Each step shows the sum and where every number comes from.',
+    youHave: 'You have', enterBrl: 'Type an amount in reais',
+    s1Title: 'Real → dollar',
+    s1Ex: 'Chainlink reports that R$ 1 is worth US$ {0}, so US$ 1 = R$ {1}. R$ {2} ÷ {1} = US$ {3}.',
+    s1No: 'This step is only the exchange rate and has no button: the real becomes ETH for real in step 2.',
+    s2Title: 'Dollar → ETH',
+    s2Ex: 'ETH is at US$ {0} (Chainlink). US$ {1} ÷ {0} = {2} ETH.',
+    s2Note: 'Opens the ETH purchase inside MetaMask, with R$ {0} filled in. PIX or card: the payment methods are the ones the wallet offers. You only confirm there. The purchase provider charges its own fee, so a little less ETH arrives.',
+    s2Trust: 'Using Trust Wallet? Buy ETH in Trust',
+    s3Title: 'ETH → bMOLI',
+    s3Ex: 'The quote of the Uniswap v4 bMOLI/ETH pool itself for {0} ETH, with the pool\'s fees ({3}) and this amount\'s price impact ({1}) included. Each MOLI costs {2} ETH.',
+    s3Cannot: 'The pool does not sell {0} ETH worth of bMOLI in one go right now. It sells at most ≈ {1} ETH (≈ R$ {2}); the sum continues with that maximum.',
+    s3Failed: 'The pool could not be quoted just now. Try refreshing.',
+    s3Note: 'Opens the buy page with {0} ETH filled in: it connects the wallet, switches to Ethereum and you confirm once. The Ethereum network fee is paid as well.',
+    s4Title: 'bMOLI → MOLI',
+    s4Ex: 'No trade and no price here: it is a bridge. bMOLI is MOLI itself on the Ethereum side. You send the bMOLI to the return vault and the same amount comes out as MOLI on the Molibra network, at the same address: 1 for 1.',
+    s4Note: 'Opens the return page with {0} bMOLI filled in; you confirm the transfer in your wallet, on Ethereum. The MOLI arrive on Molibra once the return is processed: the bridge bot does it on its own up to 5,000 MOLI per 5,760 blocks; above that, the operator processes it.',
+    goNow: 'Convert now',
+    finalTitle: 'Result', finalLine: 'R$ {0} ≈ {1} MOLI', finalInv: '1 MOLI ≈ R$ {0}',
+    finalPer: 'So R$ 1 ≈ {0} MOLI in this purchase, with pool fees and price impact included; network fees and the PIX/card provider\'s fee come on top.',
+    finalPartial: 'R$ {0} ≈ {1} MOLI (the most the pool sells in one go right now)',
+    payTitle: 'What it pays for', coffee: 'A coffee, R$ 6', lunch: 'A lunch, R$ 35',
+    exVal: '≈ {0} MOLI', exCannot: 'more than the pool sells in one go right now',
+    wsroRoute: 'Another route: through WSRO',
+    wA: 'Steps 1 and 2 are the same: R$ {0} = {1} ETH. From there, instead of the bMOLI/ETH pool, the route goes through WSRO.',
+    w2Title: 'ETH → WSRO',
+    w2Ex: 'The quote of the Uniswap v4 ETH/WSRO pool for {0} ETH, with the pool\'s fees ({2}) included. This amount\'s price impact: {1}.',
+    w2Note: 'Opens the buy page, now for WSRO, with {0} ETH filled in: it connects the wallet, switches to Ethereum and you confirm once.',
+    w2Failed: 'The ETH/WSRO pool did not quote this amount just now.',
+    w3Title: 'WSRO → Molibra network',
+    w3Ex: 'WSRO enters the Molibra network through the inbound bridge. Today that step is done by the operator (the inbound bridge page is the operator\'s), so there is no button here: ask the operator to bring your WSRO over.',
+    w4Title: 'WSRO → MOLI',
+    w4Ex: 'The quote of the Molibra MOLI/WSRO pool (0.3% fee) for {0} WSRO. This amount\'s price impact: {1}.',
+    w4Note: 'Opens the swap page with {0} WSRO filled in; you confirm in your wallet, on the Molibra network.',
+    wResult: 'Through WSRO: R$ {0} ≈ {1} MOLI',
+    wCompare: 'Both routes start at the same price: right now 1 ETH is worth {0} bMOLI or {1} WSRO in the two Uniswap v4 pools, which have the same shape. The result differs at the end: bMOLI comes back 1 for 1 through the bridge, while WSRO enters through the inbound bridge (done by the operator) and goes through Molibra\'s MOLI/WSRO pool (0.3% fee plus this amount\'s price impact).',
+    brlTitle: 'R$ per US$', brlSub: 'US$ 1 = R$ {0} · R$ 1 = US$ {1}',
+    brlEx: 'How many reais buy 1 US dollar. It comes from Chainlink, a service that publishes rates inside the Ethereum network; it updates at least once a day, or sooner if the rate moves 0.5%.',
+    ethTitle: 'US$ per ETH', ethSub: '1 ETH ≈ R$ {0}',
+    ethEx: 'How many dollars 1 ether (ETH), the currency of the Ethereum network, costs. Also from Chainlink, updated at least every hour, or sooner if the price moves 0.5%.',
+    bmoliTitle: 'bMOLI per ETH', bmoliSub: '1 MOLI = {0} ETH ≈ US$ {1} ≈ R$ {2}',
+    bmoliEx: 'How many bMOLI 1 ETH buys in the Uniswap v4 bMOLI/ETH pool. bMOLI is MOLI on the Ethereum side (1 bMOLI comes back as 1 MOLI). This is the pool\'s current price; in a purchase, the larger the amount, the more each MOLI costs (price impact).',
+    wsroTitle: 'WSRO per ETH', wsroSub: '1 WSRO = {0} ETH ≈ US$ {1}',
+    wsroEx: 'How many WSRO 1 ETH buys in the Uniswap v4 ETH/WSRO pool on Ethereum. It has the same shape as the bMOLI/ETH pool.',
+    sushiOld: 'WSRO\'s old market, the SushiSwap V3 WSRO/WETH pool ({0}), has no active liquidity (read just now).',
+    moliTitle: 'MOLI per WSRO', moliSub: '1 MOLI = {0} WSRO',
+    moliEx: 'How many MOLI 1 WSRO buys in the MOLI/WSRO pool on the Molibra network itself. It is a swap inside Molibra, with a 0.3% fee.',
+    moliDepth: 'The pool holds {0} MOLI and {1} WSRO.',
+    srcFeed: 'Source: Chainlink {0} on Ethereum ({1}), round {2}, published {3}. Chart: {4} rounds from the last {5} days.',
+    srcPool: 'Source: {0} ({1}), read at {2}.',
+    trades0: 'No trades yet: the price is the pool\'s opening price, from {0}.',
+    tradesN: '{0} trade(s) since the pool opened, on {1}.',
+    moliEvents: '{0} trade(s) and {1} liquidity deposit(s) since {2}.',
+    histMissing: 'History unavailable just now; the chart shows only the current value.',
+    histMismatch: 'The reserves rebuilt from the history do not match the contract\'s; the chart may be incomplete.',
+    tableShow: 'See the numbers', colDate: 'Date', colValue: 'Value', noData: 'No data yet',
+    howTitle: 'How to buy',
+    howBuy: 'Buy bMOLI with ETH', howBuySub: 'Straight from the pool on Ethereum, one transaction',
+    howReturn: 'Bring bMOLI back as MOLI', howReturnSub: 'The return bridge: 1 bMOLI becomes 1 MOLI on Molibra',
+    howPay: 'Pay and get paid in MOLI', howPaySub: 'QR codes for shops and customers',
+    howSwap: 'Swap on Molibra', howSwapSub: 'MOLI and WSRO on the swap page',
+    foot: 'This page only reads the networks. Nothing is sent without your confirmation in your wallet.', exchange: 'Swap',
+  },
+};
+
+let LANG = /^pt/i.test(document.documentElement.lang) ? 'pt' : 'en';
+
+function t(key) {
+  let s = (T[LANG] && T[LANG][key]) || T.en[key] || key;
+  for (let i = 1; i < arguments.length; i++) s = s.split('{' + (i - 1) + '}').join(String(arguments[i]));
+  return s;
+}
+
+function setLang(l) {
+  LANG = l === 'en' ? 'en' : 'pt';
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  try { localStorage.setItem('molibra.lang', LANG); } catch (e) {}
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  $('langPt').className = LANG === 'pt' ? 'on' : '';
+  $('langEn').className = LANG === 'en' ? 'on' : '';
+  renderAll();
+}
+
+/* ============================================================= helpers */
+
+const $ = (id) => document.getElementById(id);
+const UNIT = 10n ** 18n;
+const Q192 = 1n << 192n;
+
+/** Decimal string -> integer with `dec` decimals. ⛔ No floating point near an amount. */
+function toUnits(s, dec) {
+  const v = String(s ?? '').trim().replace(/\s/g, '').replace(',', '.');
+  if (!/^\d*\.?\d*$/.test(v) || v === '' || v === '.') return null;
+  const parts = v.split('.');
+  const f = parts[1] || '';
+  if (f.length > dec) return null;
+  const n = BigInt(parts[0] || '0') * 10n ** BigInt(dec) + BigInt((f + '0'.repeat(dec)).slice(0, dec) || '0');
+  return n > 0n ? n : null;
+}
+
+/** Integer with `dec` decimals -> plain decimal string, truncated to `places`. */
+function fromUnits(v, dec, places) {
+  const n = BigInt(v);
+  const base = 10n ** BigInt(dec);
+  const whole = n / base;
+  const f = (n % base).toString().padStart(dec, '0').slice(0, places).replace(/0+$/, '');
+  return f ? whole + '.' + f : String(whole);
+}
+
+function fromWei(v, places) {
+  return fromUnits(v, 18, places === undefined ? 6 : places);
+}
+
+/** Localise a plain decimal string: 1234.5 -> 1.234,5 in PT. */
+function localise(s) {
+  const pt = LANG === 'pt';
+  const parts = s.split('.');
+  const g = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, pt ? '.' : ',');
+  return parts[1] ? g + (pt ? ',' : '.') + parts[1] : g;
+}
+
+/** Exactly `places` decimals (truncated), localised: money. */
+function fmtFixed(v, dec, places) {
+  const s = fromUnits(v, dec, places);
+  const parts = s.split('.');
+  return localise(parts[0] + (places > 0 ? '.' + (parts[1] || '').padEnd(places, '0') : ''));
+}
+
+/**
+ * An integer amount with `dec` decimals, shown with `sig` significant digits
+ * after any leading zeros (a MOLI costs a few millionths of an ETH). Whole
+ * numbers of 1000 and up drop the fraction. Same rule as buy.html.
+ */
+function fmtSig(v, dec, sig) {
+  const n = BigInt(v);
+  if (n <= 0n) return '0';
+  const s = n.toString().padStart(dec + 1, '0');
+  const whole = BigInt(s.slice(0, s.length - dec));
+  let frac = s.slice(s.length - dec);
+  if (whole >= 1000n) frac = '';
+  else if (whole > 0n) frac = frac.slice(0, Math.max(0, sig - whole.toString().length));
+  else { const lead = frac.search(/[1-9]/); frac = frac.slice(0, lead + sig); }
+  frac = frac.replace(/0+$/, '');
+  return localise(frac ? whole.toString() + '.' + frac : whole.toString());
+}
+
+function fmt(v) {
+  const n = BigInt(v);
+  return n >= 1000n * UNIT ? localise(fromWei(n, 2)) : fmtSig(n, 18, 6);
+}
+
+const fmtBp = (bp) => localise(fromUnits(BigInt(bp), 2, 2)) + '%';
+/** A fee in pips (1e-6) as a percentage, rounded to two places: 2899 -> 0,29%. */
+const fmtFee = (pips) => localise(fromUnits((BigInt(pips) + 50n) / 100n, 2, 2)) + '%';
+const fmtImpact = (bp) => (bp === null ? '—' : bp < 1n ? (LANG === 'pt' ? '< 0,01%' : '< 0.01%') : fmtBp(bp));
+
+/** A chart number (a float, for drawing only), with `sig` significant digits. */
+function fmtNum(v, sig) {
+  if (!isFinite(v)) return '—';
+  const a = Math.abs(v);
+  const loc = LANG === 'pt' ? 'pt-BR' : 'en-US';
+  if (a !== 0 && a < 0.001) return new Intl.NumberFormat(loc, { maximumSignificantDigits: sig || 4 }).format(v);
+  if (a >= 1e6) return new Intl.NumberFormat(loc, { notation: 'compact', maximumSignificantDigits: sig || 4 }).format(v);
+  return new Intl.NumberFormat(loc, { maximumSignificantDigits: Math.max(sig || 4, Math.floor(Math.log10(a || 1)) + 3) }).format(v);
+}
+
+function fmtTime(sec, withYear) {
+  const d = new Date(sec * 1000);
+  return d.toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-GB', withYear
+    ? { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+const fmtClock = (ms) => new Date(ms).toLocaleTimeString(LANG === 'pt' ? 'pt-BR' : 'en-GB');
+const shortAddr = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+
+/** A float for drawing, from an integer ratio with 18 decimals kept. */
+function ratioNum(num, den) {
+  if (den === 0n) return 0;
+  return Number(num * UNIT / den) / 1e18;
+}
+
+/* ============================================================== ABI */
+
+function word(v) {
+  let b = BigInt(v);
+  if (b < 0n) b += 1n << 256n;
+  return b.toString(16).padStart(64, '0');
+}
+
+function addr32(a) {
+  return a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+}
+
+function pad32(h) {
+  return h.padEnd(Math.ceil(h.length / 64) * 64, '0');
+}
+
+function words(hex) {
+  const h = String(hex || '0x').replace(/^0x/, '');
+  const out = [];
+  for (let i = 0; i + 64 <= h.length; i += 64) out.push(BigInt('0x' + h.slice(i, i + 64)));
+  return out;
+}
+
+function poolKeyEnc(k) {
+  return addr32(k.currency0) + addr32(k.currency1) + word(k.fee) + word(k.tickSpacing) + addr32(k.hooks);
+}
+
+/** V4Quoter.quoteExact{Input,Output}Single, buying the pool's token with ETH (zeroForOne). Same encoding as buy.html. */
+function quoteData(key, sel, amount) {
+  return sel + word(0x20) + poolKeyEnc(key) + word(1) + word(amount) + word(8 * 32) + word(0);
+}
+
+/** Multicall3.aggregate3(Call3[]) with allowFailure = true on every call. */
+function aggregate3Data(calls) {
+  const els = calls.map((c) => {
+    const d = c.data.replace(/^0x/, '');
+    return addr32(c.target) + word(1) + word(0x60) + word(d.length / 2) + pad32(d);
+  });
+  let off = calls.length * 32;
+  const offs = els.map((e) => { const o = word(off); off += e.length / 2; return o; });
+  return SEL.aggregate3 + word(0x20) + word(calls.length) + offs.join('') + els.join('');
+}
+
+/** aggregate3's Result[] -> [{ success, data }]. */
+function aggregate3Decode(hex) {
+  const h = hex.replace(/^0x/, '');
+  const at = (b) => BigInt('0x' + h.slice(b * 2, b * 2 + 64));
+  const arr = Number(at(0));
+  const n = Number(at(arr));
+  const base = arr + 32;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const el = base + Number(at(base + 32 * i));
+    const success = at(el) !== 0n;
+    const bo = el + Number(at(el + 32));
+    const len = Number(at(bo));
+    out.push({ success: success, data: '0x' + h.slice((bo + 32) * 2, (bo + 32 + len) * 2) });
+  }
+  return out;
+}
+
+/* ============================================================== maths */
+
+/** Centavos x Chainlink BRL/USD (USD per BRL, 8 decimals) -> US$ with 8 decimals. */
+function brlToUsd8(cents, brlUsd8) {
+  return cents * brlUsd8 / 100n;
+}
+
+/** US$ (8 decimals) / Chainlink ETH/USD (8 decimals) -> wei. */
+function usd8ToWei(usd8, ethUsd8) {
+  return ethUsd8 > 0n ? usd8 * UNIT / ethUsd8 : 0n;
+}
+
+/** wei -> centavos, the way back (for "the most the pool fills, in reais"). */
+function weiToCents(wei, ethUsd8, brlUsd8) {
+  return brlUsd8 > 0n ? wei * ethUsd8 * 100n / (UNIT * brlUsd8) : 0n;
+}
+
+/** Reais per dollar with 8 decimals, from Chainlink's dollars per real. */
+function brlPerUsd8(brlUsd8) {
+  return brlUsd8 > 0n ? 10n ** 16n / brlUsd8 : 0n;
+}
+
+/** MOLI (wei) per R$ 1, from what `cents` bought. */
+function moliPerBrl(moliWei, cents) {
+  return cents > 0n ? moliWei * 100n / cents : 0n;
+}
+
+/** Reais per MOLI with 18 decimals. */
+function brlPerMoli18(cents, moliWei) {
+  return moliWei > 0n ? cents * 10n ** 34n / moliWei : 0n;
+}
+
+/** ETH wei paid per whole bMOLI. */
+function priceWeiPerMoli(amountIn, out) {
+  return out > 0n ? amountIn * UNIT / out : 0n;
+}
+
+/** Spot output for `amountIn` at a sqrtPriceX96 (token1 per token0), both 18 decimals. */
+function spotOut1(amountIn, sqrtP) {
+  return amountIn * sqrtP * sqrtP / Q192;
+}
+
+/**
+ * The fee a v4 swap pays, in pips: v4's ProtocolFeeLibrary.calculateSwapFee,
+ * protocolFee + lpFee - protocolFee*lpFee/1e6, with the zeroForOne protocol
+ * fee in the low 12 bits of slot0's protocolFee.
+ */
+function swapFeePips(protocolFee, lpFee) {
+  const pf = protocolFee & 0xfffn;
+  return pf + lpFee - pf * lpFee / 1000000n;
+}
+
+/** Price impact in basis points: what the spot price promised (fee removed) against what the pool gives. */
+function impactBp(spot, feePpm, out) {
+  const net = spot * (1000000n - feePpm) / 1000000n;
+  if (net <= 0n || out >= net) return 0n;
+  return (net - out) * 10000n / net;
+}
+
+/** MolibraPool.quote(): floor(a*997*rOut / (rIn*1000 + a*997)). The pool is asked too; this checks it. */
+function molibraQuote(amountIn, rIn, rOut) {
+  if (amountIn <= 0n || rIn <= 0n || rOut <= 0n) return 0n;
+  const withFee = amountIn * 997n;
+  return withFee * rOut / (rIn * 1000n + withFee);
+}
+
+/** ⛔ A partial fill: exact-output needs LESS input than offered (same rule as buy.html). */
+function isPartial(amountIn, neededIn) {
+  return neededIn + amountIn / 1000000n + 1000n < amountIn;
+}
+
+/* ===================================================== "Converta agora" */
+
+/**
+ * ⛔ Each opens a page or a wallet with the amount filled in. Nothing here
+ * signs or sends; the person confirms in the wallet or nothing happens.
+ */
+
+/** MetaMask's own buy deep link (metamask-mobile parseRampIntent: chainId, amount, currency). */
+function metamaskBuyUrl(cents) {
+  return 'https://link.metamask.io/buy?chainId=1&amount=' + fromUnits(cents, 2, 2) + '&currency=brl';
+}
+
+/** Trust Wallet's documented "Open Buy Crypto" deep link; c60 is ETH. */
+function trustBuyUrl(cents) {
+  return 'https://link.trustwallet.com/buy?asset=c60&fiat_currency=BRL&fiat_quantity=' + fromUnits(cents, 2, 2);
+}
+
+/** An amount for a URL: 6 decimals, truncated (never more than computed), more when tiny. */
+function urlAmount(wei) {
+  const s = fromWei(wei, 6);
+  return s === '0' ? fromWei(wei, 18) : s;
+}
+
+function buyPageUrl(wei) {
+  return '/molibra/buy?amount=' + urlAmount(wei);
+}
+
+function returnPageUrl(wei) {
+  return '/molibra/return?amount=' + urlAmount(wei);
+}
+
+/** The same direct v4 swap as for bMOLI, against the ETH/WSRO pool (buy.html ?out=wsro). */
+function buyWsroUrl(wei) {
+  return '/molibra/buy?out=wsro&amount=' + urlAmount(wei);
+}
+
+function swapPageUrl(wei) {
+  return '/molibra/swap?from=WSRO&amount=' + urlAmount(wei);
+}
+
+/* ============================================================== reads */
+
+async function rpcAt(url, method, params) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const r = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params }),
+    });
+    const j = await r.json();
+    if (j.error) {
+      const e = new Error(j.error.message || 'rpc error');
+      e.data = typeof j.error.data === 'string' ? j.error.data : '';
+      // A revert is an ANSWER: another node would say the same.
+      e.revert = j.error.code === 3 || /revert/i.test(e.message) || Boolean(e.data);
+      throw e;
+    }
+    return j.result;
+  } finally { clearTimeout(timer); }
+}
+
+/** Ask each endpoint in turn; a revert is final, anything else tries the next. */
+async function ethRpc(method, params, urls) {
+  let last = null;
+  for (const u of urls || CALL_RPCS) {
+    try { return await rpcAt(u, method, params); }
+    catch (e) { if (e.revert) throw e; last = e; }
+  }
+  throw last || new Error('no Ethereum endpoint');
+}
+const ethCall = (to, data) => ethRpc('eth_call', [{ to: to, data: data }, 'latest']);
+const molibraCall = (to, data) => rpcAt(MOLIBRA_RPC, 'eth_call', [{ to: to, data: data }, 'latest']);
+
+const blockTimes = new Map();
+async function blockTime(n) {
+  if (!blockTimes.has(n)) {
+    const b = await ethRpc('eth_getBlockByNumber', ['0x' + n.toString(16), false], LOG_RPCS);
+    blockTimes.set(n, Number(BigInt(b.timestamp)));
+  }
+  return blockTimes.get(n);
+}
+
+/** Chainlink latestRoundData -> { round, answer, updatedAt }. */
+async function readFeed(feed) {
+  const w = words(await ethCall(feed, SEL.latestRoundData));
+  return { round: w[0], answer: w[1], updatedAt: Number(w[3]) };
+}
+
+/** getRoundData for many rounds in ONE eth_call, through Multicall3. Failed rounds are skipped. */
+async function roundsOf(feed, ids) {
+  const res = aggregate3Decode(await ethCall(MULTICALL3, aggregate3Data(ids.map((id) => ({ target: feed, data: SEL.getRoundData + word(id) })))));
+  const out = [];
+  res.forEach((r, i) => {
+    if (!r.success) return;
+    const w = words(r.data);
+    if (w.length < 4 || w[3] === 0n || w[1] <= 0n) return;
+    out.push({ id: ids[i], answer: w[1], t: Number(w[3]) });
+  });
+  return out;
+}
+
+/**
+ * Rounds ids in the latest phase from `lo` to `hi`, at most `n` of them,
+ * evenly spaced and always including both ends.
+ */
+function sampleIds(lo, hi, n) {
+  if (hi < lo) return [];
+  const span = hi - lo;
+  if (span + 1n <= BigInt(n)) { const a = []; for (let i = lo; i <= hi; i++) a.push(i); return a; }
+  const a = [];
+  for (let i = 0; i < n; i++) a.push(lo + span * BigInt(i) / BigInt(n - 1));
+  return a;
+}
+
+/**
+ * The last DAYS of a Chainlink feed, about POINTS points, in two eth_calls:
+ * a coarse pass over the whole phase finds the round at the window's start,
+ * a fine pass samples from there to the latest. A round id is
+ * (phaseId << 64) | aggregatorRound, so only the low 64 bits are walked.
+ */
+async function feedHistory(feed, latest, nowSec) {
+  const MASK = (1n << 64n) - 1n;
+  const phase = latest.round >> 64n;
+  const agg = latest.round & MASK;
+  const id = (r) => (phase << 64n) | r;
+  const since = nowSec - DAYS * 86400;
+  const coarse = await roundsOf(feed, sampleIds(1n, agg, 64).map(id));
+  let lo = 1n;
+  for (const r of coarse) if (r.t < since && (r.id & MASK) > lo) lo = r.id & MASK;
+  const fine = await roundsOf(feed, sampleIds(lo, agg, POINTS).map(id));
+  fine.sort((a, b) => a.t - b.t);
+  const inside = fine.filter((r) => r.t >= since);
+  const before = fine.filter((r) => r.t < since).pop();
+  if (before) inside.unshift({ id: before.id, answer: before.answer, t: since });
+  return inside;
+}
+
+/** A v4 pool now: StateView.getSlot0 -> (sqrtPriceX96, tick, protocolFee, lpFee), and the fee a swap pays. */
+async function readV4(poolId) {
+  const w = words(await ethCall(STATE_VIEW, SEL.getSlot0 + poolId.slice(2)));
+  return { sqrtP: w[0], fee: swapFeePips(w[2], w[3]) };
+}
+
+/** A v4 pool's Initialize and Swap events, as (time, sqrtPriceX96). */
+async function v4History(poolId, fromBlock) {
+  const logs = await ethRpc('eth_getLogs', [{ address: POOL_MANAGER, fromBlock: '0x' + fromBlock.toString(16), toBlock: 'latest',
+    topics: [[TOPIC.v4Initialize, TOPIC.v4Swap], poolId] }], LOG_RPCS);
+  const out = [];
+  for (const l of logs) {
+    const w = words(l.data);
+    const init = l.topics[0] === TOPIC.v4Initialize;
+    out.push({ block: Number(BigInt(l.blockNumber)), init: init, sqrtP: init ? w[3] : w[2] });
+  }
+  for (const e of out) e.t = await blockTime(e.block);
+  return out;
+}
+
+/** The old Sushi market's active liquidity, for the note only. */
+async function readSushiLiquidity() {
+  return BigInt(await ethCall(SUSHI_POOL, SEL.liquidity));
+}
+
+/** Molibra pool now: reserves() is (MOLI, WSRO). */
+async function readMoliPool() {
+  const w = words(await molibraCall(MOLI_POOL, SEL.reserves));
+  return { rMoli: w[0], rTok: w[1] };
+}
+
+async function moliHistory() {
+  const r = await fetch(NODE + '/molibra/pool-history?pool=' + MOLI_POOL);
+  if (!r.ok) throw new Error('pool-history ' + r.status);
+  return r.json();
+}
+
+/* ============================================================ quoting */
+
+/** A v4 pool's answer for `amountIn` ETH, or a refusal (same rules as buy.html). */
+async function v4Quote(key, amountIn) {
+  let out;
+  try { out = words(await ethCall(V4_QUOTER, quoteData(key, SEL.quoteExactInSingle, amountIn)))[0]; }
+  catch (e) {
+    if (!e.revert) throw e;
+    return { amountIn: amountIn, cannot: true, reason: String(e.data || '').includes(ERR.notEnoughLiquidity.slice(2)) ? 'liquidity' : 'failed' };
+  }
+  if (!out) return { amountIn: amountIn, cannot: true, reason: 'liquidity' };
+  let need;
+  try { need = words(await ethCall(V4_QUOTER, quoteData(key, SEL.quoteExactOutSingle, out)))[0]; }
+  catch (e) { return { amountIn: amountIn, cannot: true, reason: 'liquidity' }; }
+  if (isPartial(amountIn, need)) return { amountIn: amountIn, cannot: true, reason: 'liquidity' };
+  return { amountIn: amountIn, out: out };
+}
+
+/** The most the pool fills right now, to within 0.1%, by bisection on the quoter. */
+async function maxFillable(key, upTo) {
+  let lo = 0n; let hi = upTo; let loOut = 0n;
+  for (let i = 0; i < 24 && hi - lo > hi / 1000n; i++) {
+    const mid = (lo + hi) / 2n;
+    const q = await v4Quote(key, mid);
+    if (q.cannot) hi = mid; else { lo = mid; loOut = q.out; }
+  }
+  return { maxIn: lo, maxOut: loOut };
+}
+
+/* ============================================================== state */
+
+const params = new URLSearchParams(location.search);
+const M = {};          // market reads: brl, eth, v4, wsro, sushiLiq, moli
+const H = {};          // histories: brl, eth, v4, wsro, moli
+const C = {};          // the last calculation
+let calcSeq = 0;
+let readAt = 0;
+
+/* ============================================================ drawing */
+
+/**
+ * Clean axis ticks: 1, 2 or 5 x 10^k steps covering [lo, hi], about `n` of them.
+ * Works the same for 5.2 and for 0.0000000135.
+ */
+function niceTicks(lo, hi, n) {
+  if (!isFinite(lo) || !isFinite(hi)) return [0, 1];
+  if (hi < lo) { const x = lo; lo = hi; hi = x; }
+  if (hi === lo) {
+    const pad = Math.abs(hi) * 0.01 || 1;
+    lo -= pad; hi += pad;
+  }
+  const raw = (hi - lo) / Math.max(1, n - 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const r = raw / mag;
+  const step = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10) * mag;
+  const start = Math.floor(lo / step) * step;
+  const end = Math.ceil(hi / step) * step;
+  const out = [];
+  for (let v = start, i = 0; v <= end + step / 2 && i < 50; v += step, i++) out.push(Number(v.toPrecision(12)));
+  return out;
+}
+
+/**
+ * The geometry of a step chart (a price holds until the next update or trade),
+ * pure so the test can check it with 0, 1 and many points. `points` are
+ * [{t, v}] in time order; the last value is carried to `now`.
+ */
+function chartModel(points, now, w, h, padL, padR, padT, padB) {
+  if (!points || !points.length) return { empty: true };
+  const pts = points.filter((p) => isFinite(p.v) && isFinite(p.t));
+  if (!pts.length) return { empty: true };
+  let t0 = pts[0].t;
+  const t1 = Math.max(now, pts[pts.length - 1].t);
+  if (t1 - t0 < 3600) t0 = t1 - 3600;
+  let lo = Infinity; let hi = -Infinity;
+  for (const p of pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; }
+  const ticks = niceTicks(lo, hi, 4);
+  const y0 = ticks[0]; const y1 = ticks[ticks.length - 1];
+  const X = (t) => padL + (t - t0) / (t1 - t0) * (w - padL - padR);
+  const Y = (v) => padT + (1 - (v - y0) / (y1 - y0)) * (h - padT - padB);
+  let d = '';
+  const marks = pts.map((p) => ({ t: p.t, v: p.v, x: X(p.t), y: Y(p.v) }));
+  marks.forEach((m, i) => { d += i === 0 ? 'M' + m.x.toFixed(1) + ',' + m.y.toFixed(1) : 'H' + m.x.toFixed(1) + 'V' + m.y.toFixed(1); });
+  const xEnd = X(t1);
+  d += 'H' + xEnd.toFixed(1);
+  const base = (h - padB).toFixed(1);
+  const area = d + 'V' + base + 'H' + marks[0].x.toFixed(1) + 'Z';
+  const last = marks[marks.length - 1];
+  return {
+    empty: false, path: d, area: area, t0: t0, t1: t1,
+    end: { x: xEnd, y: last.y, v: last.v },
+    yTicks: ticks.map((v) => ({ v: v, y: Y(v) })),
+    xTicks: [t0, (t0 + t1) / 2, t1].map((t) => ({ t: t, x: X(t) })),
+    marks: marks,
+  };
+}
+
+/** The value in force at time `t` on a step chart: the last mark at or before it. */
+function valueAt(marks, t) {
+  let m = marks[0];
+  for (const k of marks) { if (k.t <= t) m = k; else break; }
+  return m;
+}
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/**
+ * Draw one chart into `id`. Single series, so no legend box: the card's title
+ * names it. Hairline grid, 2px gold line, a 10% wash, the end dot with a ring
+ * in the surface colour; a crosshair and tooltip on hover, touch and keys.
+ */
+function drawChart(key, points, unit) {
+  const box = $('ch-' + key);
+  box.textContent = '';
+  const now = Math.floor(Date.now() / 1000);
+  const W = Math.max(240, box.clientWidth || 320);
+  const Hh = 190;
+  const probe = niceTicks(Math.min(...points.map((p) => p.v)), Math.max(...points.map((p) => p.v)), 4);
+  const padL = Math.min(96, 10 + Math.max(...probe.map((v) => fmtNum(v, 3).length)) * 7);
+  const m = chartModel(points, now, W, Hh, padL, 10, 8, 24);
+  if (m.empty) {
+    const d = document.createElement('div'); d.className = 'empty'; d.textContent = t('noData'); box.appendChild(d);
+    return;
+  }
+  const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, width: W, height: Hh, role: 'img', tabindex: '0',
+    'aria-label': $('c-' + key).querySelector('h2').textContent });
+  for (const tk of m.yTicks) {
+    el('line', { x1: padL, x2: W - 10, y1: tk.y.toFixed(1), y2: tk.y.toFixed(1), stroke: 'var(--grid)', 'stroke-width': 1 }, svg);
+    const tx = el('text', { x: padL - 6, y: (tk.y + 4).toFixed(1), 'text-anchor': 'end', fill: 'var(--dimmer)', 'font-size': 11,
+      'font-family': 'var(--sans)', style: 'font-variant-numeric:tabular-nums' }, svg);
+    tx.textContent = fmtNum(tk.v, 3);
+  }
+  const span = m.t1 - m.t0;
+  m.xTicks.forEach((tk, i) => {
+    const tx = el('text', { x: tk.x.toFixed(1), y: Hh - 6, 'text-anchor': i === 0 ? 'start' : i === 2 ? 'end' : 'middle',
+      fill: 'var(--dimmer)', 'font-size': 11, 'font-family': 'var(--sans)' }, svg);
+    const d = new Date(tk.t * 1000);
+    tx.textContent = d.toLocaleDateString(LANG === 'pt' ? 'pt-BR' : 'en-GB', span > 300 * 86400
+      ? { month: '2-digit', year: '2-digit' } : span < 2 * 86400 ? { hour: '2-digit', minute: '2-digit' } : { day: '2-digit', month: '2-digit' });
+  });
+  el('path', { d: m.area, fill: 'var(--gold-wash)', stroke: 'none' }, svg);
+  el('path', { d: m.path, fill: 'none', stroke: 'var(--gold)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+  el('circle', { cx: m.end.x.toFixed(1), cy: m.end.y.toFixed(1), r: 4, fill: 'var(--gold)', stroke: 'var(--card)', 'stroke-width': 2 }, svg);
+  const cross = el('line', { y1: 8, y2: Hh - 24, stroke: 'var(--dim)', 'stroke-width': 1, visibility: 'hidden' }, svg);
+  const dot = el('circle', { r: 4, fill: 'var(--gold)', stroke: 'var(--card)', 'stroke-width': 2, visibility: 'hidden' }, svg);
+  box.appendChild(svg);
+  const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; box.appendChild(tip);
+  let idx = m.marks.length - 1;
+  const show = (mk, x) => {
+    cross.setAttribute('x1', x.toFixed(1)); cross.setAttribute('x2', x.toFixed(1)); cross.setAttribute('visibility', 'visible');
+    dot.setAttribute('cx', x.toFixed(1)); dot.setAttribute('cy', mk.y.toFixed(1)); dot.setAttribute('visibility', 'visible');
+    tip.textContent = '';
+    const b = document.createElement('b'); b.textContent = fmtNum(mk.v, 6) + (unit ? ' ' + unit : ''); tip.appendChild(b);
+    const s = document.createElement('span'); s.textContent = fmtTime(mk.t, true); tip.appendChild(s);
+    tip.hidden = false;
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(W - tw, x + 10 > W - tw ? x - tw - 10 : x + 10)) + 'px';
+  };
+  const hide = () => { cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); tip.hidden = true; };
+  svg.addEventListener('pointermove', (ev) => {
+    const r = svg.getBoundingClientRect();
+    const x = Math.max(padL, Math.min(m.end.x, (ev.clientX - r.left) * W / r.width));
+    const tt = m.t0 + (x - padL) / (m.end.x - padL || 1) * (m.t1 - m.t0);
+    show(valueAt(m.marks, tt), x);
+  });
+  svg.addEventListener('pointerleave', hide);
+  svg.addEventListener('blur', hide);
+  svg.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+    ev.preventDefault();
+    idx = Math.max(0, Math.min(m.marks.length - 1, idx + (ev.key === 'ArrowRight' ? 1 : -1)));
+    show(m.marks[idx], m.marks[idx].x);
+  });
+  svg.addEventListener('focus', () => show(m.marks[idx], m.marks[idx].x));
+}
+
+/** The table twin of a chart: every point, newest first. */
+function drawTable(key, points, unit) {
+  const tb = $('tb-' + key);
+  tb.textContent = '';
+  const head = tb.insertRow();
+  for (const label of [t('colDate'), t('colValue')]) { const th = document.createElement('th'); th.textContent = label; head.appendChild(th); }
+  for (const p of points.slice().reverse()) {
+    const r = tb.insertRow();
+    r.insertCell().textContent = fmtTime(p.t, true);
+    r.insertCell().textContent = fmtNum(p.v, 6) + (unit ? ' ' + unit : '');
+  }
+}
+
+function setText(id, s) { $(id).textContent = s; }
+function setHero(id, value, unit) {
+  const e = $(id);
+  e.textContent = value;
+  if (unit) { const s = document.createElement('small'); s.textContent = unit; e.appendChild(s); }
+}
+
+/** Series for the charts: history points plus the live value now. */
+function series(hist, nowVal) {
+  const pts = (hist || []).map((p) => ({ t: p.t, v: p.v }));
+  if (nowVal !== null && nowVal !== undefined && isFinite(nowVal)) pts.push({ t: Math.floor(readAt / 1000) || Math.floor(Date.now() / 1000), v: nowVal });
+  return pts;
+}
+
+function renderCharts() {
+  const B = M.brl; const E = M.eth;
+  if (B) {
+    const v = ratioNum(10n ** 8n, B.answer);
+    setHero('v-brl', 'R$ ' + fmtFixed(brlPerUsd8(B.answer), 8, 4));
+    setText('s-brl', t('brlSub', fmtFixed(brlPerUsd8(B.answer), 8, 2), fmtSig(B.answer, 8, 4)));
+    const pts = series((H.brl || []).map((r) => ({ t: r.t, v: ratioNum(10n ** 8n, r.answer) })), null);
+    if (!pts.length || pts[pts.length - 1].t < B.updatedAt) pts.push({ t: B.updatedAt, v: v });
+    drawChart('brl', pts, 'R$'); drawTable('brl', pts, 'R$');
+    setText('src-brl', t('srcFeed', 'BRL / USD', shortAddr(CHAINLINK_BRL_USD), String(B.round & ((1n << 64n) - 1n)), fmtTime(B.updatedAt, true), (H.brl || []).length, DAYS));
+  }
+  if (E) {
+    const v = ratioNum(E.answer, 10n ** 8n);
+    setHero('v-eth', 'US$ ' + fmtFixed(E.answer, 8, 2));
+    if (B) setText('s-eth', t('ethSub', fmtFixed(E.answer * 10n ** 8n / B.answer, 8, 2)));
+    const pts = (H.eth || []).map((r) => ({ t: r.t, v: ratioNum(r.answer, 10n ** 8n) }));
+    if (!pts.length || pts[pts.length - 1].t < E.updatedAt) pts.push({ t: E.updatedAt, v: v });
+    drawChart('eth', pts, 'US$'); drawTable('eth', pts, 'US$');
+    setText('src-eth', t('srcFeed', 'ETH / USD', shortAddr(CHAINLINK_ETH_USD), String(E.round & ((1n << 64n) - 1n)), fmtTime(E.updatedAt, true), (H.eth || []).length, DAYS));
+  }
+  if (M.v4) {
+    const per = spotOut1(UNIT, M.v4.sqrtP);                 // bMOLI wei per 1 ETH
+    setHero('v-bmoli', fmtSig(per, 18, 6), 'bMOLI');
+    const ethPerMoli = per > 0n ? UNIT * UNIT / per : 0n;   // wei per MOLI
+    if (E && B) {
+      const usd8 = ethPerMoli * E.answer / UNIT;
+      setText('s-bmoli', t('bmoliSub', fmtSig(ethPerMoli, 18, 4), fmtSig(usd8, 8, 4), fmtSig(usd8 * 10n ** 8n / B.answer, 8, 4)));
+    }
+    const hist = (H.v4 || []).map((e) => ({ t: e.t, v: ratioNum(spotOut1(UNIT, e.sqrtP), UNIT) }));
+    const pts = series(hist, ratioNum(per, UNIT));
+    drawChart('bmoli', pts, 'bMOLI'); drawTable('bmoli', pts, 'bMOLI');
+    const swaps = (H.v4 || []).filter((e) => !e.init);
+    const init = (H.v4 || []).find((e) => e.init);
+    let s = t('srcPool', 'Uniswap v4 ETH/bMOLI, StateView.getSlot0', shortAddr(POOL_ID), fmtClock(readAt));
+    if (H.v4) s += ' ' + (swaps.length ? t('tradesN', swaps.length, init ? fmtTime(init.t, true) : '—') : t('trades0', init ? fmtTime(init.t, true) : '—'));
+    else if (H.v4err) s += ' ' + t('histMissing');
+    setText('src-bmoli', s);
+  }
+  if (M.wsro) {
+    const per = spotOut1(UNIT, M.wsro.sqrtP);                // WSRO wei per 1 ETH
+    setHero('v-wsro', fmtSig(per, 18, 6), 'WSRO');
+    const ethPerWsro = per > 0n ? UNIT * UNIT / per : 0n;    // wei per WSRO
+    if (E) setText('s-wsro', t('wsroSub', fmtSig(ethPerWsro, 18, 4), fmtSig(ethPerWsro * E.answer / UNIT, 8, 4)));
+    const hist = (H.wsro || []).map((e) => ({ t: e.t, v: ratioNum(spotOut1(UNIT, e.sqrtP), UNIT) }));
+    const pts = series(hist, ratioNum(per, UNIT));
+    drawChart('wsro', pts, 'WSRO'); drawTable('wsro', pts, 'WSRO');
+    const swaps = (H.wsro || []).filter((e) => !e.init);
+    const init = (H.wsro || []).find((e) => e.init);
+    let s = t('srcPool', 'Uniswap v4 ETH/WSRO, StateView.getSlot0', shortAddr(WSRO_POOL_ID), fmtClock(readAt));
+    if (H.wsro) s += ' ' + (swaps.length ? t('tradesN', swaps.length, init ? fmtTime(init.t, true) : '—') : t('trades0', init ? fmtTime(init.t, true) : '—'));
+    else if (H.wsroErr) s += ' ' + t('histMissing');
+    setText('src-wsro', s);
+  }
+  setText('d-wsro', M.sushiLiq === 0n ? t('sushiOld', shortAddr(SUSHI_POOL)) : '');
+  if (M.moli) {
+    const P = M.moli;
+    const per = P.rTok > 0n ? P.rMoli * UNIT / P.rTok : 0n;   // MOLI wei per 1 WSRO
+    setHero('v-moli', fmtSig(per, 18, 6), 'MOLI');
+    setText('s-moli', t('moliSub', fmtSig(P.rMoli > 0n ? P.rTok * UNIT / P.rMoli : 0n, 18, 6)) + ' · ' + t('moliDepth', fmt(P.rMoli), fmt(P.rTok)));
+    const evs = (H.moli && H.moli.events) || [];
+    const hist = evs.map((e) => ({ t: e.time, v: ratioNum(BigInt(e.reserveMoli), BigInt(e.reserveToken)) })).filter((p) => p.t > 0);
+    const pts = series(hist, ratioNum(P.rMoli, P.rTok));
+    drawChart('moli', pts, 'MOLI'); drawTable('moli', pts, 'MOLI');
+    let s = t('srcPool', 'Molibra MOLI/WSRO, reserves()', shortAddr(MOLI_POOL), fmtClock(readAt));
+    if (H.moli) {
+      const swaps = evs.filter((e) => e.kind === 'swap').length;
+      s += ' ' + t('moliEvents', swaps, evs.filter((e) => e.kind === 'mint').length, evs.length ? fmtTime(evs[0].time, true) : '—');
+      const lastEv = evs[evs.length - 1];
+      if (lastEv && (BigInt(lastEv.reserveMoli) !== P.rMoli || BigInt(lastEv.reserveToken) !== P.rTok)) s += ' ' + t('histMismatch');
+    } else if (H.moliErr) s += ' ' + t('histMissing');
+    setText('src-moli', s);
+  }
+}
+
+/* ========================================================= calculator */
+
+function brlInput() {
+  return toUnits($('brlIn').value, 2);
+}
+
+/** The whole chain for `cents`, BigInt end to end. Pure apart from the pool quotes. */
+async function runChain(cents) {
+  const B = M.brl.answer; const E = M.eth.answer;
+  const usd8 = brlToUsd8(cents, B);
+  const wei = usd8ToWei(usd8, E);
+  const q = await v4Quote(POOL_KEY, wei);
+  return { cents: cents, usd8: usd8, wei: wei, q: q };
+}
+
+async function compute() {
+  const seq = ++calcSeq;
+  const cents = brlInput();
+  if (!cents || !M.brl || !M.eth) { C.main = null; renderCalc(); return; }
+  const main = await runChain(cents);
+  if (seq !== calcSeq) return;
+  if (main.q.cannot && main.q.reason === 'liquidity') {
+    const mx = await maxFillable(POOL_KEY, main.wei);
+    if (seq !== calcSeq) return;
+    main.maxIn = mx.maxIn; main.maxOut = mx.maxOut;
+  }
+  C.main = main;
+  renderCalc();
+  const ex = {};
+  for (const [id, c] of EXAMPLES) {
+    try { ex[id] = (await runChain(c)).q; } catch (e) { ex[id] = null; }
+  }
+  if (seq !== calcSeq) return;
+  C.ex = ex;
+  // The WSRO route, quoted on each pool: ETH/WSRO on v4, then MOLI/WSRO on Molibra.
+  const w = { wei: main.wei };
+  try {
+    const qw = await v4Quote(WSRO_POOL_KEY, main.wei);
+    w.wsro = qw.cannot ? null : qw.out;
+  } catch (e) { w.wsro = null; }
+  if (w.wsro && M.moli) {
+    try {
+      w.moli = BigInt(await molibraCall(MOLI_POOL, SEL.quote + word(w.wsro) + word(M.moli.rTok) + word(M.moli.rMoli)));
+    } catch (e) { w.moli = null; }
+  }
+  if (seq !== calcSeq) return;
+  C.wsro = w;
+  renderCalc();
+}
+
+function setGo(id, href, on) {
+  const a = $(id);
+  a.href = on ? href : '#';
+  a.classList.toggle('off', !on);
+  a.setAttribute('aria-disabled', on ? 'false' : 'true');
+}
+
+function renderCalc() {
+  const m = C.main;
+  const ids = ['r1', 'r2', 'r3', 'r4', 'rF'];
+  if (!m || !M.brl || !M.eth) {
+    for (const id of ids) setText(id, '—');
+    for (const id of ['e1', 'e2', 'e3', 'n2', 'n3', 'n4', 'rInv', 'rPer', 'wA', 'we2', 'wn2', 'we4', 'wn4', 'wrF', 'wCmp']) setText(id, '');
+    for (const id of ['go2', 'go3', 'go4', 'goW2', 'goW4', 'go2trust']) setGo(id, '#', false);
+    $('w3').hidden = true;
+    if (!brlInput()) setText('r1', t('enterBrl'));
+    return;
+  }
+  const B = M.brl.answer; const E = M.eth.answer;
+  const brl = fmtFixed(m.cents, 2, 2);
+  setText('r1', 'US$ ' + fmtFixed(m.usd8, 8, 2));
+  setText('e1', t('s1Ex', fmtSig(B, 8, 4), fmtFixed(brlPerUsd8(B), 8, 4), brl, fmtFixed(m.usd8, 8, 2)));
+  setText('r2', fmtSig(m.wei, 18, 4) + ' ETH');
+  setText('e2', t('s2Ex', fmtFixed(E, 8, 2), fmtFixed(m.usd8, 8, 2), fmtSig(m.wei, 18, 4)));
+  setGo('go2', metamaskBuyUrl(m.cents), true);
+  setGo('go2trust', trustBuyUrl(m.cents), true);
+  setText('n2', t('s2Note', brl));
+
+  const q = m.q;
+  let ethIn = m.wei; let out = q.out || 0n; let usedCents = m.cents;
+  $('w3').hidden = !q.cannot;
+  if (q.cannot) {
+    if (m.maxIn && m.maxIn > 0n) {
+      ethIn = m.maxIn; out = m.maxOut; usedCents = weiToCents(m.maxIn, E, B);
+      $('w3').textContent = t('s3Cannot', fmtSig(m.wei, 18, 4), fmtSig(m.maxIn, 18, 4), fmtFixed(usedCents, 2, 2));
+    } else {
+      $('w3').textContent = t('s3Failed');
+      out = 0n;
+    }
+  }
+  const imp = M.v4 && out > 0n ? impactBp(spotOut1(ethIn, M.v4.sqrtP), M.v4.fee, out) : null;
+  C.impact = imp;
+  if (out > 0n) {
+    setText('r3', fmt(out) + ' bMOLI');
+    setText('e3', t('s3Ex', fmtSig(ethIn, 18, 4), fmtImpact(imp), fmtSig(priceWeiPerMoli(ethIn, out), 18, 4), M.v4 ? fmtFee(M.v4.fee) : '—'));
+    setGo('go3', buyPageUrl(ethIn), true);
+    setText('n3', t('s3Note', localise(urlAmount(ethIn))));
+    setText('r4', fmt(out) + ' MOLI');
+    setGo('go4', returnPageUrl(out), true);
+    setText('n4', t('s4Note', localise(urlAmount(out))));
+    setText('rF', q.cannot ? t('finalPartial', fmtFixed(usedCents, 2, 2), fmt(out)) : t('finalLine', brl, fmt(out)));
+    setText('rInv', t('finalInv', fmtSig(brlPerMoli18(usedCents, out), 18, 4)));
+    setText('rPer', t('finalPer', fmtSig(moliPerBrl(out, usedCents), 18, 4)));
+  } else {
+    for (const id of ['r3', 'r4', 'rF']) setText(id, '—');
+    for (const id of ['e3', 'n3', 'n4', 'rInv', 'rPer']) setText(id, '');
+    setGo('go3', '#', false); setGo('go4', '#', false);
+  }
+  for (const [id] of EXAMPLES) {
+    const x = C.ex && C.ex[id];
+    setText(id, !C.ex ? '…' : !x ? '—' : x.cannot ? t('exCannot') : t('exVal', fmt(x.out)));
+  }
+
+  // The WSRO route.
+  const w = C.wsro;
+  setText('wA', t('wA', brl, fmtSig(m.wei, 18, 4)));
+  if (!w) { for (const id of ['wr2', 'wr4', 'wrF']) setText(id, '…'); return; }
+  if (w.wsro) {
+    const spot = M.wsro ? spotOut1(w.wei, M.wsro.sqrtP) : 0n;
+    setText('wr2', fmt(w.wsro) + ' WSRO');
+    setText('we2', t('w2Ex', fmtSig(w.wei, 18, 4), fmtImpact(spot ? impactBp(spot, M.wsro.fee, w.wsro) : null), M.wsro ? fmtFee(M.wsro.fee) : '—'));
+    setGo('goW2', buyWsroUrl(w.wei), true);
+    setText('wn2', t('w2Note', localise(urlAmount(w.wei))));
+  } else {
+    setText('wr2', '—'); setText('we2', t('w2Failed')); setGo('goW2', '#', false); setText('wn2', '');
+  }
+  if (w.wsro && w.moli && M.moli) {
+    const spot = M.moli.rTok > 0n ? w.wsro * M.moli.rMoli / M.moli.rTok : 0n;
+    setText('wr4', fmt(w.moli) + ' MOLI');
+    setText('we4', t('w4Ex', fmt(w.wsro), fmtImpact(spot ? impactBp(spot, 3000n, w.moli) : null)));
+    setGo('goW4', swapPageUrl(w.wsro), true);
+    setText('wn4', t('w4Note', localise(urlAmount(w.wsro))));
+    setText('wrF', t('wResult', brl, fmt(w.moli)));
+  } else {
+    setText('wr4', '—'); setText('we4', ''); setGo('goW4', '#', false); setText('wn4', ''); setText('wrF', '—');
+  }
+  if (M.v4 && M.wsro) {
+    setText('wCmp', t('wCompare', fmtSig(spotOut1(UNIT, M.v4.sqrtP), 18, 6), fmtSig(spotOut1(UNIT, M.wsro.sqrtP), 18, 6)));
+  }
+}
+
+function renderAll() {
+  renderCharts();
+  renderCalc();
+  $('status').textContent = readAt ? t('updated', fmtClock(readAt)) : t('reading');
+}
+
+/* ============================================================ loading */
+
+const fails = [];
+async function guard(label, fn) {
+  try { return await fn(); }
+  catch (e) { fails.push(label + ' (' + (e && e.message ? e.message : e) + ')'); return null; }
+}
+
+/** The live numbers: two feeds, three pools. */
+async function readMarkets() {
+  fails.length = 0;
+  const [brl, eth, v4, wsro, moli, sushiLiq] = await Promise.all([
+    guard('Chainlink BRL/USD', () => readFeed(CHAINLINK_BRL_USD)),
+    guard('Chainlink ETH/USD', () => readFeed(CHAINLINK_ETH_USD)),
+    guard('Uniswap v4 ETH/bMOLI', () => readV4(POOL_ID)),
+    guard('Uniswap v4 ETH/WSRO', () => readV4(WSRO_POOL_ID)),
+    guard('Molibra', readMoliPool),
+    readSushiLiquidity().catch(() => null),
+  ]);
+  if (brl) M.brl = brl;
+  if (eth) M.eth = eth;
+  if (v4) M.v4 = v4;
+  if (wsro) M.wsro = wsro;
+  if (moli) M.moli = moli;
+  M.sushiLiq = sushiLiq;
+  readAt = Date.now();
+  $('netNote').hidden = !fails.length;
+  if (fails.length) $('netNote').textContent = t('nodeDown', fails.join(', '));
+}
+
+/** The histories, once per load: each chart draws as soon as its own arrives. */
+function readHistories() {
+  const now = Math.floor(Date.now() / 1000);
+  const jobs = [
+    M.brl && feedHistory(CHAINLINK_BRL_USD, M.brl, now).then((h) => { H.brl = h; }),
+    M.eth && feedHistory(CHAINLINK_ETH_USD, M.eth, now).then((h) => { H.eth = h; }),
+    v4History(POOL_ID, V4_INIT_BLOCK).then((h) => { H.v4 = h; }, () => { H.v4err = true; }),
+    v4History(WSRO_POOL_ID, WSRO_INIT_BLOCK).then((h) => { H.wsro = h; }, () => { H.wsroErr = true; }),
+    moliHistory().then((h) => { H.moli = h; }, () => { H.moliErr = true; }),
+  ].filter(Boolean).map((p) => p.catch(() => {}).then(() => renderCharts()));
+  return Promise.all(jobs);
+}
+
+async function refresh() {
+  await readMarkets();
+  renderAll();
+  await compute().catch(() => {});
+}
+
+/* ============================================================ wiring */
+
+let typing = null;
+$('langPt').onclick = () => setLang('pt');
+$('langEn').onclick = () => setLang('en');
+$('refresh').onclick = () => { refresh(); };
+$('brlIn').oninput = () => {
+  const e = $('brlIn');
+  const v = e.value.replace(/[^\d.,]/g, '');
+  const i = v.search(/[.,]/);
+  e.value = i === -1 ? v : v.slice(0, i + 1) + v.slice(i + 1).replace(/[.,]/g, '').slice(0, 2);
+  C.main = null; C.ex = null; C.wsro = null; renderCalc();
+  clearTimeout(typing);
+  typing = setTimeout(() => { compute().catch(() => {}); }, 400);
+};
+let resizeT = null;
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(renderCharts, 150); });
+
+const preset = String(params.get('brl') || '').replace(',', '.');
+if (toUnits(preset, 2)) $('brlIn').value = preset;
+setLang(LANG);
+
+(async () => {
+  await refresh();
+  await readHistories();
+  setInterval(() => { if (document.visibilityState === 'visible') refresh().catch(() => {}); }, 60000);
+})();
+</script>
+</body>
+</html>

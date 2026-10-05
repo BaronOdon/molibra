@@ -46,6 +46,7 @@ function currentCommit() {
   } catch { return null; }
 }
 import { accountLine, STATE_MERKLE_ACTIVATION } from './stateproof.js';
+import { poolHistoryCache } from './poolhistory.js';
 import { RateLimiter, clientKey, costOfPath, costOfMethod } from './ratelimit.js';
 
 // Sibling node state for /molibra/nodes, refreshed at most every 5s. A status
@@ -490,6 +491,9 @@ export function startRpcServer(node, { host, port }) {
 
 // ------------------------------------------------------------- audit routes
 
+/** One cache for the process: a pool's history only changes when the head does. */
+const POOL_HISTORY = poolHistoryCache();
+
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body, null, 2));
@@ -509,10 +513,18 @@ async function handleAudit(node, req, res) {
     const m = /^\/(?:molibra\/)?([a-z]+)\/?$/i.exec(path);
     // ⛔ not 'download': /download is served as-is further down and is printed
     // on installers and the carousel.
-    const pages = ['pay', 'swap', 'buy', 'connect', 'return', 'bridgedmoli', 'documents'];
+    const pages = ['pay', 'swap', 'buy', 'cotacao', 'connect', 'return', 'bridgedmoli', 'documents'];
     const name = m && m[1].toLowerCase();
     if (name && pages.includes(name) && path !== '/molibra/' + name) {
       res.writeHead(301, { Location: '/molibra/' + name + url.search });
+      return res.end();
+    }
+    // Pages retired in favour of another: the old address still lands
+    // somewhere true. /molibra/chart plotted the SushiSwap WSRO pool, which has
+    // had no liquidity since 5 Oct 2026; every live pair is on /molibra/cotacao.
+    const moved = { chart: 'cotacao' };
+    if (name && moved[name]) {
+      res.writeHead(301, { Location: '/molibra/' + moved[name] + url.search });
       return res.end();
     }
   }
@@ -922,6 +934,19 @@ async function handleAudit(node, req, res) {
     return;
   }
 
+  /**
+   * Cotação: what a real is worth in MOLI, step by step (R$ -> US$ -> ETH ->
+   * bMOLI -> MOLI), with the live charts of each pair. Reads only; it holds no
+   * key, and every "Converta agora" opens a page or a wallet where the person
+   * confirms.
+   */
+  if (path === '/molibra/cotacao') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'cotacao.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   // The QR encoder the pay page draws with (Kazuhiko Arase, MIT), vendored and
   // served from this node for the same reason as wallet.js: a page that tells
   // a customer where to send money must not fetch its maths from a CDN.
@@ -989,13 +1014,6 @@ async function handleAudit(node, req, res) {
 
   if (path === '/molibra/status') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'status.html');
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(readFileSync(file, 'utf8'));
-    return;
-  }
-
-  if (path === '/molibra/chart') {
-    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'chart.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
@@ -1357,6 +1375,18 @@ async function handleAudit(node, req, res) {
       theories: chain.genesis.theories,
       sealedInGenesisExtraData: chain.head ? chain.blockByNumber(0).header.extraData : null,
     });
+  }
+
+  /**
+   * A MolibraPool's Minted/Burned/Swapped history with the reserves after each
+   * event, from the receipts this node already holds (it has no eth_getLogs).
+   * Read-only and cached per head. The MOLI/WSRO chart on /molibra/cotacao
+   * reads it.
+   */
+  if (path === '/molibra/pool-history') {
+    const pool = String(url.searchParams.get('pool') || '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(pool)) return json(res, 400, { error: 'expected ?pool=0x<20-byte address>' });
+    return json(res, 200, POOL_HISTORY(chain, pool));
   }
 
   if (path === '/molibra/blocks') {

@@ -339,6 +339,8 @@
   <ul class="ways">
     <li><a href="/molibra/buy">
       <span><span data-i18n="buyEthTitle">Buy bMOLI with ETH</span><small data-i18n="buyEthSub">Straight from the pool on Ethereum, one transaction</small></span><span class="go">&#8594;</span></a></li>
+    <li><a href="/molibra/cotacao">
+      <span><span data-i18n="quoteTitle">What MOLI is worth in reais</span><small data-i18n="quoteSub">R$ → US$ → ETH → MOLI, step by step, with live charts</small></span><span class="go">&#8594;</span></a></li>
     <li><a href="https://app.uniswap.org/swap?chain=mainnet&amp;inputCurrency=ETH&amp;outputCurrency=0xa302877efb74f567f3605851194b46f1d5746822" target="_blank" rel="noopener">
       <span><span data-i18n="uniTitle">Buy or sell MOLI with ETH on Ethereum</span><small data-i18n="uniSub">bMOLI on Uniswap</small></span><span class="go">&#8599;</span></a></li>
     <li><a href="/molibra/bridgedmoli">
@@ -501,6 +503,7 @@ const T = {
     remDone: 'Liquidez retirada! Você recebeu cerca de {0}.',
     otherTitle: 'Outras formas',
     buyEthTitle: 'Comprar bMOLI com ETH', buyEthSub: 'Direto no pool da Ethereum, numa só transação',
+    quoteTitle: 'Quanto vale o MOLI em reais', quoteSub: 'R$ → US$ → ETH → MOLI, passo a passo, com gráficos ao vivo',
     uniTitle: 'Comprar ou vender MOLI com ETH na Ethereum', uniSub: 'bMOLI na Uniswap',
     outTitle: 'Enviar MOLI para a Ethereum', outSub: 'Chega lá como bMOLI',
     backTitle: 'Trazer bMOLI de volta', backSub: 'Chega aqui como MOLI',
@@ -565,6 +568,7 @@ const T = {
     remDone: 'Liquidity withdrawn! You received about {0}.',
     otherTitle: 'Other ways',
     buyEthTitle: 'Buy bMOLI with ETH', buyEthSub: 'Straight from the pool on Ethereum, one transaction',
+    quoteTitle: 'What MOLI is worth in reais', quoteSub: 'R$ → US$ → ETH → MOLI, step by step, with live charts',
     uniTitle: 'Buy or sell MOLI with ETH on Ethereum', uniSub: 'bMOLI on Uniswap',
     outTitle: 'Send MOLI to Ethereum', outSub: 'It arrives as bMOLI',
     backTitle: 'Bring bMOLI back', backSub: 'It arrives here as MOLI',
@@ -835,6 +839,13 @@ function option(value, label) {
   return o;
 }
 
+/**
+ * ?from=WSRO (a symbol or a token address) picks what is being sold, once,
+ * when the markets first load: /molibra/cotacao links here that way. Then it
+ * is forgotten, so the person's own choice is never overridden.
+ */
+let wantFrom = null;
+
 function fillSelectors() {
   for (const id of ['fromSel', 'toSel']) {
     const el = $(id); const cur = el.value;
@@ -842,6 +853,11 @@ function fillSelectors() {
     el.appendChild(option(MOLI, 'MOLI'));
     for (const m of markets) el.appendChild(option(m.token, m.symbol));
     if (cur && Array.from(el.options).some((o) => o.value === cur)) el.value = cur;
+  }
+  if (wantFrom) {
+    const w = wantFrom.toLowerCase();
+    const hit = markets.find((m) => m.token.toLowerCase() === w || String(m.symbol || '').toLowerCase() === w);
+    if (hit) { $('fromSel').value = hit.token; $('toSel').value = MOLI; wantFrom = null; }
   }
   if (!$('fromSel').value) $('fromSel').value = MOLI;
   if (!$('toSel').value || $('toSel').value === $('fromSel').value) {
@@ -1548,6 +1564,7 @@ const params = new URLSearchParams(location.search);
 try { const s = localStorage.getItem('molibra.slippage'); if (s) slipStr = s; } catch (e) {}
 if (params.get('factory')) $('factoryAddr').value = params.get('factory');
 if (params.get('amount')) $('amountIn').value = params.get('amount');
+if (params.get('from')) wantFrom = String(params.get('from')).trim();
 if (params.get('slippage')) slipStr = params.get('slippage');
 $('slippage').value = slipStr;
 if (location.hash === '#pool') showTab('pool');

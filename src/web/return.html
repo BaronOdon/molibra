@@ -143,6 +143,10 @@ let returnsLive = false;
 const params = new URLSearchParams(location.search);
 if (params.get('commit')) $('commitData').value = params.get('commit');
 if (params.get('ret')) $('retData').value = params.get('ret');
+// ?amount= from /molibra/cotacao: the bMOLI the calculator worked out. Only a
+// plain decimal is taken; the field stays editable and nothing is sent by it.
+const presetAmount = String(params.get('amount') || '').trim().replace(',', '.');
+if (/^\d+(\.\d{1,18})?$/.test(presetAmount) && Number(presetAmount) > 0) $('amount').value = presetAmount;
 
 async function ethRead(method, params) {
   const r = await fetch(ETH_RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' },

@@ -183,7 +183,7 @@
     <div class="box-top" data-i18n="youGet">Você recebe ≈</div>
     <div class="box-mid">
       <div id="amountOut" class="amt out empty">0</div>
-      <span class="unit">bMOLI</span>
+      <span class="unit" id="outUnit">bMOLI</span>
     </div>
     <div class="box-bot"><span data-i18n="oneToOne">1 bMOLI = 1 MOLI na Molibra</span></div>
   </div>
@@ -211,7 +211,7 @@
   <button class="primary" id="watchBtn" type="button" data-i18n="addToken">Adicionar bMOLI à carteira</button>
   <div class="msg" id="watchMsg" hidden></div>
   <p class="hint" data-i18n="whatNext">O bMOLI é o MOLI na Ethereum. Para usar na rede Molibra — pagar em lojas, trocar, minerar junto — traga de volta: o bMOLI é queimado na Ethereum e chega como MOLI no mesmo endereço.</p>
-  <a class="ghost" href="/molibra/return" data-i18n="toReturn">Transformar bMOLI em MOLI</a>
+  <a class="ghost" id="toReturn" href="/molibra/return" data-i18n="toReturn">Transformar bMOLI em MOLI</a>
 </section>
 
 <section class="card" id="noWallet" hidden>
@@ -235,7 +235,8 @@
 <footer>
   <span data-i18n="signNote">Nada é enviado sem a sua assinatura na carteira.</span><br>
   <a href="/molibra/swap" data-i18n="exchange">Trocar</a> ·
-  <a href="/molibra/return" data-i18n="returnLink">bMOLI → MOLI</a> ·
+  <span id="returnFoot"><a href="/molibra/return" data-i18n="returnLink">bMOLI → MOLI</a> ·</span>
+  <a href="/molibra/cotacao" data-i18n="quoteLink">Quanto vale em reais</a> ·
   <a href="/">molibra.org</a>
 </footer>
 </div>
@@ -258,13 +259,22 @@ const STATE_VIEW = '0x7ffe42c4a5deea5b0fec41c94c136cf115597227';
 const CHAINLINK_ETH_USD = '0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419';
 const ETH_ADDR = '0x0000000000000000000000000000000000000000';
 const BMOLI = '0xa302877efb74f567f3605851194b46f1d5746822';
+const WSRO = '0x8bda622a10fbb1e4a15b37507f65fc5b5755ceb8';
 
 /**
- * ⛔⛔ Read from the pool's Initialize event, not chosen. currency0 is native
- * ETH (address 0), so buying bMOLI is zeroForOne = true.
+ * ⛔⛔ The two ETH pools this page buys from, each read from its Initialize
+ * event, not chosen: ETH/bMOLI (tx 0xb87eb11e…5f67, block 26,044,855) and
+ * ETH/WSRO (tx 0x41956f00…102f, block 26,125,858). Same fee, same spacing, no
+ * hooks; currency0 is native ETH (address 0), so buying is zeroForOne = true.
+ * bMOLI unless the link says ?out=wsro (from /molibra/cotacao's WSRO route).
  */
-const POOL_KEY = { currency0: ETH_ADDR, currency1: BMOLI, fee: 2500n, tickSpacing: 25n, hooks: ETH_ADDR };
-const POOL_ID = '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312';
+const POOLS = {
+  bmoli: { token: BMOLI, symbol: 'bMOLI', poolId: '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312' },
+  wsro:  { token: WSRO,  symbol: 'WSRO',  poolId: '0x0a6dc02a1171887ace334623cff297e0aab91d90a2a2ea7973503200896562c3' },
+};
+const OUT = POOLS[String(new URLSearchParams(location.search).get('out') || '').toLowerCase()] || POOLS.bmoli;
+const POOL_KEY = { currency0: ETH_ADDR, currency1: OUT.token, fee: 2500n, tickSpacing: 25n, hooks: ETH_ADDR };
+const POOL_ID = OUT.poolId;
 
 /** ⛔ Checked against keccak256 of each signature by test/buy-page.mjs. */
 const SEL = {
@@ -332,7 +342,9 @@ const T = {
     how2: 'Digite quanto ETH quer gastar. A cotação vem do próprio pool, na hora.',
     how3: 'Confirme uma única transação. Não há aprovação: o ETH vai direto para o pool e o bMOLI volta para você.',
     poolIs: 'Pool Uniswap v4 bMOLI/ETH, taxa 0,25%. Contrato do bMOLI:',
+    wsroIs: 'WSRO na rede Ethereum', wsroNext: 'A WSRO comprada fica na sua carteira, na Ethereum. Para levá-la à rede Molibra, a ponte de entrada hoje é feita pelo operador.',
     signNote: 'Nada é enviado sem a sua assinatura na carteira.', exchange: 'Trocar', returnLink: 'bMOLI → MOLI',
+    quoteLink: 'Quanto vale em reais',
   },
   en: {
     connectShort: 'Connect', wrongNet: 'Wrong network',
@@ -373,7 +385,9 @@ const T = {
     how2: 'Type how much ETH to spend. The quote comes from the pool itself, live.',
     how3: 'Confirm one transaction. There is no approval: the ETH goes straight to the pool and the bMOLI comes back to you.',
     poolIs: 'Uniswap v4 pool bMOLI/ETH, 0.25% fee. bMOLI contract:',
+    wsroIs: 'WSRO on Ethereum', wsroNext: 'The WSRO you buy stays in your wallet, on Ethereum. To take it to the Molibra network, the inbound bridge is done by the operator today.',
     signNote: 'Nothing is sent until you sign it in your wallet.', exchange: 'Swap', returnLink: 'bMOLI → MOLI',
+    quoteLink: 'What it is worth in reais',
   },
 };
 
@@ -381,6 +395,9 @@ let LANG = /^pt/i.test(document.documentElement.lang) ? 'pt' : 'en';
 
 function t(key) {
   let s = (T[LANG] && T[LANG][key]) || T.en[key] || key;
+  // Buying WSRO (?out=wsro): the same words, naming the token actually bought.
+  // (bMOLI and MOLI as whole words; 'Molibra' is left alone.)
+  if (OUT !== POOLS.bmoli) s = s.replace(/\bb?MOLI\b/g, OUT.symbol);
   for (let i = 1; i < arguments.length; i++) s = s.split('{' + (i - 1) + '}').join(String(arguments[i]));
   return s;
 }
@@ -390,6 +407,14 @@ function setLang(l) {
   document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
   try { localStorage.setItem('molibra.lang', LANG); } catch (e) {}
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  if (OUT === POOLS.wsro) {
+    // WSRO is not MOLI: no 1:1 line, no way back through the return bridge.
+    document.querySelector('[data-i18n="oneToOne"]').textContent = t('wsroIs');
+    document.querySelector('[data-i18n="whatNext"]').textContent = t('wsroNext');
+    $('outUnit').textContent = OUT.symbol;
+    $('toReturn').hidden = true;
+    $('returnFoot').hidden = true;
+  }
   $('langPt').className = LANG === 'pt' ? 'on' : '';
   $('langEn').className = LANG === 'en' ? 'on' : '';
   render();
@@ -816,7 +841,7 @@ async function buy() {
 function receivedIn(rc, who) {
   let sum = null;
   for (const l of (rc && rc.logs) || []) {
-    if (String(l.address).toLowerCase() !== BMOLI || !l.topics || l.topics[0] !== TRANSFER_TOPIC) continue;
+    if (String(l.address).toLowerCase() !== OUT.token || !l.topics || l.topics[0] !== TRANSFER_TOPIC) continue;
     if (('0x' + String(l.topics[2]).slice(26)).toLowerCase() !== who) continue;
     sum = (sum || 0n) + BigInt(l.data);
   }
@@ -837,7 +862,7 @@ async function waitFor(hash) {
 
 function done(hash, got, paid) {
   $('doneCard').hidden = false;
-  $('doneAmount').textContent = fmt(got) + ' bMOLI';
+  $('doneAmount').textContent = fmt(got) + ' ' + OUT.symbol;
   const el = $('doneMsg');
   el.textContent = t('doneMsg', fmt(got), fmt(paid));
   el.appendChild(document.createElement('br'));
@@ -854,7 +879,9 @@ function done(hash, got, paid) {
 async function watchAsset() {
   try {
     const ok = await eth().request({ method: 'wallet_watchAsset', params: {
-      type: 'ERC20', options: { address: BMOLI, symbol: 'bMOLI', decimals: 18, image: NODE + '/icon.png' },
+      type: 'ERC20', options: OUT === POOLS.bmoli
+        ? { address: BMOLI, symbol: 'bMOLI', decimals: 18, image: NODE + '/icon.png' }
+        : { address: OUT.token, symbol: OUT.symbol, decimals: 18 },
     } });
     showMsg('watchMsg', ok ? 'ok' : 'warn', ok ? t('added') : t('notAdded'));
   } catch (e) {
@@ -927,7 +954,7 @@ function render() {
     $('priceUsd').textContent = ethUsd ? 'US$ ' + fmtSig(usdPerMoli(pw, ethUsd), 8, 4) : '—';
     const imp = slot0 ? impactBp(q.amountIn, q.out, slot0.sqrtP, POOL_KEY.fee) : null;
     $('impact').textContent = imp === null ? '—' : (imp < 1n ? '< 0,01%'.replace(',', LANG === 'pt' ? ',' : '.') : fmtBp(imp));
-    $('minOut').textContent = bp === null ? '—' : fmt(minOutFor(q.out, bp)) + ' bMOLI';
+    $('minOut').textContent = bp === null ? '—' : fmt(minOutFor(q.out, bp)) + ' ' + OUT.symbol;
     $('slipShow').textContent = bp === null ? '—' : fmtBp(bp);
     if (baseFee !== null) {
       const fee = gasLimit * (baseFee + TIP);
@@ -997,6 +1024,8 @@ const setSlip = (s) => {
 for (const b of document.querySelectorAll('#slipSeg button')) b.onclick = () => setSlip(b.dataset.slip);
 $('slippage').oninput = () => { slipStr = $('slippage').value.trim(); try { localStorage.setItem('molibra.buy.slippage', slipStr); } catch (e) {} render(); };
 
+$('tokenLink').href = ETHERSCAN + '/token/' + OUT.token;
+$('tokenLink').textContent = OUT.token;
 $('mmLink').href = 'https://metamask.app.link/dapp/' + location.host + location.pathname + location.search;
 $('twLink').href = 'https://link.trustwallet.com/open_url?coin_id=60&url=' + encodeURIComponent(location.href);
 
