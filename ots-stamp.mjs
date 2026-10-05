@@ -224,13 +224,13 @@ function findPending(buf) {
     if (op === 0x08) next = sha256(msg);
     else if (op === 0xf0 || op === 0xf1) {
       const [len, after] = varuintAt(j);
-      const operand = buf.subarray(after, after + len);
+      const arg = buf.subarray(after, after + len);
       j = after + len;
-      next = op === 0xf0 ? concat(msg, operand) : concat(operand, msg);
+      next = op === 0xf0 ? concat(msg, arg) : concat(arg, msg);
     } else {
       // ⛔ An op this parser does not know means the file is not what we think
       // it is. Guessing past it would silently mis-locate every commitment.
-      throw new Error(`unsupported OTS opcode 0x${op.toString(16)} at byte ${at}`);
+      throw new Error(`unsupported OTS instruction 0x${op.toString(16)} at byte ${at}`);
     }
     return parseNode(j, next);
   }

@@ -43,7 +43,7 @@ const input = {
   sources: { [SOURCE_KEY]: { content: readFileSync(join(HERE, 'MemeToken.sol'), 'utf8') } },
   settings: {
     optimizer: { enabled: true, runs: 200 },
-    // ⛔ paris: a Cancun target emits PUSH0/MCOPY and dies "invalid opcode" on
+    // ⛔ paris: a Cancun target emits PUSH0/MCOPY and dies "invalid instruction" on
     // Molibra. Paris bytecode runs unchanged on Ethereum mainnet, so ONE build
     // serves both chains and one verification bundle covers FAZOL.
     evmVersion: 'paris',
@@ -58,7 +58,7 @@ const art = out.contracts[SOURCE_KEY].MemeToken;
 const bytecode = '0x' + art.evm.bytecode.object;
 const runtime = '0x' + art.evm.deployedBytecode.object;
 check('MemeToken compiles for paris', true, `${(runtime.length - 2) / 2} runtime bytes`);
-check('  and contains no PUSH0 (0x5f) at an opcode position', !hasPush0(runtime));
+check('  and contains no PUSH0 (0x5f) at an instruction position', !hasPush0(runtime));
 
 const iface = new ethers.Interface(art.abi);
 for (const sig of ['name()', 'symbol()', 'decimals()', 'totalSupply()', 'description()', 'balanceOf(address)',
@@ -88,7 +88,7 @@ const curveArt = curveOut.contracts[CURVE_KEY].MoliSaleCurve;
 const curveBytecode = '0x' + curveArt.evm.bytecode.object;
 const curveRuntime = '0x' + curveArt.evm.deployedBytecode.object;
 check('MoliSaleCurve compiles for paris', true, `${(curveRuntime.length - 2) / 2} runtime bytes`);
-check('  and contains no PUSH0 at an opcode position', !hasPush0(curveRuntime));
+check('  and contains no PUSH0 at an instruction position', !hasPush0(curveRuntime));
 const curveFns = curveArt.abi.filter((f) => f.type === 'function').map((f) => f.name);
 for (const bad of ['owner', 'withdraw', 'removeLiquidity', 'pause', 'setPrice', 'sweep', 'transferOwnership', 'sell']) {
   check(`MoliSaleCurve has NO ${bad}()`, !curveFns.includes(bad));
@@ -158,7 +158,7 @@ check('memes.html deploys exactly swap.html\'s factory bytecode', page.includes(
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
-/** Walk opcodes (skipping PUSH data) looking for 0x5f. Metadata tail is excluded. */
+/** Walk instructions (skipping PUSH data) looking for 0x5f. Metadata tail is excluded. */
 function hasPush0(hex) {
   const b = Buffer.from(hex.slice(2), 'hex');
   const metaLen = b.length >= 2 ? b.readUInt16BE(b.length - 2) + 2 : 0;
