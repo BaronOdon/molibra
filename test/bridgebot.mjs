@@ -263,7 +263,8 @@ function makeBot({ node, eth, cross = null, state = {}, dryRun = false, clock })
     keys: { headerBot: BOT_KEY, ethRelayer: RELAYER_KEY },
     state, save: () => {}, log: (level, event, f) => logs.push({ level, event, ...f }),
     now: clock ?? (() => Date.parse('2026-10-05T00:00:00Z')),
-    config: { dryRun, expectHeaderBot: BOT_ADDR, ethStartBlock: 26_100_000n },
+    // Fee gating has its own tests (test/express-anchor.mjs); these exercise the legs themselves.
+    config: { dryRun, expectHeaderBot: BOT_ADDR, ethStartBlock: 26_100_000n, requireFees: false },
   });
   bot.logs = logs;
   return bot;

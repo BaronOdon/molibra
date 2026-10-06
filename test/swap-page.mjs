@@ -293,10 +293,13 @@ check('⭐ it opens in Portuguese when the browser is Portuguese',
 
 check('other ways: bMOLI on Uniswap',
   page.includes('https://app.uniswap.org/swap?chain=mainnet&amp;inputCurrency=ETH&amp;outputCurrency=0xa302877efb74f567f3605851194b46f1d5746822'));
-for (const p of ['/molibra/bridgedmoli', '/molibra/return', '/molibra/connect']) {
+// Both bridge directions go to the one-click page (6 Oct 2026); the operator
+// pages /molibra/bridgedmoli and /molibra/return stay served for the operator.
+for (const p of ['/molibra/ponte', '/molibra/connect']) {
   check(`  links to ${p}, which rpc.js serves`,
     page.includes(`href="${p}"`) && readFileSync(join(ROOT, 'src/rpc.js'), 'utf8').includes(`path === '${p}'`));
 }
+check('  and the way back opens /molibra/ponte on bMOLI -> MOLI', page.includes('href="/molibra/ponte?dir=back"'));
 check('the factory and add-token tools live in a collapsed Advanced section',
   /<details class="card" id="advanced">[\s\S]*id="deployFactory"[\s\S]*id="createPool"[\s\S]*<\/details>/.test(page)
   && /<details class="card" id="advanced">[\s\S]*id="addToken"[\s\S]*<\/details>/.test(page)

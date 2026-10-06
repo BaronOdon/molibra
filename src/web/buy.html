@@ -200,6 +200,9 @@
   <div class="msg bad" id="fillNote" hidden><span id="fillText"></span><br>
     <button class="small" id="useMax" type="button" hidden></button></div>
 
+  <label id="asMoliRow" style="display:flex;gap:10px;align-items:flex-start;margin:4px 0 12px;font-size:14px">
+    <input type="checkbox" id="asMoli" checked><span><b data-i18n="asMoli">Receber como MOLI na Molibra</b><br>
+    <span class="hint" id="asMoliNote" style="margin:0">—</span></span></label>
   <button class="primary" id="action" type="button" disabled>…</button>
   <div class="msg" id="buyMsg" hidden></div>
 </section>
@@ -208,6 +211,7 @@
   <h2 data-i18n="doneTitle">Compra concluída</h2>
   <div class="big" id="doneAmount">—</div>
   <div class="msg ok" id="doneMsg"></div>
+  <ol id="moliSteps" style="list-style:none;padding:0;margin:8px 0" hidden></ol>
   <button class="primary" id="watchBtn" type="button" data-i18n="addToken">Adicionar bMOLI à carteira</button>
   <div class="msg" id="watchMsg" hidden></div>
   <p class="hint" data-i18n="whatNext">O bMOLI é o MOLI na Ethereum. Para usar na rede Molibra — pagar em lojas, trocar, minerar junto — traga de volta: o bMOLI é queimado na Ethereum e chega como MOLI no mesmo endereço.</p>
@@ -242,6 +246,7 @@
 </div>
 
 <script src="/molibra/mobilewallet.js"></script>
+<script src="/molibra/bridgeflow.js"></script>
 <script>
 // The origin that SERVED this page (for the token icon); the literal is only the
 // fallback for opening the file from disk.
@@ -333,6 +338,11 @@ const T = {
     nodeDown: 'Não foi possível falar com a rede Ethereum agora. Tente atualizar a página.',
     viewTx: 'Ver no Etherscan',
     doneTitle: 'Compra concluída', doneMsg: 'Você recebeu {0} bMOLI por {1} ETH.',
+    asMoli: 'Receber como MOLI na Molibra',
+    asMoliNote: 'No mesmo clique, depois da compra: o bMOLI vai ao cofre da ponte e chega como MOLI no seu endereço na Molibra em ~10–25 min. Taxa de devolução, paga por você: {0} bMOLI (mais duas assinaturas na Ethereum). Automático até {1} MOLI agora; acima disso, o operador processa.',
+    overCap: 'Esta compra ({0} bMOLI) passa do que a ponte devolve automaticamente agora ({1} MOLI). Desmarque "Receber como MOLI" para ficar com bMOLI na Ethereum, ou compre menos.',
+    mVault: 'Enviar bMOLI ao cofre da ponte', mFee: 'Pagar a taxa de devolução', mReturn: 'MOLI chegando na Molibra (robô da ponte)', mNet: 'Rede Molibra na carteira',
+    mDone: '⭐ {0} MOLI na sua carteira na Molibra.',
     addToken: 'Adicionar bMOLI à carteira', added: 'bMOLI adicionado à carteira.',
     notAdded: 'A carteira não adicionou. Você pode adicionar à mão com o endereço do contrato abaixo.',
     whatNext: 'O bMOLI é o MOLI na Ethereum. Para usar na rede Molibra — pagar em lojas, trocar, minerar junto — traga de volta: o bMOLI é queimado na Ethereum e chega como MOLI no mesmo endereço.',
@@ -376,6 +386,11 @@ const T = {
     nodeDown: 'Could not reach Ethereum just now. Try reloading the page.',
     viewTx: 'View on Etherscan',
     doneTitle: 'Purchase complete', doneMsg: 'You received {0} bMOLI for {1} ETH.',
+    asMoli: 'Receive as MOLI on Molibra',
+    asMoliNote: 'In the same click, after the purchase: the bMOLI goes to the bridge vault and arrives as MOLI at your address on Molibra in ~10–25 min. Return fee, paid by you: {0} bMOLI (plus two Ethereum signatures). Automatic up to {1} MOLI right now; above that the operator processes it.',
+    overCap: 'This purchase ({0} bMOLI) is more than the bridge returns automatically right now ({1} MOLI). Untick "Receive as MOLI" to keep bMOLI on Ethereum, or buy less.',
+    mVault: 'Send bMOLI to the bridge vault', mFee: 'Pay the return fee', mReturn: 'MOLI arriving on Molibra (bridge bot)', mNet: 'Molibra network in the wallet',
+    mDone: '⭐ {0} MOLI in your wallet on Molibra.',
     addToken: 'Add bMOLI to your wallet', added: 'bMOLI added to your wallet.',
     notAdded: 'The wallet did not add it. You can add it by hand with the contract address below.',
     whatNext: 'bMOLI is MOLI on Ethereum. To use it on the Molibra network — pay in shops, swap, mine alongside — bring it back: the bMOLI is burned on Ethereum and arrives as MOLI at the same address.',
@@ -824,6 +839,14 @@ async function buy() {
   const fees = feeFields(baseFee);
   if (balEth < shown.amountIn + gasLimit * fees.maxFeePerGas) throw new Error(t('insufficient'));
 
+  const asMoli = OUT === POOLS.bmoli && $('asMoli').checked;
+  let retFee = 10n ** 18n;
+  if (asMoli) {
+    const ident = await (await fetch(NODE + '/molibra', { cache: 'no-store' })).json().catch(() => null);
+    const free = window.MolibraReturn.capFree(ident);
+    if (free !== null && shown.out > free) throw new Error(t('overCap', fmt(shown.out), fmt(free)));
+    retFee = await moliRetFee();
+  }
   busy = t('confirmWallet'); render();
   const h = await eth().request({ method: 'eth_sendTransaction', params: [{
     from: account, to: UNIVERSAL_ROUTER, data: data, value: hex(shown.amountIn), gas: hex(gasLimit),
@@ -835,6 +858,34 @@ async function buy() {
   const got = receivedIn(rc, account);
   done(h, got === null ? shown.out : got, shown.amountIn);
   await refresh();
+  // ⭐ Same click: on to Molibra as MOLI (vault + return fee, then tracked).
+  if (asMoli) await toMolibra((got === null ? shown.out : got) - retFee, retFee);
+}
+
+/** The return fee in bMOLI, from Molibra's gas price (bridgeflow.js). */
+async function moliRetFee() {
+  try {
+    const r = await fetch(NODE + '/molibra', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_gasPrice', params: [] }) });
+    return window.MolibraReturn.returnFeeWei(BigInt((await r.json()).result));
+  } catch (e) { return 10n ** 18n; }
+}
+async function toMolibra(wei, fee) {
+  $('watchBtn').hidden = true;
+  const ol = $('moliSteps'); ol.hidden = false; ol.textContent = '';
+  const rows = {};
+  const label = { vault: t('mVault') + ' — ' + fmt(wei) + ' ' + OUT.symbol, fee: t('mFee') + ' — ' + fmt(fee) + ' ' + OUT.symbol, return: t('mReturn'), net: t('mNet') };
+  for (const k of ['vault', 'fee', 'return', 'net']) {
+    const li = document.createElement('li'); li.style.padding = '6px 0'; li.textContent = '○ ' + label[k];
+    rows[k] = li; ol.appendChild(li);
+  }
+  const draw = (k, st, d) => {
+    rows[k].textContent = (st === 'done' ? '✓ ' : st === 'bad' ? '⛔ ' : '● ') + label[k]
+      + (typeof d === 'string' && d !== 'sign' ? ' · ' + d.slice(0, 18) + '…' : '');
+  };
+  const res = await window.MolibraReturn.returnToMolibra({ wallet: eth(), ethRpc, node: NODE, account, wei, fee, onStep: draw });
+  $('doneAmount').textContent = fmt(res.molibraBalance) + ' MOLI';
+  $('doneMsg').textContent = t('mDone', fmt(res.molibraBalance));
 }
 
 /** The bMOLI Transfer to the buyer in a receipt, or null. */
@@ -938,6 +989,17 @@ function renderHeader() {
 }
 
 function render() {
+  // "Receber como MOLI": bMOLI only (WSRO has no bridge back), fee and cap read once per load.
+  $("asMoliRow").hidden = OUT !== POOLS.bmoli;
+  if (OUT === POOLS.bmoli) {
+    if (!render.moli) {
+      render.moli = { fee: 10n ** 18n, free: null };
+      moliRetFee().then((f) => { render.moli.fee = f; render(); });
+      fetch(NODE + "/molibra", { cache: "no-store" }).then((r) => r.json())
+        .then((j) => { render.moli.free = window.MolibraReturn.capFree(j); render(); }).catch(() => {});
+    }
+    $("asMoliNote").textContent = t('asMoliNote', fmt(render.moli.fee), render.moli.free === null ? "—" : fmt(render.moli.free));
+  }
   renderHeader();
   $('noWallet').hidden = Boolean(window.ethereum);
   $('ethBal').textContent = account && balEth !== null ? fmt(balEth) + ' ETH' : '—';

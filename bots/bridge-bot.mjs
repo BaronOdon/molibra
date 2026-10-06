@@ -29,6 +29,7 @@ import {
   unlinkSync, openSync, closeSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { BridgeBot, DEFAULTS, addressOf } from './bridge-core.mjs';
@@ -245,11 +246,17 @@ async function main() {
       logs: rpcCaller(cfg.ethLogs),
       send: rpcCaller(cfg.ethPrimary, { rounds: 1 }),
     },
+    // ⭐ Express anchor: run the anchor publisher's scheduled task now.
+    triggerAnchor: () => new Promise((resolveRun, rejectRun) => {
+      execFile('schtasks', ['/run', '/tn', cfg.anchorTask ?? '\\Molibra anchor publisher'], { windowsHide: true },
+        (err, stdout, stderr) => (err ? rejectRun(new Error(`schtasks: ${stderr || err.message}`)) : resolveRun(stdout)));
+    }),
   };
   if (dryRun) {
     // ⛔ Belt and braces: nothing leaves, whatever the core decides.
     const refuse = async () => { throw new Error('dry-run: refusing to send'); };
     io.eth.send = refuse;
+    io.triggerAnchor = null;   // the core logs what it would have fired
     const realRpc = molibra.rpc;
     io.molibra = { ...molibra, rpc: (m, p) => (m === 'eth_sendRawTransaction' ? refuse() : realRpc(m, p)) };
   }

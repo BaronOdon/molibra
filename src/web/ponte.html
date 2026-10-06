@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
+<title>MOLIBRA · Ponte MOLI ⇄ bMOLI</title>
+<!--
+  A PUBLIC page: one click per direction, as many wallet signatures as the
+  crossing needs, and the rest followed automatically.
+
+  MOLI -> bMOLI: the SAME moliBurn payload /molibra/bridgedmoli builds
+  (MOLI_BURN_TAG ‖ recipient(20) ‖ amount(32), addressed to a contract that is
+  never called). The bridge bot claims the bMOLI on Ethereum once the burn's
+  block is anchored and BridgedMoli's challenge window (immutable, 7,200
+  Ethereum blocks ≈ 24 h) has passed; the mint goes to the burner by contract
+  design. "Âncora imediata": a second signature pays a MOLI fee so the bot runs
+  the anchor publisher at once instead of waiting for its daily run.
+
+  bMOLI -> MOLI: the SAME bMOLI.transfer(vault, amount) /molibra/return sends.
+  The bot proves it and returns the MOLI to the SENDER on Molibra, automatically
+  up to the rolling bot cap; above it the operator processes the return.
+
+  It holds no key. Nothing is sent until the wallet signs it.
+-->
+<style>
+  :root{color-scheme:dark;--bg:#07070a;--card:#111114;--box:#18181d;--edge:rgba(255,209,0,.20);
+    --ink:#f2f2f5;--dim:#9a9aa6;--gold:#FFD100;--ok:#4ade80;--bad:#ff6b6b;
+    --sans:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;--mono:ui-monospace,Menlo,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);padding:16px}
+  main{max-width:520px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .mark{font:700 20px/1 var(--mono);letter-spacing:.2em;color:var(--gold);text-decoration:none}
+  .lang button{background:transparent;border:0;color:var(--dim);padding:6px 10px;font:600 13px var(--sans);border-radius:8px;cursor:pointer}
+  .lang button.on{background:var(--gold);color:#0a0a0a}
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--edge);border-radius:14px;padding:5px;margin-bottom:12px}
+  .tabs button{flex:1;background:transparent;border:0;border-radius:10px;padding:11px 8px;color:var(--dim);font:600 14px var(--sans);cursor:pointer}
+  .tabs button.on{background:var(--box);color:var(--gold)}
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:20px;padding:16px;margin-bottom:12px}
+  .box{background:var(--box);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+  .row{display:flex;justify-content:space-between;gap:10px;color:var(--dim);font-size:13px}
+  .amt{display:flex;gap:8px;align-items:center;margin-top:6px}
+  .amt input{flex:1;min-width:0;background:transparent;border:0;color:var(--ink);font:600 26px var(--sans);outline:none}
+  .max{background:transparent;border:1px solid var(--edge);color:var(--gold);border-radius:8px;padding:4px 9px;font:600 12px var(--sans);cursor:pointer}
+  .go{width:100%;background:var(--gold);color:#0a0a0a;border:0;border-radius:14px;padding:15px;font:700 16px var(--sans);cursor:pointer}
+  .go:disabled{opacity:.45;cursor:not-allowed}
+  label.opt{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin:4px 0 12px}
+  .note{color:var(--dim);font-size:13px;margin:8px 0 0}
+  .warn{color:#ffcf66;font-size:13px}
+  ol.steps{list-style:none;padding:0;margin:0}
+  ol.steps li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px}
+  ol.steps li:last-child{border-bottom:0}
+  .dot{width:18px;flex:0 0 18px;text-align:center}
+  .done .dot{color:var(--ok)} .now .dot{color:var(--gold)} .bad .dot{color:var(--bad)}
+  .sub{color:var(--dim);font-size:12px;word-break:break-all}
+  .msg{font-size:13px;margin-top:10px;white-space:pre-wrap}
+  .msg.bad{color:var(--bad)} .msg.ok{color:var(--ok)}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <a class="mark" href="/">MOLIBRA</a>
+  <div class="lang"><button id="langPt" class="on">PT</button><button id="langEn">EN</button></div>
+</header>
+
+<div class="tabs">
+  <button id="tabOut" class="on" data-i18n="tabOut">MOLI → bMOLI</button>
+  <button id="tabBack" data-i18n="tabBack">bMOLI → MOLI</button>
+</div>
+
+<section class="card">
+  <div class="box">
+    <div class="row"><span id="fromLabel">Você envia (Molibra)</span><span id="fromBal">—</span></div>
+    <div class="amt"><input id="amount" inputmode="decimal" placeholder="0" autocomplete="off"><button class="max" id="maxBtn" type="button">MAX</button></div>
+  </div>
+  <div class="box">
+    <div class="row"><span id="toLabel">Você recebe (Ethereum)</span><span id="toBal">—</span></div>
+    <div class="amt" style="font:600 22px var(--sans)" id="receive">0</div>
+  </div>
+  <label class="opt" id="expressRow"><input type="checkbox" id="express" checked>
+    <span><b id="expressTitle">Âncora imediata</b> <span id="expressFee">(+… MOLI)</span><br>
+    <span class="note" id="expressNote">—</span></span></label>
+  <button class="go" id="go" type="button">Conectar carteira</button>
+  <p class="note" id="fees" style="color:var(--ink)">—</p>
+  <p class="note" id="timing">—</p>
+  <p class="warn" id="warn">—</p>
+  <div class="msg" id="msg" hidden></div>
+</section>
+
+<section class="card" id="progressCard" hidden>
+  <div class="row" style="margin-bottom:6px"><b id="progTitle" style="color:var(--ink)">Andamento</b><span id="progClock"></span></div>
+  <ol class="steps" id="steps"></ol>
+</section>
+</main>
+
+<script src="/molibra/mobilewallet.js"></script>
+<script>
+const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+const MOLIBRA_HEX = '0x4f02';            // 20226
+const BMOLI = '0xa302877efb74f567f3605851194b46f1d5746822';
+const VAULT = '0x0173f059ce912bb442296f3763746637f7d20fc1';
+// Native payloads go to a contract that is never called (MetaMask refuses
+// calldata to an account it manages) - the same target bridgedmoli/return use.
+const PAYLOAD_TO = '0xcedb6badceceeb46e21877c45b8b9087cb8e4d6a';
+const FEE_ADDRESS = '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a';
+const STATE_VIEW = '0x7ffe42c4a5deea5b0fec41c94c136cf115597227';
+const BMOLI_POOL_ID = '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312';
+const SEL = {
+  status: '0x42d21ef7',        // status(uint256)
+  claimed: '0xcc3c0f06',       // claimed(bytes32)
+  challenge: '0x91774928',     // challengeBlocks()
+  balanceOf: '0x70a08231',     // balanceOf(address)
+  getSlot0: '0xc815641c',      // StateView.getSlot0(bytes32)
+};
+
+/* PURE-BEGIN */
+/** MOLI_BURN ‖ recipient(20) ‖ amount(32) - the tag src/moliburn.js computes. */
+const MOLI_BURN_TAG = '0x94a06c3e';
+const TRANSFER = '0xa9059cbb';           // transfer(address,uint256)
+const word = (v) => BigInt(v).toString(16).padStart(64, '0');
+const addr32 = (a) => String(a).toLowerCase().replace(/^0x/, '').padStart(64, '0');
+/** Decimal string -> wei, BigInt only (Number(x) * 1e18 rounds). null if not a positive amount. */
+function parseAmount(s) {
+  const m = /^(\d*)(?:[.,](\d*))?$/.exec(String(s).trim());
+  if (!m || (m[1] === '' && !m[2]) || (m[2] || '').length > 18) return null;
+  const wei = BigInt(m[1] || '0') * 10n ** 18n + BigInt(((m[2] || '') + '0'.repeat(18)).slice(0, 18));
+  return wei > 0n ? wei : null;
+}
+function burnData(recipient, wei) { return MOLI_BURN_TAG + addr32(recipient).slice(24) + word(wei); }
+function vaultData(wei) { return TRANSFER + word(VAULT) + word(wei); }
+/**
+ * The express-anchor fee in MOLI-wei: max(10 MOLI, ceil(3 x 200,000 gas x the
+ * Ethereum gas price x MOLI per ETH)), MOLI per ETH from the bMOLI/ETH v4 pool
+ * (sqrtPriceX96^2 / 2^192, both 18 decimals). Rounded UP to a whole MOLI.
+ */
+function expressFeeWei(gasPriceWei, sqrtP) {
+  const ethCost = 3n * 200000n * BigInt(gasPriceWei);
+  const sq = BigInt(sqrtP);
+  const moli = (ethCost * sq * sq + (1n << 192n) - 1n) >> 192n;
+  const whole = (moli + 10n ** 18n - 1n) / 10n ** 18n * 10n ** 18n;
+  const floor = 10n * 10n ** 18n;
+  return whole > floor ? whole : floor;
+}
+/** Every cost is paid by its user (operator, 6 Oct 2026). Rounded UP to a whole coin. */
+const roundUpWhole = (wei) => (BigInt(wei) + 10n ** 18n - 1n) / 10n ** 18n * 10n ** 18n;
+/**
+ * The claim fee in MOLI-wei: the relayer's Ethereum claim (250,000 gas, above
+ * the bot's 150,000 minimum and the claims seen so far) x the gas price x MOLI
+ * per ETH x 2 margin, floor 5 MOLI.
+ */
+function claimFeeWei(gasPriceWei, sqrtP) {
+  const sq = BigInt(sqrtP);
+  const moli = (2n * 250000n * BigInt(gasPriceWei) * sq * sq + (1n << 192n) - 1n) >> 192n;
+  const whole = roundUpWhole(moli);
+  const floor = 5n * 10n ** 18n;
+  return whole > floor ? whole : floor;
+}
+/** The return fee in bMOLI-wei: header commit + return on Molibra (2 x 500,000 gas) x Molibra gas price x 2, floor 1. */
+function returnFeeWei(molibraGasPriceWei) {
+  const whole = roundUpWhole(2n * 1000000n * BigInt(molibraGasPriceWei));
+  const floor = 10n ** 18n;
+  return whole > floor ? whole : floor;
+}
+/* PURE-END */
+
+const T = {
+  pt: {
+    tabOut: 'MOLI → bMOLI', tabBack: 'bMOLI → MOLI',
+    fromOut: 'Você envia (Molibra)', toOut: 'Você recebe (Ethereum)',
+    fromBack: 'Você envia (Ethereum)', toBack: 'Você recebe (Molibra)',
+    connect: 'Conectar carteira', goOut: 'Enviar {0} MOLI para a Ethereum', goBack: 'Trazer {0} bMOLI de volta',
+    typeAmount: 'Digite um valor', busy: 'Em andamento…',
+    expressTitle: 'Âncora imediata', expressFee: '(+{0} MOLI)',
+    expressNote: 'A ponte ancora o seu bloco na Ethereum agora, em vez de esperar a rodada diária. A janela de contestação do contrato (7.200 blocos da Ethereum, ~24 h) não muda: com âncora imediata leva ~24 h no total; sem ela, até ~48 h. Uma segunda assinatura paga a taxa em MOLI.',
+    timingOut: 'Uma só interação: você assina na carteira e a página acompanha o resto sozinha. O bMOLI chega à mesma carteira, na Ethereum.',
+    timingBack: 'Uma só interação: você assina o envio na Ethereum; o robô da ponte devolve o MOLI ao mesmo endereço na Molibra em ~10–25 min, automático até {0} MOLI por janela de 5.760 blocos (agora livres: {1}). Acima disso, quem processa é o operador.',
+    warnOut: '⛔ Queimar MOLI é definitivo: ele só volta pelo caminho de volta (bMOLI → MOLI). Envie de uma carteira cuja chave você tem.',
+    warnBack: '⛔ O cofre é definitivo: o bMOLI enviado a ele nunca sai. O MOLI é pago ao endereço que ENVIOU; enviado de um contrato (roteador, Safe), cairia num endereço sem chave.',
+    stBurn: 'Queimar MOLI na Molibra', stFee: 'Pagar as taxas (reivindicação + âncora imediata)', stFeeClaim: 'Pagar a taxa de reivindicação', stRetFee: 'Pagar a taxa de devolução (bMOLI)',
+    feesOut: 'Taxas, pagas por você: reivindicação na Ethereum {0} MOLI{1} = {2} MOLI, numa segunda assinatura.', feesExpr: ' + âncora imediata {0} MOLI',
+    feesBack: 'Taxa, paga por você: devolução na Molibra {0} bMOLI, numa segunda assinatura (além do gás da Ethereum).', stAnchor: 'Bloco ancorado na Ethereum',
+    stWindow: 'Janela de contestação', stClaim: 'bMOLI emitido para você (robô da ponte)', stWatch: 'bMOLI adicionado à carteira',
+    stSend: 'Enviar bMOLI ao cofre (Ethereum)', stConf: 'Confirmado na Ethereum', stReturn: 'MOLI devolvido na Molibra (robô da ponte)', stNet: 'Rede Molibra na carteira',
+    waitSign: 'aguardando a sua assinatura', waitMine: 'aguardando mineração', waiting: 'aguardando', done: 'feito',
+    left: 'faltam {0} blocos (~{1})', overCap: 'acima do limite automático: o operador processa',
+    progress: 'Andamento', resumed: 'Retomado do que estava em andamento neste navegador.',
+    gateOff: 'A queima ainda não está ativa nesta rede.', tooMuch: 'Saldo insuficiente (inclua a taxa e o gás).',
+    outstanding: 'Mais do que o total que pode voltar ({0} MOLI): recusado antes de assinar.',
+    finishedOut: '⭐ Pronto: {0} bMOLI na sua carteira na Ethereum.', finishedBack: '⭐ Pronto: {0} MOLI de volta na Molibra.',
+  },
+  en: {
+    tabOut: 'MOLI → bMOLI', tabBack: 'bMOLI → MOLI',
+    fromOut: 'You send (Molibra)', toOut: 'You receive (Ethereum)',
+    fromBack: 'You send (Ethereum)', toBack: 'You receive (Molibra)',
+    connect: 'Connect wallet', goOut: 'Send {0} MOLI to Ethereum', goBack: 'Bring {0} bMOLI back',
+    typeAmount: 'Enter an amount', busy: 'In progress…',
+    expressTitle: 'Express anchor', expressFee: '(+{0} MOLI)',
+    expressNote: 'The bridge anchors your block on Ethereum now instead of waiting for the daily run. The contract\'s challenge window (7,200 Ethereum blocks, ~24 h) does not change: express takes ~24 h in total; without it, up to ~48 h. A second signature pays the fee in MOLI.',
+    timingOut: 'One interaction: you sign in the wallet and the page follows the rest by itself. The bMOLI arrives in the same wallet, on Ethereum.',
+    timingBack: 'One interaction: you sign the transfer on Ethereum; the bridge bot returns the MOLI to the same address on Molibra in ~10–25 min, automatic up to {0} MOLI per 5,760-block window (free now: {1}). Above that the operator processes it.',
+    warnOut: '⛔ Burning MOLI is final: it only comes back through the return path (bMOLI → MOLI). Send from a wallet whose key you hold.',
+    warnBack: '⛔ The vault is final: bMOLI sent to it never leaves. The MOLI is paid to the SENDING address; sent from a contract (router, Safe) it would land where nobody has a key.',
+    stBurn: 'Burn MOLI on Molibra', stFee: 'Pay the fees (claim + express anchor)', stFeeClaim: 'Pay the claim fee', stRetFee: 'Pay the return fee (bMOLI)',
+    feesOut: 'Fees, paid by you: Ethereum claim {0} MOLI{1} = {2} MOLI, in a second signature.', feesExpr: ' + express anchor {0} MOLI',
+    feesBack: 'Fee, paid by you: Molibra return {0} bMOLI, in a second signature (plus Ethereum gas).', stAnchor: 'Block anchored on Ethereum',
+    stWindow: 'Challenge window', stClaim: 'bMOLI minted to you (bridge bot)', stWatch: 'bMOLI added to the wallet',
+    stSend: 'Send bMOLI to the vault (Ethereum)', stConf: 'Confirmed on Ethereum', stReturn: 'MOLI returned on Molibra (bridge bot)', stNet: 'Molibra network in the wallet',
+    waitSign: 'waiting for your signature', waitMine: 'waiting to be mined', waiting: 'waiting', done: 'done',
+    left: '{0} blocks to go (~{1})', overCap: 'above the automatic cap: the operator processes it',
+    progress: 'Progress', resumed: 'Resumed what was in progress in this browser.',
+    gateOff: 'Burning is not active on this network yet.', tooMuch: 'Insufficient balance (include the fee and gas).',
+    outstanding: 'More than can ever come back ({0} MOLI): refused before signing.',
+    finishedOut: '⭐ Done: {0} bMOLI in your wallet on Ethereum.', finishedBack: '⭐ Done: {0} MOLI back on Molibra.',
+  },
+};
+let LANG = (navigator.language || 'pt').toLowerCase().startsWith('pt') ? 'pt' : 'en';
+try { const l = localStorage.getItem('molibra.lang'); if (l === 'pt' || l === 'en') LANG = l; } catch (e) {}
+const t = (k, ...a) => String(T[LANG][k] ?? k).replace(/\{(\d)\}/g, (_, i) => a[i] ?? '');
+const $ = (id) => document.getElementById(id);
+const fmt = (wei, dp = 6) => (Number(BigInt(wei)) / 1e18).toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: dp });
+const eth = () => window.molibraWallet.require();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const PENDING = 'molibra.ponte.pending';
+
+let dir = 'out';
+let account = null;
+let node = null;           // /molibra identity (outbound, activations)
+let feeWei = 10n ** 19n;          // express anchor
+let claimFee = 5n * 10n ** 18n;   // always, MOLI
+let retFee = 10n ** 18n;          // always, bMOLI
+const outFee = () => claimFee + ($('express').checked ? feeWei : 0n);
+let balMoli = null, balBmoli = null;
+let busy = false;
+
+async function rpc(url, method, params) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message || 'rpc error');
+  return j.result;
+}
+const mrpc = (m, p) => rpc(NODE + '/molibra', m, p);
+const erpc = (m, p) => rpc(ETH_RPC, m, p);
+const ethCall = (to, data) => erpc('eth_call', [{ to, data }, 'latest']);
+
+function say(text, kind) { const m = $('msg'); m.hidden = !text; m.textContent = text || ''; m.className = 'msg' + (kind ? ' ' + kind : ''); }
+function loadPending() { try { return JSON.parse(localStorage.getItem(PENDING) || 'null'); } catch (e) { return null; } }
+function savePending(p) { try { if (p) localStorage.setItem(PENDING, JSON.stringify(p)); else localStorage.removeItem(PENDING); } catch (e) {} }
+
+/* ------------------------------------------------------------ reading */
+async function readNode() { node = await (await fetch(NODE + '/molibra', { cache: 'no-store' })).json(); }
+async function readFee() {
+  try {
+    const [gp, slot] = await Promise.all([erpc('eth_gasPrice', []), ethCall(STATE_VIEW, SEL.getSlot0 + BMOLI_POOL_ID.slice(2))]);
+    const sq = BigInt('0x' + slot.slice(2, 66));
+    feeWei = expressFeeWei(BigInt(gp), sq);
+    claimFee = claimFeeWei(BigInt(gp), sq);
+  } catch (e) { /* keeps the floors */ }
+  try { retFee = returnFeeWei(BigInt(await mrpc('eth_gasPrice', []))); } catch (e) {}
+}
+async function readBalances() {
+  if (!account) return;
+  try { balMoli = BigInt(await mrpc('eth_getBalance', [account, 'latest'])); } catch (e) {}
+  try { balBmoli = BigInt(await ethCall(BMOLI, SEL.balanceOf + addr32(account))); } catch (e) {}
+}
+function botFree() {
+  const c = node?.outbound?.botCap;
+  if (!c) return null;
+  return { cap: BigInt(c.cap), free: BigInt(c.cap) - BigInt(c.usedInWindow) };
+}
+
+/* ------------------------------------------------------------- render */
+function render() {
+  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
+  $('langPt').className = LANG === 'pt' ? 'on' : ''; $('langEn').className = LANG === 'en' ? 'on' : '';
+  $('tabOut').className = dir === 'out' ? 'on' : ''; $('tabBack').className = dir === 'back' ? 'on' : '';
+  $('fromLabel').textContent = t(dir === 'out' ? 'fromOut' : 'fromBack');
+  $('toLabel').textContent = t(dir === 'out' ? 'toOut' : 'toBack');
+  const from = dir === 'out' ? balMoli : balBmoli; const to = dir === 'out' ? balBmoli : balMoli;
+  $('fromBal').textContent = from === null ? '—' : fmt(from) + (dir === 'out' ? ' MOLI' : ' bMOLI');
+  $('toBal').textContent = to === null ? '—' : fmt(to) + (dir === 'out' ? ' bMOLI' : ' MOLI');
+  const wei = parseAmount($('amount').value);
+  $('receive').textContent = wei ? fmt(wei) + (dir === 'out' ? ' bMOLI' : ' MOLI') : '0';
+  $('expressRow').hidden = dir !== 'out';
+  $('expressTitle').textContent = t('expressTitle');
+  $('expressFee').textContent = t('expressFee', fmt(feeWei, 0));
+  $('expressNote').textContent = t('expressNote');
+  const bf = botFree();
+  $('timing').textContent = dir === 'out' ? t('timingOut')
+    : t('timingBack', bf ? fmt(bf.cap, 0) : '5.000', bf ? fmt(bf.free, 0) : '—');
+  $('warn').textContent = t(dir === 'out' ? 'warnOut' : 'warnBack');
+  $('fees').textContent = dir === 'out'
+    ? t('feesOut', fmt(claimFee, 0), $('express').checked ? t('feesExpr', fmt(feeWei, 0)) : '', fmt(outFee(), 0))
+    : t('feesBack', fmt(retFee, 0));
+  $('go').disabled = busy;
+  $('go').textContent = busy ? t('busy') : !account ? t('connect')
+    : wei ? t(dir === 'out' ? 'goOut' : 'goBack', fmt(wei)) : t('typeAmount');
+}
+
+/** The progress list, from a pending record: [{label, state, sub}] built with textContent only. */
+function drawSteps(steps) {
+  $('progressCard').hidden = false;
+  $('progTitle').textContent = t('progress');
+  const ol = $('steps'); ol.textContent = '';
+  for (const s of steps) {
+    const li = document.createElement('li'); li.className = s.state || '';
+    const d = document.createElement('span'); d.className = 'dot'; d.textContent = s.state === 'done' ? '✓' : s.state === 'now' ? '●' : s.state === 'bad' ? '⛔' : '○';
+    const body = document.createElement('span'); body.textContent = s.label;
+    if (s.sub) { const sub = document.createElement('div'); sub.className = 'sub'; sub.textContent = s.sub; body.appendChild(sub); }
+    li.append(d, body); ol.appendChild(li);
+  }
+}
+const human = (secs) => secs < 3600 ? Math.ceil(secs / 60) + ' min' : (secs / 3600).toFixed(1) + ' h';
+
+/* ------------------------------------------------------------- wallet */
+async function connect() {
+  account = String((await eth().request({ method: 'eth_requestAccounts' }))[0]).toLowerCase();
+  await readBalances(); render();
+}
+async function switchTo(hex) {
+  const id = await eth().request({ method: 'eth_chainId' });
+  if (BigInt(id) === BigInt(hex)) return;
+  try { await eth().request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] }); }
+  catch (e) {
+    if (e && e.code === 4902 && hex === MOLIBRA_HEX) {
+      await eth().request({ method: 'wallet_addEthereumChain', params: [{ chainId: MOLIBRA_HEX, chainName: 'Molibra',
+        nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 }, rpcUrls: [NODE + '/molibra'] }] });
+    } else throw e;
+  }
+  const now = await eth().request({ method: 'eth_chainId' });
+  if (BigInt(now) !== BigInt(hex)) throw new Error('wallet did not switch network');
+}
+async function waitReceipt(read, hash, minutes) {
+  for (let i = 0; i < minutes * 12; i++) {
+    const r = await read('eth_getTransactionReceipt', [hash]).catch(() => null);
+    if (r) { if (r.status !== '0x1') throw new Error('reverted: ' + hash); return r; }
+    await sleep(5000);
+  }
+  throw new Error('not mined in ' + minutes + ' min: ' + hash);
+}
+
+/* ---------------------------------------------------- MOLI -> bMOLI */
+async function runOut(wei) {
+  await readNode();
+  const gate = node.activations?.moliBurn;
+  if (!gate || !gate.active) throw new Error(t('gateOff'));
+  await switchTo(MOLIBRA_HEX);
+  const express = $('express').checked;
+  await readFee(); await readBalances();
+  const fees = outFee();   // claim fee, plus the express fee when on: ONE transfer
+  const need = wei + fees + 10n ** 15n;
+  if (balMoli !== null && balMoli < need) throw new Error(t('tooMuch'));
+  const p = { dir: 'out', account, amount: wei.toString(), express, fee: fees.toString(), startedAt: Date.now() };
+  drawOut(p, 'sign');
+  // ⛔ Gas explicit: estimation simulates a native payload as a contract call.
+  p.burnTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: PAYLOAD_TO, data: burnData(account, wei), gas: '0x186a0' }] });
+  savePending(p); drawOut(p);
+  const r = await waitReceipt(mrpc, p.burnTx, 10);
+  p.burnHeight = BigInt(r.blockNumber).toString(); savePending(p);
+  {
+    drawOut(p, 'fee');
+    p.feeTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: FEE_ADDRESS, value: '0x' + BigInt(p.fee).toString(16), gas: '0x5208' }] });
+    savePending(p); drawOut(p);
+    await waitReceipt(mrpc, p.feeTx, 10);
+    p.feeMined = true; savePending(p);
+  }
+  await trackOut(p);
+}
+function drawOut(p, phase) {
+  const steps = [{ label: t('stBurn') + ' — ' + fmt(p.amount) + ' MOLI', state: p.burnHeight ? 'done' : 'now',
+    sub: p.burnTx ? p.burnTx : phase === 'sign' ? t('waitSign') : '' }];
+  steps.push({ label: t(p.express ? 'stFee' : 'stFeeClaim') + ' — ' + fmt(p.fee, 0) + ' MOLI', state: p.feeMined ? 'done' : p.burnHeight ? 'now' : '',
+    sub: p.feeTx ? p.feeTx : phase === 'fee' ? t('waitSign') : '' });
+  const anchored = p.anchoredAt != null;
+  steps.push({ label: t('stAnchor'), state: anchored ? 'done' : p.burnHeight ? 'now' : '', sub: anchored ? 'Ethereum ' + p.anchoredAt : '' });
+  steps.push({ label: t('stWindow'), state: p.usable ? 'done' : anchored ? 'now' : '', sub: p.windowLeft != null && !p.usable ? t('left', p.windowLeft, human(p.windowLeft * 12)) : '' });
+  steps.push({ label: t('stClaim'), state: p.claimed ? 'done' : p.usable ? 'now' : '' });
+  steps.push({ label: t('stWatch'), state: p.watched ? 'done' : p.claimed ? 'now' : '' });
+  drawSteps(steps);
+}
+async function trackOut(p) {
+  const wordHash = p.burnTx.replace(/^0x/, '').padStart(64, '0');
+  const challenge = BigInt(await ethCall(BMOLI, SEL.challenge));
+  for (;;) {
+    try {
+      const claimed = BigInt(await ethCall(BMOLI, SEL.claimed + wordHash));
+      if (claimed !== 0n) { p.claimed = true; p.usable = true; break; }
+      const st = (await ethCall(BMOLI, SEL.status + word(p.burnHeight))).replace(/^0x/, '');
+      const w = (i) => BigInt('0x' + (st.slice(i * 64, i * 64 + 64) || '0'));
+      if (w(0) !== 0n) {
+        p.anchoredAt = w(2).toString();
+        p.usable = w(1) !== 0n;
+        const tip = BigInt(await erpc('eth_blockNumber', []));
+        const end = w(2) + challenge;
+        p.windowLeft = end > tip ? Number(end - tip) : 0;
+      }
+      savePending(p); drawOut(p);
+    } catch (e) { /* a flaky read is retried next round */ }
+    await sleep(30000);
+  }
+  savePending(p); drawOut(p);
+  // ⭐ Put bMOLI in the wallet: switch to Ethereum, then watch the token.
+  try {
+    await switchTo('0x1');
+    await eth().request({ method: 'wallet_watchAsset', params: { type: 'ERC20', options: {
+      address: BMOLI, symbol: 'bMOLI', decimals: 18, image: 'https://molibra.org/molibra/tokens/bmoli-200.png' } } });
+    p.watched = true;
+  } catch (e) { /* declined: the token is still yours */ }
+  drawOut(p); say(t('finishedOut', fmt(p.amount)), 'ok'); savePending(null);
+}
+
+/* ---------------------------------------------------- bMOLI -> MOLI */
+async function runBack(wei) {
+  await readNode();
+  const outstanding = BigInt(node.outbound?.outstanding ?? 0);
+  if (wei > outstanding) throw new Error(t('outstanding', fmt(outstanding, 0)));
+  await switchTo('0x1');
+  await readBalances();
+  if (balBmoli !== null && balBmoli < wei + retFee) throw new Error(t('tooMuch'));
+  const base = BigInt(await mrpc('eth_getBalance', [account, 'latest']).catch(() => '0x0'));
+  const p = { dir: 'back', account, amount: wei.toString(), base: base.toString(), startedAt: Date.now() };
+  drawBack(p, 'sign');
+  // ⛔ A LOW tip, explicitly (as /molibra/return): 0.05 gwei over the base fee.
+  const blk = await erpc('eth_getBlockByNumber', ['latest', false]);
+  const bf = BigInt(blk.baseFeePerGas); const tip = 50000000n;
+  p.ethTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: BMOLI, value: '0x0', data: vaultData(wei),
+    maxPriorityFeePerGas: '0x' + tip.toString(16), maxFeePerGas: '0x' + (bf * 2n + tip).toString(16) }] });
+  savePending(p); drawBack(p);
+  await waitReceipt(erpc, p.ethTx, 15);
+  p.confirmed = true; savePending(p);
+  // The return fee (operator rule: every cost paid by its user), as bMOLI to the fee address.
+  p.retFee = retFee.toString(); drawBack(p, 'fee');
+  p.feeTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: BMOLI, value: '0x0', data: TRANSFER + word(FEE_ADDRESS) + word(retFee),
+    maxPriorityFeePerGas: '0x' + tip.toString(16), maxFeePerGas: '0x' + (bf * 2n + tip).toString(16) }] });
+  savePending(p); drawBack(p);
+  await waitReceipt(erpc, p.feeTx, 15);
+  p.feeMined = true; savePending(p);
+  await trackBack(p);
+}
+function drawBack(p, phase) {
+  const bf = botFree();
+  const over = bf && BigInt(p.amount) > bf.free;
+  drawSteps([
+    { label: t('stSend') + ' — ' + fmt(p.amount) + ' bMOLI', state: p.ethTx ? 'done' : 'now', sub: p.ethTx || (phase === 'sign' ? t('waitSign') : '') },
+    { label: t('stConf'), state: p.confirmed ? 'done' : p.ethTx ? 'now' : '' },
+    { label: t('stRetFee') + (p.retFee ? ' — ' + fmt(p.retFee, 0) + ' bMOLI' : ''), state: p.feeMined ? 'done' : p.confirmed ? 'now' : '', sub: p.feeTx || (phase === 'fee' ? t('waitSign') : '') },
+    { label: t('stReturn'), state: p.returned ? 'done' : p.feeMined ? 'now' : '', sub: over && !p.returned ? t('overCap') : '' },
+    { label: t('stNet'), state: p.net ? 'done' : p.returned ? 'now' : '' },
+  ]);
+}
+async function trackBack(p) {
+  const target = BigInt(p.base) + BigInt(p.amount) - 10n ** 15n;
+  for (;;) {
+    try {
+      await readNode();
+      const b = BigInt(await mrpc('eth_getBalance', [p.account, 'latest']));
+      if (b >= target) { p.returned = true; break; }
+      drawBack(p);
+    } catch (e) {}
+    await sleep(30000);
+  }
+  drawBack(p);
+  try { await switchTo(MOLIBRA_HEX); p.net = true; } catch (e) {}
+  drawBack(p); say(t('finishedBack', fmt(p.amount)), 'ok'); savePending(null);
+}
+
+/* ------------------------------------------------------------- wiring */
+$('go').onclick = async () => {
+  try {
+    say('');
+    if (!account) { await connect(); return; }
+    const wei = parseAmount($('amount').value);
+    if (!wei) return;
+    busy = true; render();
+    if (dir === 'out') await runOut(wei); else await runBack(wei);
+  } catch (e) {
+    say(e && e.code === 4001 ? (LANG === 'pt' ? 'Cancelado na carteira; nada foi enviado.' : 'Cancelled in the wallet; nothing was sent.') : (e.message || String(e)), 'bad');
+  } finally { busy = false; await readBalances(); render(); }
+};
+$('maxBtn').onclick = () => {
+  let b = dir === 'out' ? balMoli : balBmoli;
+  if (b === null) return;
+  if (dir === 'out') b -= outFee() + 10n ** 16n; else b -= retFee;
+  if (b > 0n) $('amount').value = (Number(b / 10n ** 12n) / 1e6).toString();
+  render();
+};
+$('amount').oninput = render; $('express').onchange = render;
+$('tabOut').onclick = () => { if (!busy) { dir = 'out'; render(); } };
+$('tabBack').onclick = () => { if (!busy) { dir = 'back'; render(); } };
+const setLang = (l) => { LANG = l; try { localStorage.setItem('molibra.lang', l); } catch (e) {} render(); };
+$('langPt').onclick = () => setLang('pt'); $('langEn').onclick = () => setLang('en');
+
+const params = new URLSearchParams(location.search);
+if (params.get('dir') === 'back') dir = 'back';
+const preset = String(params.get('amount') || '').trim();
+if (parseAmount(preset)) $('amount').value = preset;
+
+(async () => {
+  render();
+  await Promise.all([readNode().catch(() => {}), readFee()]);
+  render();
+  if (window.ethereum) {
+    try {
+      const accs = await window.ethereum.request({ method: 'eth_accounts' });
+      if (accs && accs[0]) { account = String(accs[0]).toLowerCase(); await readBalances(); render(); }
+    } catch (e) {}
+  }
+  // ⭐ Resume a crossing this browser started: the tracking needs no click.
+  const p = loadPending();
+  if (p && p.burnTx && p.dir === 'out') { dir = 'out'; busy = true; render(); say(t('resumed')); drawOut(p); trackOut(p).finally(() => { busy = false; render(); }); }
+  else if (p && p.ethTx && p.dir === 'back') { dir = 'back'; busy = true; render(); say(t('resumed')); drawBack(p); trackBack(p).finally(() => { busy = false; render(); }); }
+})();
+</script>
+</body>
+</html>

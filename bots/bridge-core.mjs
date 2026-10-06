@@ -42,9 +42,49 @@ import { buildReturn, RpcDisagreement } from '../src/returnproof.js';
 import { signEip1559, decodeEip1559 } from '../src/eth1559.js';
 
 export const MOLIBRA_CHAIN_ID = 20226n;
+
+/**
+ * ⭐ EXPRESS ANCHOR (operator, 6 Oct 2026). A burner who also pays a fee in MOLI
+ * to EXPRESS_FEE_ADDRESS, from the SAME address, within EXPRESS_WINDOW_BLOCKS
+ * after the burn, gets the anchor publisher run at once instead of waiting for
+ * its daily schedule. The 7,200-block challenge window in BridgedMoli is
+ * immutable, so express means ~24 h end to end instead of up to ~48 h.
+ *
+ * ⛔ The floor is conservative and fixed here; the page quotes the live price.
+ * ⛔ anchor-publisher.mjs anchors a burn's block only once it is at least
+ *    MAX_REORG_DEPTH + 1 deep (MIN_DEPTH there), so the trigger waits for that
+ *    depth - fired earlier, the run would anchor below the burn and miss it.
+ */
+export const EXPRESS_FEE_ADDRESS = '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a';
+export const EXPRESS_FLOOR_WEI = 10n * 10n ** 18n;
+export const EXPRESS_WINDOW_BLOCKS = 100n;
+export const EXPRESS_MIN_INTERVAL_MS = 10 * 60 * 1000;
+export const ANCHOR_MIN_DEPTH = BigInt(MAX_REORG_DEPTH) + 1n;
+
+/** The fee transfer that buys an express anchor for `burn`, or null. Pure. */
+export function expressFeeFor(burn, fees, minWei = EXPRESS_FLOOR_WEI, windowBlocks = EXPRESS_WINDOW_BLOCKS) {
+  const from = String(burn.from).toLowerCase();
+  const h = BigInt(burn.height);
+  for (const [hash, f] of Object.entries(fees ?? {})) {
+    const fh = BigInt(f.height);
+    if (String(f.from).toLowerCase() === from && BigInt(f.value) >= BigInt(minWei)
+        && fh >= h && fh <= h + BigInt(windowBlocks)) return { hash, ...f };
+  }
+  return null;
+}
 const GWEI = 1_000_000_000n;
 
 export const DEFAULTS = {
+  // ⛔ Every system cost is paid by the user who triggers it (operator, 6 Oct
+  //    2026). A burn is claimed and a return relayed automatically ONLY when its
+  //    sender paid the fee to EXPRESS_FEE_ADDRESS within the window; unpaid ones
+  //    go to pending-operator.json as 'unpaid-fee'. The page quotes the live fee.
+  requireFees: true,
+  claimFeeFloorWei: 5n * 10n ** 18n,      // MOLI, covers the relayer's Ethereum claim gas
+  expressFeeFloorWei: 10n * 10n ** 18n,   // MOLI, on top of the claim fee, for an express anchor
+  returnFeeFloorWei: 1n * 10n ** 18n,     // bMOLI, covers the header commit + return on Molibra
+  feeWindowBlocks: 100n,                  // Molibra blocks after the burn
+  ethFeeWindowBlocks: 100n,               // Ethereum blocks after the vault transfer
   dryRun: false,
   confirmations: 12n,
   // bMOLI (0xa302…) had no Transfer before this; checked 2 Oct 2026 by
@@ -64,6 +104,7 @@ export const DEFAULTS = {
 /** Statuses that need a person, and what to tell them. */
 const ATTENTION = {
   'awaiting-anchor': 'the burn\'s block is not anchored on Ethereum yet (is the anchor publisher funded and running?)',
+  'unpaid-fee': 'no fee was paid for it within the window: not processed automatically, the operator decides',
   'relayer-unfunded': 'the Ethereum relayer has too little ETH for this claim',
   'gas-too-high': 'Ethereum gas is above the bot\'s cap; it will retry',
   'preflight-revert': 'the claim pre-flight reverts with an unexpected error',
@@ -116,6 +157,8 @@ export class BridgeBot {
     state.burns ??= {};
     state.returns ??= {};
     state.spentReturnKeys ??= {};
+    state.expressFees ??= {};
+    state.ethFees ??= {};
   }
 
   save() { this.saveState(this.state); }
@@ -140,7 +183,7 @@ export class BridgeBot {
       });
     }
     for (const [name, leg] of [['scan', () => this.scanMolibra(ctx)],
-      ['claims', () => this.claims(ctx)], ['returns', () => this.returns(ctx)]]) {
+      ['claims', () => this.claims(ctx)], ['express', () => this.express(ctx)], ['returns', () => this.returns(ctx)]]) {
       try { await leg(); } catch (e) {
         ctx.errors.push(`${name}: ${e.message}`);
         this.log('error', `${name}-failed`, { error: e.message });
@@ -211,11 +254,54 @@ export class BridgeBot {
         };
         this.log('info', 'burn-found', { tx: tx.hash, height: n.toString(), amount: burn.amount.toString() });
       }
+      // An express-anchor fee: a plain MOLI transfer to the fee address.
+      if (persist && !burn && !ret && tx.to && lower(tx.to) === EXPRESS_FEE_ADDRESS
+          && BigInt(tx.value ?? 0) > 0n && !this.state.expressFees[tx.hash]) {
+        this.state.expressFees[tx.hash] = { from: lower(tx.from), height: n.toString(), value: BigInt(tx.value).toString() };
+        this.log('info', 'express-fee-found', { tx: tx.hash, from: lower(tx.from), height: n.toString() });
+      }
       if (ret) {
         const key = returnKey(ret.blockNumber, ret.txIndex);
         if (persist) this.state.spentReturnKeys[key] = { molibraTx: tx.hash, height: n.toString() };
         else ctx.recentKeys.add(key);
       }
+    }
+  }
+
+  /* ----------------------------------------------------- 1b. express anchor */
+
+  /**
+   * Run the anchor publisher now for a paid burn that is not anchored yet.
+   * At most one trigger per EXPRESS_MIN_INTERVAL_MS, never twice for one burn
+   * (recorded in state, so a restart does not re-fire), never in dry-run.
+   */
+  async express(ctx) {
+    for (const [hash, b] of Object.entries(this.state.burns)) {
+      if (b.expressFiredAt || b.status === 'claimed') continue;
+      if (b.status !== 'awaiting-anchor' && b.status !== 'new') continue;
+      const fee = expressFeeFor(b, this.state.expressFees,
+        this.cfg.claimFeeFloorWei + this.cfg.expressFeeFloorWei, this.cfg.feeWindowBlocks);
+      if (!fee) continue;
+      if (ctx.height < BigInt(b.height) + ANCHOR_MIN_DEPTH) {
+        if (b.express !== 'waiting-depth') {
+          this.log('info', 'express-waiting-depth', { tx: hash, readyAt: (BigInt(b.height) + ANCHOR_MIN_DEPTH).toString() });
+        }
+        b.express = 'waiting-depth';
+        continue;
+      }
+      const last = this.state.lastExpressTriggerAt ? Date.parse(this.state.lastExpressTriggerAt) : 0;
+      if (this.now() - last < EXPRESS_MIN_INTERVAL_MS) { b.express = 'rate-limited'; continue; }
+      if (this.cfg.dryRun || !this.io.triggerAnchor) {
+        this.log('info', 'express-dry-run', { tx: hash, fee: fee.hash, note: 'would run the anchor publisher now' });
+        b.express = 'dry-run';
+        continue;
+      }
+      await this.io.triggerAnchor();
+      const at = new Date(this.now()).toISOString();
+      this.state.lastExpressTriggerAt = at;
+      Object.assign(b, { expressFiredAt: at, express: 'fired', expressFee: fee.hash });
+      this.log('info', 'express-anchor-fired', { tx: hash, fee: fee.hash, height: b.height });
+      return;   // one per tick: the publisher anchors the oldest unanchored burn first
     }
   }
 
@@ -226,6 +312,7 @@ export class BridgeBot {
       .filter(([, b]) => b.status !== 'claimed')
       .sort(([, a], [, b]) => (BigInt(a.height) < BigInt(b.height) ? -1 : 1));
     for (const [hash, b] of open) {
+      if (!this.claimPaid(hash, b, ctx)) { b.updatedAt = new Date(this.now()).toISOString(); continue; }
       try { await this.advanceClaim(hash, b, ctx); } catch (e) {
         b.lastError = e.message;
         this.log('warn', 'claim-error', { tx: hash, error: e.message });
@@ -233,6 +320,17 @@ export class BridgeBot {
       b.updatedAt = new Date(this.now()).toISOString();
       this.save();
     }
+  }
+
+  /** True when the burner paid the claim fee; otherwise marks awaiting-fee / unpaid-fee. */
+  claimPaid(hash, b, ctx) {
+    if (b.feePaid || !this.cfg.requireFees) return true;
+    const fee = expressFeeFor(b, this.state.expressFees, this.cfg.claimFeeFloorWei, this.cfg.feeWindowBlocks);
+    if (fee) { b.feePaid = fee.hash; this.log('info', 'claim-fee-paid', { tx: hash, fee: fee.hash }); return true; }
+    const status = ctx.height > BigInt(b.height) + this.cfg.feeWindowBlocks ? 'unpaid-fee' : 'awaiting-fee';
+    if (b.status !== status) this.log('info', 'claim-status', { tx: hash, from: b.status, to: status });
+    b.status = status;
+    return false;
   }
 
   async advanceClaim(hash, b, ctx) {
@@ -328,8 +426,9 @@ export class BridgeBot {
   /* ----------------------------------------------------------- 2. returns */
 
   async returns(ctx) {
-    await this.scanEth();
-    const open = Object.entries(this.state.returns).filter(([, r]) => r.status !== 'returned');
+    const latestEth = await this.scanEth();
+    const open = Object.entries(this.state.returns)
+      .filter(([h, r]) => r.status !== 'returned' && this.returnPaid(h, r, BigInt(latestEth ?? 0)));
     if (!open.length) return;
     const bridge = await this.io.molibra.get('/molibra/bridge');
     ctx.headers = new Map((bridge.headers ?? [])
@@ -362,14 +461,41 @@ export class BridgeBot {
         const h = lower(l.transactionHash);
         if (!this.state.returns[h]) {
           this.state.returns[h] = { blockNumber: BigInt(l.blockNumber).toString(), status: 'new',
+            from: '0x' + String(l.topics?.[1] ?? '').slice(-40).toLowerCase(),
             firstSeen: new Date(this.now()).toISOString() };
           this.log('info', 'return-found', { ethTx: h, block: BigInt(l.blockNumber).toString() });
         }
+      }
+      // bMOLI fees: Transfer(any -> fee address) in the same range.
+      const feeTopic = '0x' + EXPRESS_FEE_ADDRESS.slice(2).padStart(64, '0');
+      const feeLogs = await this.io.eth.logs('eth_getLogs', [{
+        address: BMOLI_CONTRACT, topics: [TRANSFER_TOPIC, null, feeTopic],
+        fromBlock: '0x' + next.toString(16), toBlock: '0x' + to.toString(16),
+      }]);
+      for (const l of feeLogs ?? []) {
+        if (l.removed || lower(l.address) !== BMOLI_CONTRACT) continue;
+        const h = lower(l.transactionHash);
+        this.state.ethFees[h] ??= { from: '0x' + String(l.topics?.[1] ?? '').slice(-40).toLowerCase(),
+          height: BigInt(l.blockNumber).toString(), value: BigInt(l.data ?? '0x0').toString() };
       }
       next = to + 1n;
       this.state.ethScan.next = next.toString();
       this.save();
     }
+    return latest;
+  }
+
+  /** True when the vault sender paid the return fee in bMOLI; otherwise awaiting-fee / unpaid-fee. */
+  returnPaid(hash, r, latestEth) {
+    if (r.feePaid || !this.cfg.requireFees) return true;
+    if (!r.from) return true;   // recorded before fees existed: grandfathered
+    const fee = expressFeeFor({ from: r.from, height: r.blockNumber }, this.state.ethFees,
+      this.cfg.returnFeeFloorWei, this.cfg.ethFeeWindowBlocks);
+    if (fee) { r.feePaid = fee.hash; this.log('info', 'return-fee-paid', { ethTx: hash, fee: fee.hash }); return true; }
+    const status = latestEth > BigInt(r.blockNumber) + this.cfg.ethFeeWindowBlocks ? 'unpaid-fee' : 'awaiting-fee';
+    if (r.status !== status) this.log('info', 'return-status', { ethTx: hash, from: r.status, to: status });
+    r.status = status;
+    return false;
   }
 
   async advanceReturn(hash, r, ctx) {

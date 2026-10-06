@@ -361,7 +361,8 @@ check('swap.html "Outras formas" links here', swap.includes('<li><a href="/molib
 check('pay.html "Comprar MOLI" links here', /id="buyCard"[\s\S]*?href="\/molibra\/cotacao"[\s\S]*?<\/ul>/.test(read('src/web/pay.html')));
 check('buy.html links here', buyHtml.includes('href="/molibra/cotacao"'));
 check('the front page lists it', read('src/web/index.html').includes('<a class="card" href="/molibra/cotacao">'));
-check('"Como comprar" links buy, return, pay and swap', ['/molibra/buy', '/molibra/return', '/molibra/pay', '/molibra/swap'].every((h) => page.includes(`<a href="${h}">`)));
+// The way back opens the one-click bridge (6 Oct 2026); /molibra/return stays for the operator.
+check('"Como comprar" links buy, the bridge back, pay and swap', ['/molibra/buy', '/molibra/ponte?dir=back', '/molibra/pay', '/molibra/swap'].every((h) => page.includes(`<a href="${h}">`)));
 check('⛔ no script from anywhere: not even this node\'s (the page needs none)', !/<script[^>]+src=/.test(page));
 check('⛔ no stylesheet, font or import from elsewhere', !/<link[^>]+rel="stylesheet"/.test(page) && !/@import|fonts\.googleapis|cdn/i.test(page));
 

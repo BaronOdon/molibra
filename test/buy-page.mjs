@@ -303,7 +303,8 @@ check('/molibra/buy is routed to buy.html', /path === '\/molibra\/buy'\)[\s\S]{0
 check('the exchange page links here', readFileSync(join(ROOT, 'src/web/swap.html'), 'utf8').includes('href="/molibra/buy"'));
 check('the point-of-sale page links here', readFileSync(join(ROOT, 'src/web/pay.html'), 'utf8').includes('href="/molibra/buy"'));
 const scripts = [...page.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
-check('⛔ no script from anywhere but this node', scripts.length === 1 && scripts[0] === '/molibra/mobilewallet.js', scripts.join(', '));
+// bridgeflow.js (6 Oct 2026): the shared bMOLI -> MOLI flow, served by this node too.
+check('⛔ no script from anywhere but this node', scripts.length === 2 && scripts[0] === '/molibra/mobilewallet.js' && scripts[1] === '/molibra/bridgeflow.js', scripts.join(', '));
 check('⛔ no stylesheet or font from elsewhere', !/<link[^>]+rel="stylesheet"/.test(page) && !/@import/.test(page));
 check('  reads go to the same public Ethereum node as return.html',
   page.includes("const ETH_RPC = 'https://ethereum-rpc.publicnode.com';")
