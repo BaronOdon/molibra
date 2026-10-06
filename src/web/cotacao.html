@@ -325,6 +325,9 @@
   <p class="explain" id="mktNote" data-i18n="mktMeme">As memecoins são memes não oficiais, sem vínculo com as pessoas ou marcas citadas e sem nenhuma promessa de valor.</p>
 </section>
 
+<!-- One chart card per registry market with a pool, built from /molibra/markets.json. -->
+<div id="memeCharts"></div>
+
 <!-- ======================================================== HOW TO BUY -->
 <section class="card">
   <h2 data-i18n="howTitle">Como comprar</h2>
@@ -1472,9 +1475,69 @@ async function readRegistry() {
   REGM = await Promise.all(live.map(async (m) => {
     try {
       const w = words(await molibraCall(m.pool, SEL.reserves));
-      return { symbol: m.symbol, kind: m.kind, rMoli: w[0], rTok: w[1] };
-    } catch (e) { return { symbol: m.symbol, kind: m.kind, rMoli: 0n, rTok: 0n }; }
+      return { symbol: m.symbol, kind: m.kind, pool: m.pool.toLowerCase(), rMoli: w[0], rTok: w[1] };
+    } catch (e) { return { symbol: m.symbol, kind: m.kind, pool: m.pool.toLowerCase(), rMoli: 0n, rTok: 0n }; }
   }));
+}
+
+/*
+ * ⭐ A price chart per memecoin: the pool's own history (/molibra/pool-history:
+ * the seed, then every curve purchase arriving as liquidity, then trades), its
+ * reserves after each step giving MOLI per coin. The MOLI/WSRO pool keeps its
+ * own card above, so only the memes get one here.
+ */
+const MEME_H = {};
+const memeKey = (m) => 'mk-' + m.symbol.toLowerCase();
+function memeCards() {
+  const host = $('memeCharts'); if (!host) return [];
+  const memes = REGM.filter((m) => m.kind === 'meme' && m.rTok > 0n);
+  for (const m of memes) {
+    const k = memeKey(m);
+    if ($('c-' + k)) continue;
+    const sec = document.createElement('section'); sec.className = 'card'; sec.id = 'c-' + k;
+    const h2 = document.createElement('h2'); h2.textContent = (LANG === 'pt' ? 'MOLI por ' : 'MOLI per ') + m.symbol; sec.appendChild(h2);
+    for (const [cls, id] of [['hero', 'v-' + k], ['sub2', 's-' + k], ['chart', 'ch-' + k], ['src', 'src-' + k]]) {
+      const d = document.createElement(cls === 'src' ? 'p' : 'div'); d.className = cls; d.id = id; sec.appendChild(d);
+    }
+    const det = document.createElement('details'); det.className = 'tbl';
+    const sum = document.createElement('summary'); sum.textContent = t('tableShow'); det.appendChild(sum);
+    const wrap = document.createElement('div'); wrap.className = 'tbl-wrap';
+    const tb = document.createElement('table'); tb.id = 'tb-' + k; wrap.appendChild(tb); det.appendChild(wrap); sec.appendChild(det);
+    host.appendChild(sec);
+  }
+  return memes;
+}
+function readMemeHistories() {
+  return Promise.all(REGM.filter((m) => m.kind === 'meme').map((m) =>
+    fetch(NODE + '/molibra/pool-history?pool=' + m.pool)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((h) => { MEME_H[m.pool] = h; }, () => { MEME_H[m.pool] = null; })
+      .then(() => renderMemeCharts())));
+}
+function renderMemeCharts() {
+  const memes = memeCards();
+  let moliUsd = null;
+  if (M.eth && M.v4) moliUsd = (Number(M.eth.answer) / 1e8) / (Number(M.v4.sqrtP) ** 2 / 2 ** 192);
+  const brlPerUsd = M.brl ? 1e8 / Number(M.brl.answer) : null;
+  const loc = LANG === 'pt' ? 'pt-BR' : 'en-US';
+  for (const m of memes) {
+    const k = memeKey(m);
+    const now = ratioNum(m.rMoli, m.rTok);
+    setHero('v-' + k, now.toLocaleString(loc, { maximumSignificantDigits: 6 }), 'MOLI');
+    const usd = moliUsd ? now * moliUsd : null;
+    setText('s-' + k, usd === null ? '' : '1 ' + m.symbol + ' ≈ US$ ' + usd.toLocaleString(loc, { maximumSignificantDigits: 4 })
+      + (brlPerUsd ? ' ≈ R$ ' + (usd * brlPerUsd).toLocaleString(loc, { maximumSignificantDigits: 4 }) : '')
+      + ' · ' + (LANG === 'pt' ? '1 MOLI = ' : '1 MOLI = ') + Math.round(1 / now).toLocaleString(loc) + ' ' + m.symbol);
+    const h = MEME_H[m.pool];
+    const evs = (h && h.events) || [];
+    const hist = evs.map((e) => ({ t: e.time, v: ratioNum(BigInt(e.reserveMoli), BigInt(e.reserveToken)) })).filter((p) => p.t > 0);
+    const pts = series(hist, now);
+    drawChart(k, pts, 'MOLI'); drawTable(k, pts, 'MOLI');
+    let s = t('srcPool', 'Molibra MOLI/' + m.symbol + ', reserves()', shortAddr(m.pool), fmtClock(readAt));
+    if (h) s += ' ' + t('moliEvents', evs.filter((e) => e.kind === 'swap').length, evs.filter((e) => e.kind === 'mint').length, evs.length ? fmtTime(evs[0].time, true) : '—');
+    else if (h === null) s += ' ' + t('histMissing');
+    setText('src-' + k, s);
+  }
 }
 function renderRegistry() {
   const tb = $('tb-markets'); if (!tb) return;
@@ -1495,7 +1558,7 @@ function renderRegistry() {
     const tr = document.createElement('tr');
     for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
     const td = document.createElement('td'); const a = document.createElement('a');
-    a.href = '/molibra/swap?from=' + encodeURIComponent(m.symbol); a.textContent = t('mktTrade'); td.appendChild(a); tr.appendChild(td);
+    a.href = '/molibra/swap?' + (m.kind === 'meme' ? 'to=' : 'from=') + encodeURIComponent(m.symbol); a.textContent = t('mktTrade'); td.appendChild(a); tr.appendChild(td);
     tb.appendChild(tr);
   }
 }
@@ -1504,6 +1567,8 @@ async function refresh() {
   await readMarkets();
   await readRegistry().catch(() => {});
   renderAll();
+  renderMemeCharts();
+  readMemeHistories().catch(() => {});
   await compute().catch(() => {});
 }
 

@@ -276,6 +276,10 @@ check('the wallet is not handed an explorer URL that 404s',
   sendsExplorer === claimsEip3091 ? (sendsExplorer ? 'both on' : 'both off')
     : 'connect.html and the chain listing disagree about whether Moliscan speaks EIP-3091');
 
+// ⛔ HEAD used to fall through to JSON-RPC and answer "application/json" for a
+// token logo, so a wallet probing the image's type was told it was not one.
+check('HEAD is served like GET (a logo probed with HEAD answers image/png)',
+  rpc.includes("req.method === 'GET' || req.method === 'HEAD'") && rpc.includes("'GET, HEAD, POST, OPTIONS'"));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

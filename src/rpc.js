@@ -415,14 +415,17 @@ export function startRpcServer(node, { host, port }) {
   const server = createServer(async (req, res) => {
     // Browser wallets are cross-origin by nature.
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') {
       res.writeHead(204).end();
       return;
     }
 
-    if (req.method === 'GET') {
+    // ⛔ HEAD is a GET without the body (Node drops the body itself). It used to
+    // fall through to JSON-RPC and answer "application/json" for a logo, so a
+    // wallet probing a token image's type was told it was not an image.
+    if (req.method === 'GET' || req.method === 'HEAD') {
       // Cost is per ROUTE: a state proof rebuilds the whole Merkle tree and is
       // not the same unit of work as reading a balance.
       // ⛔ costOfPath normalises exactly as the router does: /molibra/./blocks
