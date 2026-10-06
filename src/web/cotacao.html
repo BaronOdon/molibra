@@ -1473,11 +1473,34 @@ async function readRegistry() {
   const reg = await (await fetch(NODE + '/molibra/markets.json', { cache: 'no-store' })).json();
   const live = (reg.markets || []).filter((m) => /^0x[0-9a-fA-F]{40}$/.test(m.token || '') && /^0x[0-9a-fA-F]{40}$/.test(m.pool || ''));
   REGM = await Promise.all(live.map(async (m) => {
+    const out = { symbol: m.symbol, kind: m.kind, pool: m.pool.toLowerCase(), rMoli: 0n, rTok: 0n, curve: null };
     try {
       const w = words(await molibraCall(m.pool, SEL.reserves));
-      return { symbol: m.symbol, kind: m.kind, pool: m.pool.toLowerCase(), rMoli: w[0], rTok: w[1] };
-    } catch (e) { return { symbol: m.symbol, kind: m.kind, pool: m.pool.toLowerCase(), rMoli: 0n, rTok: 0n }; }
+      out.rMoli = w[0]; out.rTok = w[1];
+    } catch (e) { /* the row shows no pool */ }
+    const c = m.meme && m.meme.curve;
+    if (/^0x[0-9a-fA-F]{40}$/.test(c || '')) {
+      try {
+        // MoliSaleCurve: startPrice() p0, supplyForSale() S, sold() x - all MOLI-wei / token-wei.
+        const [p0, S, x] = await Promise.all([CURVE_SEL.startPrice, CURVE_SEL.supplyForSale, CURVE_SEL.sold]
+          .map((s) => molibraCall(c, s).then((r) => words(r)[0])));
+        out.curve = { addr: c.toLowerCase(), p0: p0, S: S, sold: x };
+      } catch (e) { /* the card falls back to the pool price */ }
+    }
+    return out;
   }));
+}
+const CURVE_SEL = { startPrice: '0xf1a9af89', supplyForSale: '0xc2e18c05', sold: '0x02c7e7af' };
+
+/**
+ * The curve's price after `moliIn` MOLI-wei has been paid into it, as a float
+ * (MOLI per coin). Linear curve p(x) = p0 (1 + 4x/S); paid C = p0 (x + 2x^2/S),
+ * so p = p0 sqrt(1 + 8C / (p0 S)). Every MOLI paid becomes pool liquidity, so C
+ * is the sum of the curve's own deposits in the pool history.
+ */
+function curvePriceAfter(cv, moliIn) {
+  const p0 = Number(cv.p0) / 1e18; const S = Number(cv.S) / 1e18; const C = Number(moliIn) / 1e18;
+  return p0 * Math.sqrt(1 + 8 * C / (p0 * S));
 }
 
 /*
@@ -1522,18 +1545,38 @@ function renderMemeCharts() {
   const loc = LANG === 'pt' ? 'pt-BR' : 'en-US';
   for (const m of memes) {
     const k = memeKey(m);
-    const now = ratioNum(m.rMoli, m.rTok);
-    setHero('v-' + k, now.toLocaleString(loc, { maximumSignificantDigits: 6 }), 'MOLI');
+    const h = MEME_H[m.pool];
+    const evs = (h && h.events) || [];
+    // While the curve still sells, ITS price is what a buyer pays and what moves;
+    // the pool takes each purchase as liquidity at its own ratio and stays flat.
+    const cv = m.curve && m.curve.sold < m.curve.S ? m.curve : null;
+    const pricePoint = (p) => (p * 1).toLocaleString(loc, { maximumSignificantDigits: 6 });
+    let now; let hist;
+    if (cv) {
+      now = (Number(cv.p0) / 1e18) * (1 + 4 * Number(cv.sold) / Number(cv.S));
+      let paid = 0n;
+      hist = [];
+      for (const e of evs) {
+        if (!(e.time > 0)) continue;
+        if (e.kind === 'mint' && String(e.by).toLowerCase() === cv.addr) paid += BigInt(e.moli);
+        hist.push({ t: e.time, v: curvePriceAfter(cv, paid) });
+      }
+    } else {
+      now = ratioNum(m.rMoli, m.rTok);
+      hist = evs.map((e) => ({ t: e.time, v: ratioNum(BigInt(e.reserveMoli), BigInt(e.reserveToken)) })).filter((p) => p.t > 0);
+    }
+    setHero('v-' + k, pricePoint(now), 'MOLI');
     const usd = moliUsd ? now * moliUsd : null;
     setText('s-' + k, usd === null ? '' : '1 ' + m.symbol + ' ≈ US$ ' + usd.toLocaleString(loc, { maximumSignificantDigits: 4 })
       + (brlPerUsd ? ' ≈ R$ ' + (usd * brlPerUsd).toLocaleString(loc, { maximumSignificantDigits: 4 }) : '')
       + ' · ' + (LANG === 'pt' ? '1 MOLI = ' : '1 MOLI = ') + Math.round(1 / now).toLocaleString(loc) + ' ' + m.symbol);
-    const h = MEME_H[m.pool];
-    const evs = (h && h.events) || [];
-    const hist = evs.map((e) => ({ t: e.time, v: ratioNum(BigInt(e.reserveMoli), BigInt(e.reserveToken)) })).filter((p) => p.t > 0);
     const pts = series(hist, now);
     drawChart(k, pts, 'MOLI'); drawTable(k, pts, 'MOLI');
-    let s = t('srcPool', 'Molibra MOLI/' + m.symbol + ', reserves()', shortAddr(m.pool), fmtClock(readAt));
+    let s = cv
+      ? (LANG === 'pt'
+        ? 'Preço de compra na curva de venda (' + shortAddr(cv.addr) + '): ' + (Number(cv.sold * 10000n / cv.S) / 100).toLocaleString(loc) + '% vendido, sobe até 5× a abertura. Histórico das compras pelo pool (' + shortAddr(m.pool) + '), lido em ' + fmtClock(readAt) + '.'
+        : 'Buy price on the sale curve (' + shortAddr(cv.addr) + '): ' + (Number(cv.sold * 10000n / cv.S) / 100).toLocaleString(loc) + '% sold, rising to 5× the opening. Purchase history from the pool (' + shortAddr(m.pool) + '), read at ' + fmtClock(readAt) + '.')
+      : t('srcPool', 'Molibra MOLI/' + m.symbol + ', reserves()', shortAddr(m.pool), fmtClock(readAt));
     if (h) s += ' ' + t('moliEvents', evs.filter((e) => e.kind === 'swap').length, evs.filter((e) => e.kind === 'mint').length, evs.length ? fmtTime(evs[0].time, true) : '—');
     else if (h === null) s += ' ' + t('histMissing');
     setText('src-' + k, s);
