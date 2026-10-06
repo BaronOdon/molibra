@@ -1243,6 +1243,21 @@ async function handleAudit(node, req, res) {
     return;
   }
 
+  // The fast (inventory) bridge: the page, and the limits it shows - the same
+  // numbers the bridge bot enforces (bots/fastbridge-core.mjs FAST_DEFAULTS).
+  if (path === '/molibra/rapido') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'rapido.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+  if (path === '/molibra/fastbridge.json') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'fastbridge.json');
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/bridgedmoli') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridgedmoli.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
