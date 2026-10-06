@@ -256,7 +256,8 @@
       <div id="amountOut" class="amt out empty">0</div>
       <select id="toSel" class="tok" aria-label="to"></select>
     </div>
-    <div class="box-bot"><span><span data-i18n="balance">Balance</span>: <span id="toBal">—</span></span></div>
+    <div class="box-bot"><span><span data-i18n="balance">Balance</span>: <span id="toBal">—</span></span>
+      <button class="max" id="watchBtn" type="button" hidden></button></div>
   </div>
 
   <div class="details" id="details" hidden>
@@ -484,6 +485,7 @@ const T = {
     slipHelp: 'Se o preço mudar mais do que isso antes da confirmação, a troca é cancelada automaticamente.',
     sent: 'Transação enviada. Aguardando confirmação…',
     swapDone: 'Troca concluída! Você trocou {0} por cerca de {1}.',
+    watch: '+ {0} na carteira', watched: '{0} adicionado à carteira.',
     approved: '{0} aprovado. Agora é só tocar no botão de novo.',
     needApprove: 'Primeiro é preciso aprovar {0}.',
     rejected: 'Cancelado na carteira. Nada foi enviado.',
@@ -552,6 +554,7 @@ const T = {
     slipHelp: 'If the price moves more than this before your trade is confirmed, it is cancelled automatically.',
     sent: 'Transaction sent. Waiting for confirmation…',
     swapDone: 'Swap complete! You swapped {0} for about {1}.',
+    watch: '+ {0} to wallet', watched: '{0} added to your wallet.',
     approved: '{0} approved. Now tap the button again.',
     needApprove: '{0} needs to be approved first.',
     rejected: 'Cancelled in the wallet. Nothing was sent.',
@@ -1082,6 +1085,8 @@ function renderSwap() {
   $('fromBal').textContent = balText(from);
   $('toBal').textContent = balText(to);
   $('maxBtn').hidden = balOf(from) === null;
+  $('watchBtn').hidden = to === MOLI || !to;
+  if (to && to !== MOLI) $('watchBtn').textContent = t('watch', symbolOf(to));
   const slipBp = slippageBp();
   $('slipShow').textContent = slipBp === null ? '—' : dec(slipStr.replace(',', '.')) + '%';
   for (const b of document.querySelectorAll('#slipSeg button')) {
@@ -1265,6 +1270,7 @@ async function doSwap() {
     lastPlan = null;
     await refresh();
     showMsg('swapMsg', 'ok', t('swapDone', paidC, fmt(fresh) + ' ' + symbolOf(p.to)), h);
+    offerWatchOnce(p.to);
     return;
   }
 
@@ -1289,6 +1295,7 @@ async function doSwap() {
   lastPlan = null;
   await refresh();
   showMsg('swapMsg', 'ok', t('swapDone', paid, got), h);
+  offerWatchOnce(p.to);
 }
 
 /* ========================================================== liquidity */
@@ -1598,6 +1605,40 @@ $('flip').onclick = () => {
   if (lastPlan && lastPlan.out > 0n) $('amountIn').value = fromWei(lastPlan.out, 18);
   requote().catch((e) => showErr('swapMsg', e));
 };
+/*
+ * Add a coin to the wallet. MetaMask detects tokens on its own networks only,
+ * never on a custom one like Molibra, so without this a buyer sees nothing
+ * after the swap. After a purchase it is offered once per coin per browser.
+ */
+const LOGO = new Set(['caramelo', 'bolso', 'fazol', 'wsro', 'bmoli']);
+const WATCHED = 'molibra.watched';
+async function watchToken(token, msgId) {
+  if (!token || token === MOLI) return;
+  // ⛔ A wallet files a watched token under the network it is on now.
+  await requireMolibra();
+  const sym = symbolOf(token);
+  const dec = Number(toBig(await call(token, SEL.decimals).catch(() => '0x12')) || 18n);
+  const options = { address: token, symbol: sym.slice(0, 11), decimals: dec };
+  if (LOGO.has(sym.toLowerCase())) options.image = location.origin + '/molibra/tokens/' + sym.toLowerCase() + '-200.png';
+  const ok = await eth().request({ method: 'wallet_watchAsset', params: { type: 'ERC20', options: options } });
+  remember(token);
+  if (ok && msgId) showMsg(msgId, 'ok', t('watched', sym));
+}
+function remember(token) {
+  try {
+    const seen = JSON.parse(localStorage.getItem(WATCHED) || '[]');
+    if (!seen.includes(token)) { seen.push(token); localStorage.setItem(WATCHED, JSON.stringify(seen)); }
+  } catch (e) {}
+}
+async function offerWatchOnce(token) {
+  try {
+    const seen = JSON.parse(localStorage.getItem(WATCHED) || '[]');
+    if (seen.includes(token)) return;
+  } catch (e) {}
+  // A refusal counts as an answer: the button stays for whoever changes their mind.
+  try { await watchToken(token, null); } catch (e) { remember(token); }
+}
+$('watchBtn').onclick = () => { watchToken($('toSel').value, 'swapMsg').catch((e) => showErr('swapMsg', e)); };
 $('maxBtn').onclick = () => {
   const from = $('fromSel').value;
   let b = balOf(from);
