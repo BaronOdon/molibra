@@ -5,7 +5,7 @@
  */
 import {
   BridgeBot, expressFeeFor, EXPRESS_FEE_ADDRESS, EXPRESS_FLOOR_WEI, EXPRESS_WINDOW_BLOCKS,
-  EXPRESS_MIN_INTERVAL_MS, ANCHOR_MIN_DEPTH,
+  EXPRESS_MIN_INTERVAL_MS, ANCHOR_MIN_DEPTH, PUBLISHER_DEPTH, EXPRESS_RETRY_MS, EXPRESS_MAX_ATTEMPTS,
 } from '../bots/bridge-core.mjs';
 
 let pass = 0, fail = 0;
@@ -71,11 +71,28 @@ const clock = { t: Date.parse('2026-10-06T20:00:00Z') };
   await bot.express({ height: 1010n + ANCHOR_MIN_DEPTH });
   check('  and fires once the interval has passed', fired.length === 2 && state.burns.b2.express === 'fired');
 
-  // A restart: a new bot on the same state must not fire again for either burn.
-  clock.t += 2 * EXPRESS_MIN_INTERVAL_MS;
+  // A restart inside the retry window: a new bot on the same state does not fire again.
+  clock.t += EXPRESS_MIN_INTERVAL_MS;
   const again = makeBot({ state, clock });
   await again.bot.express({ height: 2000n });
-  check('⛔ after a restart, nothing re-fires for a burn already served', again.fired.length === 0);
+  check('⛔ after a restart, nothing re-fires inside the retry window', again.fired.length === 0);
+
+  // ⛔ Live 6 Oct: a fired run anchored tip-200 and missed the burn. Still
+  // 'awaiting-anchor' after EXPRESS_RETRY_MS means Ethereum did not anchor it: re-fire.
+  state.burns.b2.status = 'challenge-window';            // b2 WAS anchored by its run
+  clock.t += EXPRESS_RETRY_MS;
+  await again.bot.express({ height: 2000n });
+  check('a burn still unanchored after the retry window is re-fired (attempt 2)',
+    again.fired.length === 1 && state.burns.b1.expressAttempts === 2
+    && again.logs.some((l) => l.event === 'express-not-anchored' && l.tx === 'b1'));
+  check('  and a burn its run DID anchor is never re-fired', state.burns.b2.expressAttempts === undefined || state.burns.b2.expressAttempts === 1);
+  clock.t += EXPRESS_RETRY_MS; await again.bot.express({ height: 2000n });
+  clock.t += EXPRESS_RETRY_MS; await again.bot.express({ height: 2000n });
+  check(`⛔ at most ${EXPRESS_MAX_ATTEMPTS} attempts per burn, then 'gave-up' (logged)`,
+    again.fired.length === 2 && state.burns.b1.expressAttempts === EXPRESS_MAX_ATTEMPTS
+    && state.burns.b1.express === 'gave-up' && again.logs.some((l) => l.event === 'express-gave-up'));
+  check(`fire depth = the publisher's rule: burn < tip - ${PUBLISHER_DEPTH}, plus margin`,
+    ANCHOR_MIN_DEPTH > PUBLISHER_DEPTH && ANCHOR_MIN_DEPTH === PUBLISHER_DEPTH + 6n);
 }
 {
   const state = freshState();

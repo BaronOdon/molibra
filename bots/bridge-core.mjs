@@ -51,15 +51,25 @@ export const MOLIBRA_CHAIN_ID = 20226n;
  * immutable, so express means ~24 h end to end instead of up to ~48 h.
  *
  * ⛔ The floor is conservative and fixed here; the page quotes the live price.
- * ⛔ anchor-publisher.mjs anchors a burn's block only once it is at least
- *    MAX_REORG_DEPTH + 1 deep (MIN_DEPTH there), so the trigger waits for that
- *    depth - fired earlier, the run would anchor below the burn and miss it.
+ * ⛔⛔ anchor-publisher.mjs takes a burn ahead of its routine height only when
+ *    burn < tip - DEPTH, DEPTH = MAX_REORG_DEPTH + 72 (= 200). Live, 6 Oct: the
+ *    trigger fired at MAX_REORG_DEPTH + 1 (129) deep and the publisher anchored
+ *    its routine tip-200 instead ("a burn waits at 153653, still shallow"), so a
+ *    PAID express run missed the burn. The trigger now waits for THAT rule plus a
+ *    margin, and re-fires (max EXPRESS_MAX_ATTEMPTS, EXPRESS_RETRY_MS apart) while
+ *    Ethereum still reports the burn's height unanchored.
  */
 export const EXPRESS_FEE_ADDRESS = '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a';
 export const EXPRESS_FLOOR_WEI = 10n * 10n ** 18n;
 export const EXPRESS_WINDOW_BLOCKS = 100n;
 export const EXPRESS_MIN_INTERVAL_MS = 10 * 60 * 1000;
-export const ANCHOR_MIN_DEPTH = BigInt(MAX_REORG_DEPTH) + 1n;
+/** anchor-publisher.mjs's DEPTH (MAX_REORG_DEPTH + 72), mirrored. */
+export const PUBLISHER_DEPTH = BigInt(MAX_REORG_DEPTH) + 72n;
+export const EXPRESS_DEPTH_MARGIN = 5n;
+/** Fire only when burn < tip - PUBLISHER_DEPTH holds with margin. */
+export const ANCHOR_MIN_DEPTH = PUBLISHER_DEPTH + 1n + EXPRESS_DEPTH_MARGIN;
+export const EXPRESS_RETRY_MS = 30 * 60 * 1000;
+export const EXPRESS_MAX_ATTEMPTS = 3;
 
 /** The fee transfer that buys an express anchor for `burn`, or null. Pure. */
 export function expressFeeFor(burn, fees, minWei = EXPRESS_FLOOR_WEI, windowBlocks = EXPRESS_WINDOW_BLOCKS) {
@@ -277,8 +287,20 @@ export class BridgeBot {
    */
   async express(ctx) {
     for (const [hash, b] of Object.entries(this.state.burns)) {
-      if (b.expressFiredAt || b.status === 'claimed') continue;
+      if (b.status === 'claimed') continue;
       if (b.status !== 'awaiting-anchor' && b.status !== 'new') continue;
+      // Already fired: the claims leg re-reads status(height) on Ethereum every
+      // tick, so a burn still 'awaiting-anchor' here was NOT anchored by that run.
+      if (b.expressFiredAt) {
+        const attempts = b.expressAttempts ?? 1;
+        if (attempts >= EXPRESS_MAX_ATTEMPTS) {
+          if (b.express !== 'gave-up') this.log('warn', 'express-gave-up', { tx: hash, attempts, height: b.height });
+          b.express = 'gave-up';
+          continue;
+        }
+        if (this.now() - Date.parse(b.expressFiredAt) < EXPRESS_RETRY_MS) continue;
+        this.log('warn', 'express-not-anchored', { tx: hash, attempts, height: b.height, note: 'refiring' });
+      }
       const fee = expressFeeFor(b, this.state.expressFees,
         this.cfg.claimFeeFloorWei + this.cfg.expressFeeFloorWei, this.cfg.feeWindowBlocks);
       if (!fee) continue;
@@ -299,8 +321,9 @@ export class BridgeBot {
       await this.io.triggerAnchor();
       const at = new Date(this.now()).toISOString();
       this.state.lastExpressTriggerAt = at;
-      Object.assign(b, { expressFiredAt: at, express: 'fired', expressFee: fee.hash });
-      this.log('info', 'express-anchor-fired', { tx: hash, fee: fee.hash, height: b.height });
+      const attempts = b.expressFiredAt ? (b.expressAttempts ?? 1) + 1 : 1;
+      Object.assign(b, { expressFiredAt: at, expressAttempts: attempts, express: 'fired', expressFee: fee.hash });
+      this.log('info', 'express-anchor-fired', { tx: hash, fee: fee.hash, height: b.height, attempt: attempts });
       return;   // one per tick: the publisher anchors the oldest unanchored burn first
     }
   }
