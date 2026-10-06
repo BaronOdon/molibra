@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
+<title>MOLIBRA · Ponte rápida / Fast bridge</title>
+<!--
+  The FAST bridge: an inventory wallet holds MOLI on Molibra and bMOLI on
+  Ethereum and swaps one for the other in minutes (bots/fastbridge-core.mjs).
+  One plain transfer per direction, signed in the reader's own wallet; the
+  page then waits for the payout and adds bMOLI to the wallet when it lands.
+  ⛔ Custodial for the minutes in flight, bounded by the limits in
+  /molibra/fastbridge.json. The user pays every cost: the fee is the larger of
+  0.5%, twice the payout's live gas, and 1 MOLI. Text goes in by textContent only.
+-->
+<style>
+  :root{--bg:#07070a;--panel:#111116;--line:#24242c;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--ok:#4ade80;--bad:#ff5c5c}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  main{max-width:520px;margin:0 auto;padding:20px 16px 60px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .brand{font-weight:800;letter-spacing:.18em;color:var(--gold)} .lang button{background:none;border:1px solid var(--line);color:var(--dim);border-radius:8px;padding:3px 8px;cursor:pointer}
+  .lang button.on{color:var(--bg);background:var(--gold);border-color:var(--gold)}
+  h1{font-size:20px;margin:6px 0 4px} .sub{color:var(--dim);margin:0 0 14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .seg{display:flex;gap:6px;margin-bottom:12px} .seg button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--ink);cursor:pointer;font-weight:600}
+  .seg button.on{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+  label{display:block;color:var(--dim);font-size:13px;margin:6px 0 4px}
+  .row{display:flex;gap:8px} input{flex:1;min-width:0;background:#0b0b0f;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:12px;font-size:18px}
+  .max{background:none;border:1px solid var(--gold);color:var(--gold);border-radius:10px;padding:0 12px;cursor:pointer}
+  dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:12px 0 0;font-size:14px} dt{color:var(--dim)} dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+  .go{width:100%;margin-top:14px;padding:14px;border:0;border-radius:12px;background:var(--gold);color:var(--bg);font-weight:800;font-size:16px;cursor:pointer}
+  .go:disabled{opacity:.45;cursor:not-allowed}
+  .msg{margin-top:12px;padding:10px 12px;border-radius:10px;background:#16161d;font-size:14px;white-space:pre-line} .msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+  ol.steps{margin:10px 0 0;padding-left:20px;font-size:14px;color:var(--dim)} ol.steps li.done{color:var(--ok)} ol.steps li.now{color:var(--ink)}
+  .note{color:var(--dim);font-size:13px} a{color:var(--gold)}
+</style>
+</head>
+<body>
+<main>
+<header><span class="brand">MOLIBRA</span><span class="lang"><button id="lpt" class="on">PT</button> <button id="len">EN</button></span></header>
+<h1 data-t="title">Ponte rápida · minutos</h1>
+<p class="sub" data-t="sub">MOLI ⇄ bMOLI em minutos, com um clique e uma assinatura.</p>
+
+<div class="card">
+  <div class="seg"><button id="dM2B" class="on">MOLI → bMOLI</button><button id="dB2M">bMOLI → MOLI</button></div>
+  <label for="amt" data-t="amount">Quanto enviar</label>
+  <div class="row"><input id="amt" inputmode="decimal" placeholder="0" autocomplete="off"><button class="max" id="maxBtn">MAX</button></div>
+  <dl>
+    <dt data-t="youGet">Você recebe</dt><dd id="out">—</dd>
+    <dt data-t="fee">Taxa (inclui o gás)</dt><dd id="fee">—</dd>
+    <dt data-t="avail">Disponível na ponte</dt><dd id="avail">—</dd>
+    <dt data-t="limits">Limites</dt><dd id="lim">—</dd>
+    <dt data-t="eta">Tempo</dt><dd id="eta">—</dd>
+    <dt data-t="bal">Seu saldo</dt><dd id="bal">—</dd>
+  </dl>
+  <button class="go" id="go" disabled>…</button>
+  <ol class="steps" id="steps" hidden></ol>
+  <div class="msg" id="msg" hidden></div>
+</div>
+
+<div class="card note">
+  <p data-t="how1">Como funciona: uma carteira de estoque guarda MOLI na Molibra e bMOLI na Ethereum. Você envia de um lado e recebe do outro no mesmo endereço, em minutos.</p>
+  <p data-t="how2">⛔ Envie de uma carteira cuja chave é sua (MetaMask, Trust…), nunca de uma corretora ou contrato: o pagamento vai para o endereço que enviou.</p>
+  <p data-t="how3">Acima dos limites ou do estoque disponível, a ponte rápida não paga automaticamente: use a ponte normal (24 h, sem custódia) em <a href="/molibra/bridgedmoli">/molibra/bridgedmoli</a> e <a href="/molibra/return">/molibra/return</a>.</p>
+</div>
+</main>
+
+<script src="/molibra/mobilewallet.js"></script>
+<script>
+'use strict';
+const NODE = location.origin;
+const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
+const MOLIBRA_CHAIN = '0x4f02', ETH_CHAIN = '0x1';
+const WEI = 10n ** 18n;
+const T = {
+  pt: { title: 'Ponte rápida · minutos', sub: 'MOLI ⇄ bMOLI em minutos, com um clique e uma assinatura.', amount: 'Quanto enviar',
+    youGet: 'Você recebe', fee: 'Taxa (inclui o gás)', avail: 'Disponível na ponte', limits: 'Limites', eta: 'Tempo', bal: 'Seu saldo',
+    goM2B: 'Enviar MOLI e receber bMOLI', goB2M: 'Enviar bMOLI e receber MOLI', connect: 'Conectar carteira',
+    etaM2B: '~5–15 min (12 blocos na Molibra)', etaB2M: '~5–10 min (3 blocos na Ethereum)',
+    limText: 'até {0} por envio · {1}/hora', tooBig: 'Acima do limite de {0} por envio: use a ponte normal.',
+    noStock: 'O estoque da ponte não cobre esse valor agora: use a ponte normal ou um valor menor.', belowFee: 'Valor menor que a taxa.',
+    s1: 'Assinar o envio na carteira', s2: 'Confirmações', s3: 'Pagamento da ponte', s4: 'Adicionar bMOLI à carteira',
+    sent: 'Enviado. Aguardando a ponte…', done: 'Pronto: {0} chegou na sua carteira.', cancelled: 'Cancelado na carteira; nada foi enviado.',
+    how1: 'Como funciona: uma carteira de estoque guarda MOLI na Molibra e bMOLI na Ethereum. Você envia de um lado e recebe do outro no mesmo endereço, em minutos.',
+    how2: '⛔ Envie de uma carteira cuja chave é sua (MetaMask, Trust…), nunca de uma corretora ou contrato: o pagamento vai para o endereço que enviou.',
+    how3: 'Acima dos limites ou do estoque disponível, a ponte rápida não paga automaticamente: use a ponte normal (24 h, sem custódia).' },
+  en: { title: 'Fast bridge · minutes', sub: 'MOLI ⇄ bMOLI in minutes, one click and one signature.', amount: 'Amount to send',
+    youGet: 'You receive', fee: 'Fee (includes gas)', avail: 'Available in the bridge', limits: 'Limits', eta: 'Time', bal: 'Your balance',
+    goM2B: 'Send MOLI, receive bMOLI', goB2M: 'Send bMOLI, receive MOLI', connect: 'Connect wallet',
+    etaM2B: '~5–15 min (12 Molibra blocks)', etaB2M: '~5–10 min (3 Ethereum blocks)',
+    limText: 'up to {0} per transfer · {1}/hour', tooBig: 'Above the {0} per-transfer limit: use the normal bridge.',
+    noStock: 'The bridge inventory cannot cover this now: use the normal bridge or a smaller amount.', belowFee: 'Smaller than the fee.',
+    s1: 'Sign the transfer in your wallet', s2: 'Confirmations', s3: 'Bridge payout', s4: 'Add bMOLI to your wallet',
+    sent: 'Sent. Waiting for the bridge…', done: 'Done: {0} arrived in your wallet.', cancelled: 'Cancelled in the wallet; nothing was sent.',
+    how1: 'How it works: an inventory wallet holds MOLI on Molibra and bMOLI on Ethereum. You send on one side and receive on the other, same address, in minutes.',
+    how2: '⛔ Send from a wallet whose key you hold (MetaMask, Trust…), never from an exchange or a contract: the payout goes to the sending address.',
+    how3: 'Above the limits or the available inventory the fast bridge does not pay automatically: use the normal bridge (24 h, non-custodial).' },
+};
+let LANG = 'pt';
+const t = (k, ...a) => String(T[LANG][k] ?? k).replace(/\{(\d)\}/g, (_, i) => a[i]);
+const $ = (id) => document.getElementById(id);
+let CFG = null, dir = 'm2b', account = null, gas = null, inv = { moli: null, bmoli: null }, mine = { moli: null, bmoli: null };
+
+async function rpcAt(url, method, params) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json(); if (j.error) throw new Error(j.error.message); return j.result;
+}
+const mrpc = (m, p) => rpcAt(NODE + '/molibra', m, p);
+const erpc = (m, p) => rpcAt(ETH_RPC, m, p);
+const pad = (a) => a.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+const toWei = (s) => { const v = String(s).trim().replace(',', '.'); if (!/^\d+(\.\d+)?$/.test(v)) return null; const [w, f = ''] = v.split('.'); return BigInt(w) * WEI + BigInt((f + '0'.repeat(18)).slice(0, 18)); };
+const fmt = (w, d = 4) => (Number(w) / 1e18).toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US', { maximumFractionDigits: d });
+const eth = () => window.molibraWallet.require($('msg'));
+
+async function readAll() {
+  CFG = CFG ?? await (await fetch(NODE + '/molibra/fastbridge.json', { cache: 'no-store' })).json();
+  const [mBal, bBal, block, slot0, mGas] = await Promise.all([
+    mrpc('eth_getBalance', [CFG.inventory, 'latest']),
+    erpc('eth_call', [{ to: CFG.bmoli, data: '0x70a08231' + pad(CFG.inventory) }, 'latest']),
+    erpc('eth_getBlockByNumber', ['latest', false]),
+    erpc('eth_call', [{ to: CFG.stateView, data: '0xc815641c' + CFG.bmoliPoolId.slice(2) }, 'latest']),
+    mrpc('eth_gasPrice', []),
+  ]);
+  inv = { moli: BigInt(mBal), bmoli: BigInt(bBal) };
+  // The same arithmetic the bot uses (bots/fastbridge-core.mjs gasCosts).
+  const tip = BigInt(Math.round(Number(CFG.tipGwei) * 1e9));
+  const maxFee = BigInt(block.baseFeePerGas || '0x0') * 2n + tip;
+  const sq = BigInt('0x' + slot0.slice(2, 66));
+  const perEth = (sq * sq * WEI) >> 192n;
+  gas = { m2b: (BigInt(CFG.erc20GasLimit) * maxFee * perEth) / WEI, b2m: 21512n * BigInt(mGas) };
+  if (account) {
+    const [a, b] = await Promise.all([mrpc('eth_getBalance', [account, 'latest']),
+      erpc('eth_call', [{ to: CFG.bmoli, data: '0x70a08231' + pad(account) }, 'latest'])]);
+    mine = { moli: BigInt(a), bmoli: BigInt(b) };
+  }
+  render();
+}
+
+function quoteFor(amount) {
+  let fee = amount * BigInt(CFG.feeBp) / 10000n;
+  const g = (gas ? gas[dir] : 0n) * BigInt(CFG.gasMargin);
+  if (fee < g) fee = g;
+  const min = BigInt(CFG.minFee) * WEI; if (fee < min) fee = min;
+  return { fee, out: amount > fee ? amount - fee : 0n };
+}
+
+function problem(amount) {
+  if (!amount) return '';
+  if (amount > BigInt(CFG.maxPerTransfer) * WEI) return t('tooBig', CFG.maxPerTransfer);
+  const q = quoteFor(amount);
+  if (q.out === 0n) return t('belowFee');
+  const stock = dir === 'm2b' ? inv.bmoli : inv.moli;
+  if (stock !== null && q.out > stock) return t('noStock');
+  return '';
+}
+
+function render() {
+  for (const el of document.querySelectorAll('[data-t]')) el.textContent = t(el.dataset.t);
+  $('lpt').className = LANG === 'pt' ? 'on' : ''; $('len').className = LANG === 'en' ? 'on' : '';
+  $('dM2B').className = dir === 'm2b' ? 'on' : ''; $('dB2M').className = dir === 'b2m' ? 'on' : '';
+  if (!CFG) return;
+  const a = toWei($('amt').value || '0') || 0n;
+  const q = quoteFor(a);
+  const outSym = dir === 'm2b' ? 'bMOLI' : 'MOLI', inSym = dir === 'm2b' ? 'MOLI' : 'bMOLI';
+  $('out').textContent = a ? fmt(q.out) + ' ' + outSym : '—';
+  $('fee').textContent = fmt(quoteFor(a || WEI).fee) + ' ' + inSym;
+  $('avail').textContent = (dir === 'm2b' ? (inv.bmoli === null ? '—' : fmt(inv.bmoli, 0) + ' bMOLI') : (inv.moli === null ? '—' : fmt(inv.moli, 0) + ' MOLI'));
+  $('lim').textContent = t('limText', Number(CFG.maxPerTransfer).toLocaleString(), Number(CFG.maxPerHour).toLocaleString());
+  $('eta').textContent = dir === 'm2b' ? t('etaM2B') : t('etaB2M');
+  $('bal').textContent = account ? fmt(dir === 'm2b' ? mine.moli : mine.bmoli) + ' ' + inSym : '—';
+  const p = problem(a);
+  if (p) { showMsg(p, 'bad'); } else if ($('msg').dataset.kind === 'bad' && !$('msg').dataset.sticky) { $('msg').hidden = true; }
+  $('go').textContent = account ? (dir === 'm2b' ? t('goM2B') : t('goB2M')) : t('connect');
+  $('go').disabled = Boolean(account) && (!a || Boolean(p));
+}
+function showMsg(text, kind = '', sticky = false) {
+  const m = $('msg'); m.hidden = false; m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : '');
+  m.dataset.kind = kind; m.dataset.sticky = sticky ? '1' : '';
+}
+function steps(list, at) {
+  const ol = $('steps'); ol.hidden = false; ol.textContent = '';
+  list.forEach((s, i) => { const li = document.createElement('li'); li.textContent = s; li.className = i < at ? 'done' : i === at ? 'now' : ''; ol.appendChild(li); });
+}
+
+async function onChain(chain) {
+  const w = eth();
+  const cur = await w.request({ method: 'eth_chainId' });
+  if (cur === chain) return;
+  if (chain === MOLIBRA_CHAIN) {
+    try { await w.request({ method: 'wallet_addEthereumChain', params: [{ chainId: MOLIBRA_CHAIN, chainName: 'Molibra',
+      nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 }, rpcUrls: [NODE + '/molibra'] }] }); } catch (e) { if (e && e.code === 4001) throw e; }
+  }
+  await w.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chain }] });
+}
+
+async function connect() {
+  const accs = await eth().request({ method: 'eth_requestAccounts' });
+  account = accs && accs[0] ? accs[0].toLowerCase() : null;
+  await readAll();
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function go() {
+  if (!account) return connect();
+  const amount = toWei($('amt').value);
+  await readAll();
+  const p = problem(amount); if (p) return showMsg(p, 'bad', true);
+  const q = quoteFor(amount);
+  const list = [t('s1'), t('s2'), t('s3')].concat(dir === 'm2b' ? [t('s4')] : []);
+  steps(list, 0);
+  let before;
+  if (dir === 'm2b') {
+    before = mine.bmoli;
+    await onChain(MOLIBRA_CHAIN);
+    await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: CFG.inventory, value: '0x' + amount.toString(16) }] });
+  } else {
+    before = mine.moli;
+    await onChain(ETH_CHAIN);
+    const data = '0xa9059cbb' + pad(CFG.inventory) + amount.toString(16).padStart(64, '0');
+    await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: CFG.bmoli, data }] });
+  }
+  try { localStorage.setItem('molibra.rapido', JSON.stringify({ dir, account, before: before.toString(), out: q.out.toString(), at: Date.now() })); } catch (e) {}
+  steps(list, 1); showMsg(t('sent'));
+  await waitPayout(dir, before, q.out, list);
+}
+
+async function waitPayout(d, before, out, list) {
+  for (let i = 0; i < 180; i++) {          // up to ~45 min
+    await sleep(15000);
+    await readAll().catch(() => {});
+    const now = d === 'm2b' ? mine.bmoli : mine.moli;
+    if (now !== null && now - BigInt(before) >= BigInt(out) * 99n / 100n) {
+      steps(list, d === 'm2b' ? 3 : 3);
+      try { localStorage.removeItem('molibra.rapido'); } catch (e) {}
+      if (d === 'm2b') {
+        try {
+          await onChain(ETH_CHAIN);
+          await eth().request({ method: 'wallet_watchAsset', params: { type: 'ERC20', options: { address: CFG.bmoli, symbol: 'bMOLI', decimals: 18,
+            image: NODE + '/molibra/tokens/bmoli-200.png' } } });
+        } catch (e) { /* declined: the bMOLI is there either way */ }
+        steps(list, 4);
+      }
+      return showMsg(t('done', fmt(BigInt(out)) + (d === 'm2b' ? ' bMOLI' : ' MOLI')), 'ok', true);
+    }
+    if (i === 2) steps(list, 2);
+  }
+}
+
+$('lpt').onclick = () => { LANG = 'pt'; document.documentElement.lang = 'pt-BR'; render(); };
+$('len').onclick = () => { LANG = 'en'; document.documentElement.lang = 'en'; render(); };
+$('dM2B').onclick = () => { dir = 'm2b'; render(); };
+$('dB2M').onclick = () => { dir = 'b2m'; render(); };
+$('amt').oninput = render;
+$('maxBtn').onclick = () => { const b = dir === 'm2b' ? mine.moli : mine.bmoli; if (b) { const cap = BigInt(CFG.maxPerTransfer) * WEI; const v = b > cap ? cap : (dir === 'm2b' ? (b > WEI / 100n ? b - WEI / 100n : 0n) : b); $('amt').value = (Number(v) / 1e18).toString(); render(); } };
+$('go').onclick = () => go().catch((e) => showMsg(e && e.code === 4001 ? t('cancelled') : (e && e.message) || String(e), 'bad', true));
+readAll().then(async () => {
+  // Resume a transfer still waiting after a reload.
+  let p = null; try { p = JSON.parse(localStorage.getItem('molibra.rapido') || 'null'); } catch (e) {}
+  if (p && Date.now() - p.at < 3 * 3600 * 1000 && window.ethereum) {
+    const accs = await window.ethereum.request({ method: 'eth_accounts' }).catch(() => []);
+    if (accs && accs[0] && accs[0].toLowerCase() === p.account) {
+      account = p.account; dir = p.dir; await readAll();
+      const list = [t('s1'), t('s2'), t('s3')].concat(dir === 'm2b' ? [t('s4')] : []);
+      steps(list, 2); showMsg(t('sent'));
+      waitPayout(p.dir, p.before, p.out, list);
+    }
+  }
+}).catch((e) => showMsg(e.message, 'bad', true));
+render();
+</script>
+</body>
+</html>

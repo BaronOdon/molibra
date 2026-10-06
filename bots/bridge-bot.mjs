@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { BridgeBot, DEFAULTS, addressOf } from './bridge-core.mjs';
+import { FastBridge, FAST_DEFAULTS } from './fastbridge-core.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).flatMap((a, i, all) =>
   a.startsWith('--') ? [[a.slice(2), all[i + 1] && !all[i + 1].startsWith('--') ? all[i + 1] : true]] : []));
@@ -231,6 +232,13 @@ async function main() {
       }
     }
     keys = { headerBot: k.headerBot.key, ethRelayer: k.ethRelayer.key };
+    // The fast leg's inventory key is optional: no entry, no fast leg.
+    if (k.fastInventory) {
+      if (addressOf(k.fastInventory.key) !== String(k.fastInventory.address).toLowerCase()) {
+        throw new Error('fastInventory: the key does not derive the address recorded beside it');
+      }
+      keys.fastInventory = k.fastInventory.key;
+    }
   } else if (!dryRun) {
     throw new Error('--no-keys is for --dry-run only');
   }
@@ -266,8 +274,22 @@ async function main() {
   const save = (s) => writeAtomic(stateFile, JSON.stringify(s, replacer, 1));
   const bot = new BridgeBot({ io, keys, state, save, log,
     config: { ...DEFAULTS, ...(fileCfg.core ?? {}), dryRun } });
+  // --- the fast leg (inventory), only with its key --------------------------
+  let fast = null;
+  if (keys?.fastInventory && cfg.fastEnabled !== false) {
+    const fastStateFile = join(dataDir, dryRun ? 'fast-state.dry-run.json' : 'fast-state.json');
+    const fastState = loadJson(fastStateFile, {});
+    const ledger = join(dataDir, dryRun ? 'fast-payouts.dry-run.jsonl' : 'fast-payouts.jsonl');
+    // Every Molibra node, separately, so a source block can be cross-checked.
+    const molibraNodes = cfg.nodes.map((u) => ({ name: u, get: molibraIo([u]).get }));
+    fast = new FastBridge({ io: { ...io, molibraNodes }, key: keys.fastInventory, state: fastState,
+      save: (s) => writeAtomic(fastStateFile, JSON.stringify(s, replacer, 1)), log,
+      config: { ...FAST_DEFAULTS, ...(fileCfg.fast ?? {}), dryRun } });
+    fast.onPayout = (p) => { try { appendFileSync(ledger, JSON.stringify(p, replacer) + '\n'); } catch { /* logged by state */ } };
+  }
+
   log('info', 'start', { pid: process.pid, mode, dataDir, relayer: bot.relayer, headerBot: bot.botAddress,
-    nodes: cfg.nodes, intervalSec: cfg.intervalSec });
+    fastInventory: fast?.inventory ?? null, nodes: cfg.nodes, intervalSec: cfg.intervalSec });
 
   const heartbeatFile = join(dataDir, dryRun ? 'heartbeat.dry-run.json' : 'heartbeat.json');
   const beat = { pid: process.pid, host: hostname(), mode, startedAt: new Date().toISOString(),
@@ -287,14 +309,23 @@ async function main() {
     heartbeat({ phase: 'tick' });
     try {
       const s = await bot.tick();
-      const pending = bot.pendingItems(cfg.publicNode);
+      // ⛔ STOP-FAST pauses only the fast leg; the slow legs keep running.
+      let f = null;
+      if (fast && existsSync(join(dataDir, 'STOP-FAST'))) {
+        log('warn', 'stop-fast-file', { note: 'STOP-FAST exists: the fast leg is skipped' });
+      } else if (fast) {
+        try { f = await fast.tick(); } catch (e) { log('error', 'fast-tick-failed', { error: e.message }); }
+        if (f?.errors?.length) s.errors.push(...f.errors.map((x) => `fast ${x}`));
+      }
+      const pending = [...bot.pendingItems(cfg.publicNode), ...(fast ? fast.pendingItems() : [])];
+      if (f) s.fast = f.fast;
       writeAtomic(join(dataDir, dryRun ? 'pending-operator.dry-run.json' : 'pending-operator.json'),
         JSON.stringify({ updatedAt: new Date().toISOString(), mode, items: pending }, replacer, 1));
       beat.consecutiveFailures = s.errors.length ? beat.consecutiveFailures + 1 : 0;
       heartbeat({ phase: 'idle', lastTickAt: new Date().toISOString(),
         ...(s.errors.length ? {} : { lastOkAt: new Date().toISOString() }),
         molibraHeight: s.height, claimsLive: s.claimsLive, returnsLive: s.returnsLive,
-        summary: { burns: s.burns, burnsWei: s.burnsWei, returns: s.returns, returnsWei: s.returnsWei },
+        summary: { burns: s.burns, burnsWei: s.burnsWei, returns: s.returns, returnsWei: s.returnsWei, fast: s.fast ?? null },
         pending: pending.length, errors: s.errors });
       log('info', 'tick', { tick: beat.tick, ...s, pending: pending.length });
     } catch (e) {
