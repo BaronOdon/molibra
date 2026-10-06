@@ -345,7 +345,7 @@ function pairText(key) {
   const m = memeOf(key); const ref = m.meme.referencePair;
   const refUsd = Number(usd[ref.counterpart] || REG.counterparts[ref.counterpart].usd);
   const live = POOLR[key];
-  if (!live) return 'pool ainda não semeado · a proporção entre as moedas segue ' + ref.symbol + ' / TRUMP';
+  if (!live) return 'pool ainda não semeado' + (ref.symbol === 'TRUMP' ? '' : ' · a proporção entre as moedas segue ' + ref.symbol + ' / TRUMP');
   const coinUsd = (Number(live.rM) / Number(live.rT)) * Number(moliUsd);
   return '1 ' + m.symbol + ' = ' + (coinUsd / refUsd).toLocaleString('pt-BR', { maximumSignificantDigits: 5 }) + ' ' + ref.symbol
     + ' (US$ ' + coinUsd.toLocaleString('pt-BR', { maximumSignificantDigits: 5 }) + ' vs US$ ' + refUsd + ')';

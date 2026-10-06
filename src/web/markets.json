@@ -1,6 +1,6 @@
 {
   "about": "The one list of MOLI markets on Molibra that the pages read: /molibra/swap and /molibra/cotacao list every entry with a token AND a pool; /molibra/memes prefills its deploy plan from the meme entries. Served at /molibra/markets.json. A pool existing says nothing about whether an asset is worth anything.",
-  "updated": "2026-10-05",
+  "updated": "2026-10-06",
   "factory": null,
   "markets": [
     {
@@ -14,8 +14,8 @@
       "key": "caramelo",
       "symbol": "CARAMELO",
       "kind": "meme",
-      "token": null,
-      "pool": null,
+      "token": "0x2932c0150b3f9e9f811dd1ccafce5975fd6ea768",
+      "pool": "0x16e90f814ff5183d15cd1d26ef8000b2b7cf753c",
       "meme": {
         "name": "Caramelo",
         "description": "CARAMELO é uma memecoin nativa da Molibra em homenagem ao vira-lata caramelo, o cão de rua do Brasil. É um meme: sem vínculo com o Dogecoin ou com seus criadores, sem dono, sem emissão futura e sem nenhuma promessa de valor. / A Molibra-native meme coin honouring Brazil's caramel street dog. A meme: not affiliated with Dogecoin, no owner, no further issuance, no promise of value.",
@@ -32,8 +32,8 @@
           "vesting": "4000000000",
           "wallet": "1000000000"
         },
-        "curve": null,
-        "vesting": null,
+        "curve": "0x16d2602960fcc5c3cf01de57472bb1b6c452e578",
+        "vesting": "0x1952b05215cf51701da31e7f5dc8b0c0c583b50e",
         "vestingSchedule": {
           "cliffDays": 180,
           "durationDays": 720,
@@ -50,8 +50,8 @@
       "key": "bolso",
       "symbol": "BOLSO",
       "kind": "meme",
-      "token": null,
-      "pool": null,
+      "token": "0xafd6aa99dbbf2313a4101556fe7f0edc8556a3c4",
+      "pool": "0x31abd3961fe8cd2fa1b7331dacae1a22a7818038",
       "meme": {
         "name": "Bolsonaro Meme",
         "description": "BOLSO é um meme não oficial, sem vínculo com Jair Bolsonaro, sua família ou qualquer partido/campanha: nenhum deles o criou, o endossa ou tem relação com este token. Sem imagem, sem dono, sem emissão futura e sem nenhuma promessa de valor. / Unofficial meme, not affiliated with or endorsed by Jair Bolsonaro, his family or any party/campaign. No likeness, no owner, no further issuance, no promise of value.",
@@ -68,8 +68,8 @@
           "vesting": "40000000",
           "wallet": "10000000"
         },
-        "curve": null,
-        "vesting": null,
+        "curve": "0xa71b63aac90b8f8e09d536b4dfddec0744b8e87c",
+        "vesting": "0xdf717dab22aa3a478149bf5c19a34bc2faee75f1",
         "vestingSchedule": {
           "cliffDays": 180,
           "durationDays": 720,
@@ -86,8 +86,8 @@
       "key": "fazol",
       "symbol": "FAZOL",
       "kind": "meme",
-      "token": null,
-      "pool": null,
+      "token": "0x7d3be5a892d6ad98df5fda84e5aab63d9a39455f",
+      "pool": "0x209e2afadea6f55713b97de03e40fabb1ac4bf73",
       "meme": {
         "name": "Faz o L",
         "description": "FAZOL é um meme não oficial, inspirado no bordão popular \"Faz o L\", sem vínculo com Luiz Inácio Lula da Silva ou qualquer partido/campanha: nenhum deles o criou, o endossa ou tem relação com este token. Sem imagem, sem dono, sem emissão futura e sem nenhuma promessa de valor. / Unofficial meme inspired by the popular slogan \"Faz o L\", not affiliated with or endorsed by Luiz Inácio Lula da Silva or any party/campaign. No likeness, no owner, no further issuance, no promise of value.",
@@ -106,8 +106,8 @@
           "vesting": "40000000",
           "wallet": "10000000"
         },
-        "curve": null,
-        "vesting": null,
+        "curve": "0x6ad90343608c462bd4b63b3ab97f055f442b5169",
+        "vesting": "0x5d3deb1bd35f3ecd16b58ecaa34dabd18cbde40c",
         "vestingSchedule": {
           "cliffDays": 180,
           "durationDays": 720,
