@@ -1493,14 +1493,18 @@ async function readRegistry() {
 const CURVE_SEL = { startPrice: '0xf1a9af89', supplyForSale: '0xc2e18c05', sold: '0x02c7e7af' };
 
 /**
- * The curve's price after `moliIn` MOLI-wei has been paid into it, as a float
- * (MOLI per coin). Linear curve p(x) = p0 (1 + 4x/S); paid C = p0 (x + 2x^2/S),
- * so p = p0 sqrt(1 + 8C / (p0 S)). Every MOLI paid becomes pool liquidity, so C
- * is the sum of the curve's own deposits in the pool history.
+ * Replay one curve purchase (floats, MOLI and whole coins). The curve is linear,
+ * p(x) = p0 (1 + 4x/S), and `sold` advances by BOTH the buyer's coins and the
+ * coins it deposits beside the MOLI (MoliSaleCurve: sold = x + out, then
+ * sold += t in _deepen). A pool-history mint by the curve carries the MOLI paid
+ * and the deposited coins; the buyer's coins solve cost(x, out) = paid, i.e.
+ * (2 p0/S) out^2 + p0 (1 + 4x/S) out - paid = 0. Returns the new x.
  */
-function curvePriceAfter(cv, moliIn) {
-  const p0 = Number(cv.p0) / 1e18; const S = Number(cv.S) / 1e18; const C = Number(moliIn) / 1e18;
-  return p0 * Math.sqrt(1 + 8 * C / (p0 * S));
+function curveReplay(cv, x, paid, toPool) {
+  const p0 = Number(cv.p0) / 1e18; const S = Number(cv.S) / 1e18;
+  const a = 2 * p0 / S; const b = p0 * (1 + 4 * x / S);
+  const out = (2 * paid) / (b + Math.sqrt(b * b + 4 * a * paid));   // the stable root
+  return x + out + toPool;
 }
 
 /*
@@ -1553,13 +1557,16 @@ function renderMemeCharts() {
     const pricePoint = (p) => (p * 1).toLocaleString(loc, { maximumSignificantDigits: 6 });
     let now; let hist;
     if (cv) {
-      now = (Number(cv.p0) / 1e18) * (1 + 4 * Number(cv.sold) / Number(cv.S));
-      let paid = 0n;
+      const p0 = Number(cv.p0) / 1e18; const S = Number(cv.S) / 1e18;
+      now = p0 * (1 + 4 * (Number(cv.sold) / 1e18) / S);
+      let x = 0;
       hist = [];
       for (const e of evs) {
         if (!(e.time > 0)) continue;
-        if (e.kind === 'mint' && String(e.by).toLowerCase() === cv.addr) paid += BigInt(e.moli);
-        hist.push({ t: e.time, v: curvePriceAfter(cv, paid) });
+        if (e.kind === 'mint' && String(e.by).toLowerCase() === cv.addr) {
+          x = curveReplay(cv, x, Number(e.moli) / 1e18, Number(e.tokens) / 1e18);
+        }
+        hist.push({ t: e.time, v: p0 * (1 + 4 * x / S) });
       }
     } else {
       now = ratioNum(m.rMoli, m.rTok);
