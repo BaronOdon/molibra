@@ -35,13 +35,15 @@ check('⛔ a fee below the floor does not', expressFeeFor(burn, { f: fee(A, 1005
 check('sender match ignores case', expressFeeFor({ from: A.toUpperCase().replace('0X', '0x'), height: '1000' }, { f: fee(A, 1001, 10n * MOLI) }) !== null);
 
 /* ------------------------------------------------------------- trigger */
-function makeBot({ state, dryRun = false, clock }) {
+function makeBot({ state, dryRun = false, clock, claimed = new Set(), config = {} }) {
   const fired = [];
   const logs = [];
+  // claimed(tx) on BridgedMoli: 1 for hashes in `claimed`, else 0.
+  const eth = { rpc: async (m, [call]) => (m === 'eth_call' && [...claimed].some((h) => String(call.data).includes(String(h).replace(/^0x/, ''))) ? '0x1' : '0x0') };
   const bot = new BridgeBot({
-    io: { molibra: {}, eth: {}, triggerAnchor: dryRun ? null : async () => { fired.push(clock.t); } },
+    io: { molibra: {}, eth, triggerAnchor: dryRun ? null : async () => { fired.push(clock.t); } },
     keys: null, state, log: (level, event, extra) => logs.push({ event, ...extra }),
-    now: () => clock.t, config: { dryRun },
+    now: () => clock.t, config: { dryRun, feesFromMolibraHeight: 0n, feesFromEthBlock: 0n, ...config },
   });
   return { bot, fired, logs };
 }
@@ -116,6 +118,26 @@ const clock = { t: Date.parse('2026-10-06T20:00:00Z') };
   await bot.express({ height: 5000n });
   check('⛔ dry-run never runs the trigger, it logs what it would do',
     fired.length === 0 && logs.some((l) => l.event === 'express-dry-run') && !state.burns.b1.expressFiredAt);
+}
+
+/* ------------- regression 7 Oct: ground truth before the fee gate, grandfathering */
+{
+  const old = '0x' + '5d'.repeat(32);
+  const state = { burns: {
+    [old]: { from: B, height: '97260', status: 'unpaid-fee' },
+    preRule: { from: B, height: '150000', status: 'new' },
+    postRuleUnpaid: { from: B, height: '160000', status: 'new' },
+  }, expressFees: {} };
+  const { bot } = makeBot({ state, clock, claimed: new Set([old]), config: { feesFromMolibraHeight: 153_546n } });
+  const advanced = [];
+  bot.advanceClaim = async (hash) => { advanced.push(hash); };
+  await bot.claims({ height: 170000n });
+  check('⛔ a burn already claimed on Ethereum is CLAIMED, whatever the fee (heals a past unpaid-fee)',
+    state.burns[old].status === 'claimed' && !advanced.includes(old));
+  check('a burn from before the fee rule (fixed height) needs no fee: processed', advanced.includes('preRule'));
+  check('⛔ a burn after the rule with no fee is still NOT processed (a state reset exempts nothing)',
+    !advanced.includes('postRuleUnpaid') && state.burns.postRuleUnpaid.status === 'unpaid-fee');
+  check('  and the resolved one is not listed for the operator', !bot.pendingItems().some((i) => i.molibraTx === old));
 }
 
 /* ------------------------------------------ fees gate claims and returns */

@@ -90,6 +90,12 @@ export const DEFAULTS = {
   //    sender paid the fee to EXPRESS_FEE_ADDRESS within the window; unpaid ones
   //    go to pending-operator.json as 'unpaid-fee'. The page quotes the live fee.
   requireFees: true,
+  // ⛔ The user-pays rule went live with the bot restart of 6 Oct 2026 ~19:55 UTC
+  //    (first tick at Molibra 153,546; Ethereum ~26,135,500). Burns and returns
+  //    BEFORE these never owed a fee. FIXED values, not "the first run with fees
+  //    on": a state reset must never exempt new unpaid requests.
+  feesFromMolibraHeight: 153_546n,
+  feesFromEthBlock: 26_135_500n,
   claimFeeFloorWei: 5n * 10n ** 18n,      // MOLI, covers the relayer's Ethereum claim gas
   expressFeeFloorWei: 10n * 10n ** 18n,   // MOLI, on top of the claim fee, for an express anchor
   returnFeeFloorWei: 1n * 10n ** 18n,     // bMOLI, covers the header commit + return on Molibra
@@ -335,6 +341,18 @@ export class BridgeBot {
       .filter(([, b]) => b.status !== 'claimed')
       .sort(([, a], [, b]) => (BigInt(a.height) < BigInt(b.height) ? -1 : 1));
     for (const [hash, b] of open) {
+      // ⛔ Ground truth BEFORE the fee gate (regression, 7 Oct: after a state
+      //    rebuild, three burns claimed weeks earlier were marked 'unpaid-fee').
+      //    Claimed on Ethereum = done, whatever the fee. This also heals any
+      //    record a past run left as unpaid-fee/awaiting-fee.
+      try {
+        const claimed = await this.io.eth.rpc('eth_call', [{ to: BMOLI_CONTRACT, data: claimedCall(hash) }, 'latest']);
+        if (BigInt(claimed || '0x0') !== 0n) {
+          if (b.status !== 'claimed') this.log('info', 'claim-status', { tx: hash, from: b.status, to: 'claimed', note: 'claimed on Ethereum (ground truth)' });
+          b.status = 'claimed'; b.updatedAt = new Date(this.now()).toISOString();
+          continue;
+        }
+      } catch (e) { this.log('warn', 'claim-error', { tx: hash, error: 'claimed() unreadable: ' + e.message }); continue; }
       if (!this.claimPaid(hash, b, ctx)) { b.updatedAt = new Date(this.now()).toISOString(); continue; }
       try { await this.advanceClaim(hash, b, ctx); } catch (e) {
         b.lastError = e.message;
@@ -348,6 +366,7 @@ export class BridgeBot {
   /** True when the burner paid the claim fee; otherwise marks awaiting-fee / unpaid-fee. */
   claimPaid(hash, b, ctx) {
     if (b.feePaid || !this.cfg.requireFees) return true;
+    if (BigInt(b.height) < BigInt(this.cfg.feesFromMolibraHeight)) return true;   // before the rule: grandfathered
     const fee = expressFeeFor(b, this.state.expressFees, this.cfg.claimFeeFloorWei, this.cfg.feeWindowBlocks);
     if (fee) { b.feePaid = fee.hash; this.log('info', 'claim-fee-paid', { tx: hash, fee: fee.hash }); return true; }
     const status = ctx.height > BigInt(b.height) + this.cfg.feeWindowBlocks ? 'unpaid-fee' : 'awaiting-fee';
@@ -512,6 +531,7 @@ export class BridgeBot {
   returnPaid(hash, r, latestEth) {
     if (r.feePaid || !this.cfg.requireFees) return true;
     if (!r.from) return true;   // recorded before fees existed: grandfathered
+    if (BigInt(r.blockNumber) < BigInt(this.cfg.feesFromEthBlock)) return true;   // before the rule: grandfathered
     const fee = expressFeeFor({ from: r.from, height: r.blockNumber }, this.state.ethFees,
       this.cfg.returnFeeFloorWei, this.cfg.ethFeeWindowBlocks);
     if (fee) { r.feePaid = fee.hash; this.log('info', 'return-fee-paid', { ethTx: hash, fee: fee.hash }); return true; }

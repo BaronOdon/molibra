@@ -89,6 +89,8 @@ export async function conditions(dataDir, now = Date.now()) {
   const pend = readJson(join(dataDir, 'pending-operator.json'), {});
   const items = Array.isArray(pend) ? pend : Array.isArray(pend.items) ? pend.items : Object.values(pend || {});
   for (const it of items) {
+    // Already resolved on-chain (claimed / returned) is not something to look at.
+    if (it && ['claimed', 'returned', 'paid', 'done'].includes(it.status)) continue;
     const id = (it && ((it.leg ? it.leg + ':' : '') + (it.molibraTx || it.ethTx || it.tx || it.id || it.key || '')))
       || JSON.stringify(it).slice(0, 80);
     out['pending:' + id] = 'needs you: ' + JSON.stringify(it).slice(0, 300);
