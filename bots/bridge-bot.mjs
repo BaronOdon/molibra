@@ -29,7 +29,7 @@ import {
   unlinkSync, openSync, closeSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { hostname } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { BridgeBot, DEFAULTS, addressOf } from './bridge-core.mjs';
@@ -149,6 +149,25 @@ export function molibraIo(nodes, { fetchImpl = fetch } = {}) {
 
 /* ------------------------------------------------------------ the service */
 
+/**
+ * The bot keys. ⭐ keys.dpapi first: Windows DPAPI, CurrentUser scope of the
+ * account the bot runs as (molibra-bot), so the file is useless to any other
+ * account and on any other machine. Decrypted by a short PowerShell child; its
+ * stdout is parsed and never logged. keys.json (plaintext) only if no
+ * keys.dpapi exists - kept as the fallback for a fresh install.
+ */
+export function loadKeys(dataDir) {
+  const enc = join(dataDir, 'keys.dpapi');
+  if (existsSync(enc)) {
+    const ps = 'Add-Type -AssemblyName System.Security; $b=[Convert]::FromBase64String((Get-Content -Raw -LiteralPath $env:MOLIBRA_KEYS_DPAPI).Trim());'
+      + '[Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect($b,$null,"CurrentUser"))';
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps],
+      { env: { ...process.env, MOLIBRA_KEYS_DPAPI: enc }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    return JSON.parse(out);
+  }
+  return loadJson(join(dataDir, 'keys.json'), null);
+}
+
 function loadJson(path, fallback) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
 }
@@ -225,7 +244,7 @@ async function main() {
   // --- keys, matched by derivation and never printed -------------------------
   let keys = null;
   if (!args['no-keys']) {
-    const k = loadJson(args.keys ?? join(dataDir, 'keys.json'), null);
+    const k = args.keys ? loadJson(args.keys, null) : loadKeys(dataDir);
     if (!k) throw new Error(`no keys file in ${dataDir} (or pass --no-keys with --dry-run)`);
     for (const [name, entry] of [['headerBot', k.headerBot], ['ethRelayer', k.ethRelayer]]) {
       if (addressOf(entry.key) !== String(entry.address).toLowerCase()) {

@@ -32,6 +32,11 @@ param(
   [string]$DataDir = 'C:\Users\Administrator\molibra-bots',
   [int]$IntervalSec = 300,
   [switch]$DryRun,
+  # Run as this least-privilege account (6 Oct 2026: molibra-bot). Its password is
+  # read from the operator vault (Server Ops\vault.ps1, entry <user>-password);
+  # empty = the old S4U Administrator task.
+  [string]$User = '',
+  [string]$Vault = 'C:\Users\Administrator\Desktop\Server Ops\vault.ps1',
   [switch]$Remove
 )
 
@@ -45,8 +50,8 @@ if ($Remove) {
   exit 0
 }
 
-if (-not (Test-Path (Join-Path $DataDir 'keys.json'))) {
-  throw "no keys.json in $DataDir - the bot keys are recorded in CREDENTIALS.md (2 Oct 2026)"
+if (-not (Test-Path (Join-Path $DataDir 'keys.dpapi')) -and -not (Test-Path (Join-Path $DataDir 'keys.json'))) {
+  throw "no keys.dpapi (or keys.json) in $DataDir - the bot keys are in the operator vault (Server Ops\vault.ps1)"
 }
 if (Test-Path (Join-Path $Repo 'keys.json')) {
   throw "a keys.json exists INSIDE the repository at $Repo - move it out before anything else"
@@ -68,6 +73,13 @@ $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
   -RepetitionInterval (New-TimeSpan -Minutes 10)
 
 $principal = New-ScheduledTaskPrincipal -UserId 'Administrator' -LogonType S4U -RunLevel Highest
+$cred = @{ Principal = $principal }
+if ($User) {
+  # ⛔ A non-admin account with the batch-logon right; Password logon so its DPAPI
+  #    (keys.dpapi) can be opened. RunLevel Limited: no elevation.
+  $pw = & $Vault get "$User-password"
+  $cred = @{ User = $User; Password = $pw; RunLevel = 'Limited' }
+}
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
   -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
@@ -75,7 +87,8 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd 
   -MultipleInstances IgnoreNew
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($atStartup, $repeat) `
-  -Principal $principal -Settings $settings -Force | Out-Null
+  @cred -Settings $settings -Force | Out-Null
+Remove-Variable pw -ErrorAction SilentlyContinue
 
 $t = Get-ScheduledTask -TaskName $TaskName
 Write-Host "installed: $TaskName"

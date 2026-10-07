@@ -144,8 +144,11 @@ function world() {
 const sqrtOf = (perEth) => hex(BigInt(Math.round(Math.sqrt(perEth) * 2 ** 48)) << 48n);
 const GWEI = 1_000_000_000n;
 
-function bridge(W, state = {}, config = {}) {
-  return new FastBridge({ io: W.io, key: W.invKey, state, save: () => {}, log: () => {}, config });
+// The payout scenarios run with sweeping out of the way (inventory caps far above
+// any balance here); the sweep has its own section at the end.
+const NO_SWEEP = { maxInventoryMoliWei: 10n ** 30n, maxInventoryBmoliWei: 10n ** 30n };
+function bridge(W, state = {}, config = {}, log = () => {}) {
+  return new FastBridge({ io: W.io, key: W.invKey, state, save: () => {}, log, config: { ...NO_SWEEP, ...config } });
 }
 
 /* ------------------------------------------------------------------ pure */
@@ -366,6 +369,27 @@ console.log('\n8. the service and the page\n');
     && BigInt(cfg.maxPerDay) * WEI === FAST_DEFAULTS.maxPerDayWei && cfg.molibraConfirmations === 12 && cfg.ethConfirmations === 3);
   check('the page reads fastbridge.json and never uses innerHTML', page.includes('/molibra/fastbridge.json') && !/innerHTML/.test(page));
   check('the page adds bMOLI to the wallet when it arrives', page.includes('wallet_watchAsset'));
+}
+
+/* ------------------------------------------- inventory sweep (6 Oct review) */
+{
+  const max = 15_000n * WEI; const bp = 11_000n;
+  check('sweep: at or below max + 10% nothing moves', FastBridge.excess(16_500n * WEI, max, bp) === 0n && FastBridge.excess(10_000n * WEI, max, bp) === 0n);
+  check('sweep: above the trigger the excess over max goes, gas included, never below max',
+    FastBridge.excess(20_000n * WEI, max, bp, 1n * WEI) === 4_999n * WEI);
+  check('sweep: a gas cost larger than the excess sends nothing', FastBridge.excess(16_501n * WEI, max, bp, 2_000n * WEI) === 0n);
+  check('sweep defaults: 15,000 MOLI and 15,000 bMOLI, 110% trigger, cold wallet = the operator',
+    FAST_DEFAULTS.maxInventoryMoliWei === max && FAST_DEFAULTS.maxInventoryBmoliWei === max && FAST_DEFAULTS.sweepTriggerBp === bp
+    && FAST_DEFAULTS.coldWallet === '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a');
+  const W = world(); const logs = [];
+  const fb = bridge(W, {}, { dryRun: true, maxInventoryMoliWei: 1n * WEI, maxInventoryBmoliWei: 1n * WEI }, (lvl, ev, d) => logs.push({ ev, ...d }));
+  let threw = null;
+  try { await fb.sweep({ live: false, ethSent: false, molibraSent: false }); } catch (e) { threw = e.message; }
+  check('sweep (dry run) on a funded inventory: logged, nothing sent', !threw && logs.some((l) => l.ev === 'fast-sweep-dry-run'), threw ?? logs.map((l) => l.ev).join(','));
+  const W2 = world(); const sent = [];
+  const fb2 = bridge(W2, {}, { maxInventoryMoliWei: 1n * WEI, maxInventoryBmoliWei: 1n * WEI });
+  try { await fb2.sweep({ live: true, ethSent: true, molibraSent: true }); } catch (e) { sent.push(e.message); }
+  check('⛔ no sweep on a chain where this tick already sent a payout (no nonce races)', sent.length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

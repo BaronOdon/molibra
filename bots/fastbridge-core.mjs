@@ -72,6 +72,13 @@ export const FAST_DEFAULTS = {
   //    payout's gas twice over, read live. MOLI per ETH comes from the bMOLI/ETH
   //    Uniswap v4 pool (StateView.getSlot0), as /molibra/cotacao reads it.
   gasMargin: 2n,
+  // ⛔ A hot wallet holds only what the route needs (security review, 6 Oct 2026):
+  //    above max + 10% the excess goes to the operator's cold wallet, one tx per
+  //    tick, gas paid by the inventory, never leaving it below max.
+  maxInventoryMoliWei: 15_000n * WEI,
+  maxInventoryBmoliWei: 15_000n * WEI,
+  sweepTriggerBp: 11_000n,                 // 110% of max
+  coldWallet: '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a',
   stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227',
   bmoliPoolId: '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312',
 };
@@ -181,6 +188,7 @@ export class FastBridge {
       ['scan-molibra', () => this.scanMolibra(tips)],
       ['scan-eth', () => this.scanEth(tips)],
       ['payouts', () => this.payouts(tips, ctx)],
+      ['sweep', () => this.sweep(ctx)],
     ]) {
       try { await leg(); } catch (e) {
         errors.push(`${name}: ${e.message}`);
@@ -504,6 +512,66 @@ export class FastBridge {
     this.set(hash, it, 'sent', { payoutTx: lower(sent), payoutRaw: raw, sentAt: new Date(this.now()).toISOString(),
       paidAt: new Date(this.now()).toISOString(), ...fees });
     this.recordPayout(hash, it);
+  }
+
+  /** The excess over max (with the 10% trigger), or 0n. Pure. */
+  static excess(balance, max, triggerBp, cost = 0n) {
+    if (balance * 10_000n <= max * triggerBp) return 0n;
+    const amt = balance - max - cost;
+    return amt > 0n ? amt : 0n;
+  }
+
+  /**
+   * Sweep the inventory above max to the cold wallet. Skipped on a chain where
+   * this tick sent a payout or a payout is still unconfirmed (no nonce races).
+   */
+  async sweep(ctx) {
+    const busy = (dir) => Object.values(this.state.items ?? {}).some((x) => x.dir === dir && x.status === 'sent');
+    const cold = lower(this.cfg.coldWallet);
+    // Molibra: native MOLI.
+    if (!ctx.molibraSent && !busy('b2m')) {
+      const m = this.io.molibra;
+      const bal = BigInt(await m.rpc('eth_getBalance', [this.inventory, 'latest']));
+      const gasPrice = BigInt(await m.rpc('eth_gasPrice', []));
+      const gasLimit = intrinsicGas({ data: '0x' });
+      const amt = FastBridge.excess(bal, this.cfg.maxInventoryMoliWei, this.cfg.sweepTriggerBp, gasLimit * gasPrice);
+      if (amt > 0n) {
+        if (!ctx.live) this.log('info', 'fast-sweep-dry-run', { chain: 'molibra', amountWei: amt.toString(), to: cold });
+        else {
+          const nonce = BigInt(await m.rpc('eth_getTransactionCount', [this.inventory, 'latest']));
+          const raw = toHex(signTransaction({ nonce, gasPrice, gasLimit, to: cold, value: amt, data: '0x' }, this.key, MOLIBRA_CHAIN_ID));
+          const back = decodeTransaction(raw, MOLIBRA_CHAIN_ID);
+          if (back.from !== this.inventory || lower(back.to) !== cold || back.value !== amt) throw new Error('sweep tx does not read back as intended - refusing');
+          const tx = await m.rpc('eth_sendRawTransaction', [raw]);
+          ctx.molibraSent = true;
+          this.log('info', 'fast-sweep', { chain: 'molibra', amountWei: amt.toString(), to: cold, tx });
+        }
+      }
+    }
+    // Ethereum: bMOLI (ERC-20), gas in ETH from the inventory.
+    if (!ctx.ethSent && !busy('m2b')) {
+      const eth = this.io.eth;
+      const bal = BigInt(await eth.rpc('eth_call', [{ to: BMOLI_CONTRACT, data: '0x70a08231' + addr32(this.inventory) }, 'latest']));
+      const amt = FastBridge.excess(bal, this.cfg.maxInventoryBmoliWei, this.cfg.sweepTriggerBp);
+      if (amt > 0n) {
+        const data = '0xa9059cbb' + addr32(cold) + amt.toString(16).padStart(64, '0');
+        if (!ctx.live) this.log('info', 'fast-sweep-dry-run', { chain: 'ethereum', amountWei: amt.toString(), to: cold });
+        else {
+          const latest = await eth.rpc('eth_getBlockByNumber', ['latest', false]);
+          const tip = this.cfg.tipWei; const maxFee = BigInt(latest.baseFeePerGas ?? '0x0') * 2n + tip;
+          if (maxFee > this.cfg.maxFeeCapWei) { this.log('warn', 'fast-sweep-gas-too-high', { maxFee: maxFee.toString() }); return; }
+          await eth.rpc('eth_call', [{ from: this.inventory, to: BMOLI_CONTRACT, data }, 'latest']);
+          const nonce = BigInt(await eth.rpc('eth_getTransactionCount', [this.inventory, 'pending']));
+          const raw = signEip1559({ chainId: 1n, nonce, maxPriorityFeePerGas: tip, maxFeePerGas: maxFee,
+            gasLimit: this.cfg.erc20GasLimit, to: BMOLI_CONTRACT, value: 0n, data }, this.key);
+          const back = decodeEip1559(raw);
+          if (back.from !== this.inventory || lower(back.to) !== lower(BMOLI_CONTRACT) || back.data !== lower(data)) throw new Error('sweep tx does not read back as intended - refusing');
+          const tx = await eth.send('eth_sendRawTransaction', [raw]);
+          ctx.ethSent = true;
+          this.log('info', 'fast-sweep', { chain: 'ethereum', amountWei: amt.toString(), to: cold, tx });
+        }
+      }
+    }
   }
 
   async payOnMolibra(hash, it, q, ctx) {
