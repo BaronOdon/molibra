@@ -56,9 +56,15 @@
   .nav::-webkit-scrollbar{display:none}
   .nav a{font:500 12.5px var(--sans);color:var(--dim);text-decoration:none;padding:7px 10px;border-radius:999px;white-space:nowrap}
   .nav a:hover{color:var(--gold);background:rgba(255,209,0,.08)}
-  .lang{display:flex;border:1px solid var(--edge);border-radius:999px;overflow:hidden;flex:none}
-  .lang button{background:none;border:0;color:var(--dim);font:600 11px var(--mono);padding:6px 9px;cursor:pointer}
-  .lang button.on{background:var(--gold);color:#111}
+  .lang{flex:none;position:relative}
+  .lang select{appearance:none;-webkit-appearance:none;background:rgba(255,209,0,.08);color:var(--gold);border:1px solid var(--edge-hi);
+               border-radius:999px;font:600 12px var(--sans);padding:7px 28px 7px 12px;cursor:pointer;max-width:150px}
+  .lang::after{content:"▾";position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--gold);pointer-events:none;font-size:11px}
+  .lang select option{background:#111;color:var(--ink)}
+  [dir="rtl"] .lang::after{right:auto;left:11px} [dir="rtl"] .lang select{padding:7px 12px 7px 28px}
+  [dir="rtl"] .nav{margin-left:0;margin-right:auto} [dir="rtl"] .step::before{left:auto;right:18px}
+  [dir="rtl"] .honest{border-left:0;border-right:3px solid var(--gold-dk);border-radius:12px 0 0 12px}
+  [dir="rtl"] .stat,[dir="rtl"] .hero{text-align:right} [dir="rtl"] .hero{text-align:center}
 
   /* ------------------------------------------------------------------ hero */
   .hero{position:relative;padding:72px 0 40px;text-align:center}
@@ -152,6 +158,9 @@
   footer{border-top:1px solid var(--edge);margin-top:72px;padding:26px 0 60px;color:var(--dimmer);font-size:12.5px}
   footer a{color:var(--gold-dk)}
 
+  /* Measures in ch are Latin widths: a CJK character is about two, so the caps double. */
+  :lang(ja) h2,:lang(zh) h2,:lang(ko) h2,:lang(ja) .headline,:lang(zh) .headline,:lang(ko) .headline{max-width:none}
+  :lang(ja) .sub,:lang(zh) .sub,:lang(ko) .sub{max-width:44em}
   .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease, transform .6s ease}
   .reveal.in{opacity:1;transform:none}
   @media (prefers-reduced-motion: reduce){
@@ -176,7 +185,7 @@
     <a href="#verify" data-t="navVerify">Conferir</a>
     <a href="#all" data-t="navAll">Todos os links</a>
   </nav>
-  <div class="lang"><button id="lpt" class="on">PT</button><button id="len">EN</button></div>
+  <label class="lang" title="Language / Idioma"><span hidden>Language</span><select id="langSel" aria-label="Language / Idioma"></select></label>
 </div></div>
 
 <main class="wrap">
@@ -364,100 +373,86 @@ const NODE = location.protocol.startsWith('http') ? location.origin : 'http://19
 const RPC = NODE + '/molibra';
 const $ = (id) => document.getElementById(id);
 
-const EN = {
-  navStart: 'Start', navMarket: 'Market', navMemes: 'Memes', navBridge: 'Bridge', navBuild: 'Build', navVerify: 'Verify', navAll: 'All links',
-  headline: null, lede: 'MOLI is only ever mined — there is no sale. Swap on the chain’s own market, launch a token, cross to Ethereum and back. Nothing here asks to be believed: run a node and check every block.',
-  ctaMine: 'Mine MOLI', ctaBuy: 'Buy bMOLI', ctaWallet: 'Add to wallet',
-  kHeight: 'block', sHeight: 'chain height right now', kFinal: 'finalized', sFinal: 'anchored on Ethereum',
-  kBurned: 'MOLI → bMOLI', sBurned: 'burned and carried to Ethereum', kReaders: 'readers', sReaders: 'in the last 15 min',
-  livenote: 'Read from this node just now. Anyone with their own node arrives at the same numbers.',
-  eStart: 'start in 3 steps', hStart: null, s1t: 'Connect a wallet', s1d: 'MetaMask or any EVM wallet. The network goes in with one click.',
-  s2t: 'Mine or buy', s2d: 'A Windows and Mac installer that runs in the background — or buy bMOLI with ETH.',
-  s3t: 'Use it', s3d: 'Swap, pay a shop by QR, create a token, cross to Ethereum.',
-  eMarket: 'market', hMarket: null, pMarket: 'One pool per token, two-hop routes, and MOLI’s price in reais worked out step by step, with where each number comes from.',
-  cSwap: 'Swap', dSwap: 'Molibra’s DEX: any listed pair, routed through the curve or the pool automatically.',
-  cQuote: 'Price (Cotação)', dQuote: 'What a real is worth in MOLI — R$, US$, ETH, bMOLI — with live charts.',
-  cBuy: 'Buy bMOLI', dBuy: 'ETH → bMOLI on Ethereum, and optionally straight to MOLI on Molibra.',
-  cPay: 'Pay · point of sale', dPay: 'A shop shows a QR with the amount and sees the payment arrive.',
-  cPool: 'Liquidity', dPool: 'Add and read depth. A deposit adds depth; it never sets a price.',
-  cBroker: 'Broker', dBroker: 'The Ethereum side: WSRO, WETH and the live position.',
-  eMemes: 'memecoins on Molibra', hMemes: null, pMemes: 'Each with 95% of supply on a price curve, 4% on long vesting (6-month cliff, 24 months linear) and 1% free. Live price, chart and buying right on the token page.',
-  mCaramelo: 'The caramel street dog, Brazil’s national mascot, now on chain.', mBolso: 'A meme from one side of the stands.', mFazol: 'A meme from the other side. Same curve, same rules.',
-  eBridge: 'bridge to Ethereum', hBridge: null, pBridge: 'Burning MOLI mints bMOLI on Ethereum against a proof; bMOLI sent to the vault comes back as MOLI. Fees cover only the gas — or claim it yourself, with no bridge fee.',
-  cPonte: 'Bridge', dPonte: 'One click per direction; the page follows the rest. ~25 h to Ethereum, minutes back.',
-  cFast: 'Fast bridge', dFast: 'In minutes, from the bridge inventory: 0.1–0.3% + the gas.',
-  cBmoli: 'bMOLI', dBmoli: 'Burn MOLI here and mint the same amount on Ethereum against the proof.',
-  cReturn: 'Return', dReturn: 'bMOLI → MOLI through the vault, step by step.',
-  cSettle: 'Settlement', dSettle: 'Anchor a block on Ethereum and release a bridge-out against the proof.',
-  cInbound: 'Inbound', dInbound: 'Assets arriving from another chain.',
-  eBuild: 'build and mine', hBuild: null,
-  cMine: 'Mine MOLI', dMine: 'Open the installer, paste an address (or let it make one), done.',
-  cMiner: 'Browser miner', dMiner: 'Watch the miner work, right in the page.',
-  cCreate: 'Create a token', dCreate: 'A question or an asset. The id is derived, never chosen: nobody squats a name.',
-  cChalk: 'Earn chalk', dChalk: 'Solve a puzzle bound to your address and receive the units expression costs.',
-  cDocs: 'Document registry', dDocs: 'Register a document’s hash on chain, with a date nobody can erase.',
-  cOut: 'Declare a bridge-out', dOut: 'Sign the statement that a holding is leaving. On its own it destroys nothing.',
-  eVerify: 'read and verify', hVerify: null, pVerify: 'The block format, the validation rules and replication are public. Divergence between nodes is detectable by anyone.',
-  dScan: 'Any block, transaction or address, read straight out of the chain.',
-  cStatus: 'Network status', dStatus: 'Nodes, height, anchors and the network’s health.',
-  cPaper: 'White paper', dPaper: 'What the chain does — and a section listing only what is unsolved.',
-  cSource: 'Source code', dSource: 'Apache-2.0. Clone it, run the README, compare with your own node.',
-  cTheories: 'Theories', dTheories: 'Libertarian theory and the Macrobiotic Quantum Theory, named in the genesis block.',
-  cApi: 'Node API', dApi: 'Identity, height, activations and audit routes, as JSON.',
-  eWallet: 'add the network', hWallet: 'Any EVM wallet already speaks Molibra.',
-  pWallet: 'No special client: the network answers the JSON-RPC methods an ordinary wallet calls. A public endpoint is a convenience, not the design — run your own.',
-  kvNet: 'Network', kvSym: 'Symbol', kvDec: 'Decimals',
-  eAll: 'index', hAll: 'All links', gStart: 'Start', gMarket: 'Market', gBridge: 'Bridge', gBuild: 'Build', gVerify: 'Verify',
-  lDownload: 'Download the miner', lConnect: 'Connect a wallet', lMiner: 'Browser miner', lChalk: 'Earn chalk',
-  lSwap: 'Swap', lQuote: 'Price in reais', lBuy: 'Buy bMOLI', lPay: 'Pay by QR', lPool: 'Liquidity', lBroker: 'Broker (Ethereum)',
-  lMemes: 'Launch panel', lPonte: 'Bridge MOLI ⇄ bMOLI', lFast: 'Fast bridge', lBmoli: 'Mint bMOLI', lReturn: 'Return bMOLI',
-  lSettle: 'Settlement', lInbound: 'Inbound', lOut: 'Declare a bridge-out', lCreate: 'Create a token', lDocs: 'Document registry',
-  lStatus: 'Network status', lTheories: 'Theories', lApi: 'Node API', lNodes: 'Known nodes', lSource: 'Source code ↗',
-  honest: null, fNode: 'node identity', fSource: 'source',
+/* ------------------------------------------------------------- languages */
+// Portuguese is the page itself; every other language is /molibra/i18n/<code>.json,
+// fetched only when chosen (test/landing-i18n.mjs checks each has every key).
+// Any language not listed: English is shown and the page stays open to the
+// browser's own translator (translate is never disabled). Markup in a string:
+// *x* = gold emphasis, **x** = bold - rendered as elements, never as HTML.
+const LANGS = [
+  ['pt', 'Português'], ['en', 'English'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'],
+  ['it', 'Italiano'], ['nl', 'Nederlands'], ['pl', 'Polski'], ['ru', 'Русский'], ['tr', 'Türkçe'],
+  ['ar', 'العربية'], ['hi', 'हिन्दी'], ['id', 'Bahasa Indonesia'], ['zh', '简体中文'], ['ja', '日本語'], ['ko', '한국어'],
+];
+const RTL = new Set(['ar']);
+const LOCALE = { pt: 'pt-BR', zh: 'zh-CN' };
+const PT_DYN = {
+  liveOn: 'rede ao vivo', liveOff: 'nó sem resposta', liveFail: 'Este nó não respondeu: ',
+  walletOk: '✓ Molibra está na sua carteira.', walletCancel: 'Cancelado na carteira.',
+  credit: 'Crédito de origem:', coauth: 'em coautoria com', metaTitle: document.title,
 };
-// Strings with emphasis are built from parts, never from HTML.
-const RICH = {
-  headline: { pt: ['Dinheiro que você ', ['minera'], '. Uma rede que você ', ['confere'], '.'],
-              en: ['Money you ', ['mine'], '. A chain you ', ['check'], '.'] },
-  hStart:  { pt: ['Sem cadastro. ', ['Só uma carteira.']], en: ['No sign-up. ', ['Just a wallet.']] },
-  hMarket: { pt: ['Troque qualquer par. ', ['Pague com QR.']], en: ['Swap any pair. ', ['Pay by QR.']] },
-  hMemes:  { pt: ['Três memes. ', ['Uma curva justa.']], en: ['Three memes. ', ['One fair curve.']] },
-  hBridge: { pt: ['MOLI ⇄ bMOLI. ', ['A preço de custo.']], en: ['MOLI ⇄ bMOLI. ', ['At cost.']] },
-  hBuild:  { pt: ['Seu computador minera. ', ['Sua ideia vira token.']], en: ['Your computer mines. ', ['Your idea becomes a token.']] },
-  hVerify: { pt: ['Não acredite. ', ['Confira.']], en: ['Don’t believe. ', ['Verify.']] },
-  honest:  { pt: [{ b: 'Sem promessa de lucro.' }, ' MOLI é emitido pela mineração; o valor vem só de quem quer usá-lo. A ponte é garantida por uma atestação com caução, não por prova de trabalho — tudo está escrito no white paper, inclusive o que falta.'],
-             en: [{ b: 'No promise of profit.' }, ' MOLI is issued by mining; its value comes only from people who want to use it. The bridge is backed by a bonded attestation, not proof of work — it is all in the white paper, including what is still missing.'] },
-};
-const PT = {};
-for (const el of document.querySelectorAll('[data-t]')) PT[el.dataset.t] ??= el.textContent;
-let LANG = (navigator.language || 'pt').toLowerCase().startsWith('pt') ? 'pt' : 'en';
-try { const l = localStorage.getItem('molibra.lang'); if (l === 'pt' || l === 'en') LANG = l; } catch (e) {}
+// The Portuguese original of every tagged element, kept as nodes so emphasis survives.
+const PT_NODES = {};
+for (const el of document.querySelectorAll('[data-t]')) PT_NODES[el.dataset.t] ??= [...el.childNodes].map((n) => n.cloneNode(true));
+const DICTS = { pt: null };
+let LANG = 'pt', D = PT_DYN;
 
-function fill(el, parts) {
+function pick() {
+  try { const l = localStorage.getItem('molibra.lang'); if (LANGS.some(([c]) => c === l)) return l; } catch (e) {}
+  for (const tag of navigator.languages || [navigator.language || 'pt']) {
+    const c = String(tag).toLowerCase().split('-')[0];
+    if (LANGS.some(([k]) => k === c)) return c;
+  }
+  return 'en';
+}
+/** "a *b* c **d**" -> text, <em>, text, <b> - DOM nodes only. */
+function rich(el, str) {
   el.textContent = '';
-  for (const p of parts) {
-    if (typeof p === 'string') el.append(p);
-    else if (Array.isArray(p)) { const em = document.createElement('em'); em.textContent = p[0]; el.append(em); }
-    else { const b = document.createElement('b'); b.textContent = p.b; el.append(b); }
+  for (const part of String(str).split(/(\*\*[^*]+\*\*|\*[^*]+\*)/)) {
+    if (!part) continue;
+    if (part.startsWith('**')) { const b = document.createElement('b'); b.textContent = part.slice(2, -2); el.append(b); }
+    else if (part.startsWith('*')) { const em = document.createElement('em'); em.textContent = part.slice(1, -1); el.append(em); }
+    else el.append(part);
   }
 }
+const loc = () => LOCALE[LANG] || LANG;
 function applyLang() {
-  document.documentElement.lang = LANG === 'pt' ? 'pt-BR' : 'en';
-  $('lpt').className = LANG === 'pt' ? 'on' : ''; $('len').className = LANG === 'en' ? 'on' : '';
+  const html = document.documentElement;
+  html.lang = loc(); html.dir = RTL.has(LANG) ? 'rtl' : 'ltr';
+  const dict = DICTS[LANG];
   for (const el of document.querySelectorAll('[data-t]')) {
     const k = el.dataset.t;
-    if (RICH[k]) fill(el, RICH[k][LANG]);
-    else el.textContent = LANG === 'en' && EN[k] ? EN[k] : PT[k];
+    if (!dict || dict[k] == null) { el.replaceChildren(...PT_NODES[k].map((n) => n.cloneNode(true))); continue; }
+    rich(el, dict[k]);
   }
-  $('kicker').textContent = (live === false ? (LANG === 'pt' ? 'nó sem resposta' : 'node not answering')
-    : (LANG === 'pt' ? 'rede ao vivo' : 'live network')) + ' · chain id 20226';
+  D = dict ? { ...PT_DYN, ...dict } : PT_DYN;
+  document.title = D.metaTitle;
+  $('langSel').value = LANG;
+  $('kicker').textContent = (live === false ? D.liveOff : D.liveOn) + ' · chain id 20226';
+  if (lastIdentity) showIdentity(lastIdentity);
 }
-const setLang = (l) => { LANG = l; try { localStorage.setItem('molibra.lang', l); } catch (e) {} applyLang(); };
-$('lpt').onclick = () => setLang('pt'); $('len').onclick = () => setLang('en');
+async function setLang(code, remember) {
+  if (code !== 'pt' && !DICTS[code]) {
+    try { DICTS[code] = await (await fetch(NODE + '/molibra/i18n/' + code + '.json')).json(); }
+    catch (e) { if (code !== 'en') return setLang('en', remember); DICTS.en = null; }
+  }
+  LANG = code;
+  if (remember) { try { localStorage.setItem('molibra.lang', code); } catch (e) {} }
+  applyLang();
+}
+for (const [code, name] of LANGS) { const o = document.createElement('option'); o.value = code; o.textContent = name; $('langSel').append(o); }
+$('langSel').onchange = (e) => setLang(e.target.value, true);
 
 /* ------------------------------------------------------------ live figures */
 let live = null;
-const fmtInt = (n) => Math.round(n).toLocaleString(LANG === 'pt' ? 'pt-BR' : 'en-US');
+const fmtInt = (n) => Math.round(n).toLocaleString(loc());
+let lastIdentity = null;
+function showIdentity(j) {
+  $('readers').textContent = j.readers ? fmtInt(j.readers.distinct) : '—';
+  const a = j.attribution;
+  if (a) $('attrib').textContent = D.credit + ' ' + (a.originAttributedTo || []).join(' · ')
+    + (a.coAuthors?.length ? ' · ' + D.coauth + ' ' + a.coAuthors.map((c) => c.name).join(', ') : '');
+}
 function countTo(el, target) {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = fmtInt(target); return; }
   const t0 = performance.now(), from = target * 0.97;
@@ -475,16 +470,13 @@ async function readLive() {
     countTo($('height'), Number(j.height));
     if (j.finality?.finalizedHeight != null) countTo($('final'), Number(j.finality.finalizedHeight)); else $('final').textContent = '—';
     countTo($('burned'), Number(BigInt(j.outbound?.burned ?? 0) / 10n ** 18n));
-    $('readers').textContent = j.readers ? fmtInt(j.readers.distinct) : '—';
-    const a = j.attribution;
-    if (a) $('attrib').textContent = 'Origin credit: ' + (a.originAttributedTo || []).join(' · ')
-      + (a.coAuthors?.length ? ' · co-authored with ' + a.coAuthors.map((c) => c.name).join(', ') : '');
+    lastIdentity = j; showIdentity(j);
   } catch (e) {
     // A front page that cannot read its own node says so rather than render zeros.
     live = false;
     $('liveDot').classList.add('off');
     for (const id of ['height', 'final', 'burned', 'readers']) $(id).textContent = '—';
-    $('livenote').textContent = (LANG === 'pt' ? 'Este nó não respondeu: ' : 'This node did not answer: ') + e.message;
+    $('livenote').textContent = D.liveFail + e.message;
   }
   applyLang();
 }
@@ -497,9 +489,9 @@ async function addNetwork() {
     const eth = window.molibraWallet.require(msg);
     await eth.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x4f02', chainName: 'Molibra',
       nativeCurrency: { name: 'MOLI', symbol: 'MOLI', decimals: 18 }, rpcUrls: [RPC], blockExplorerUrls: [NODE + '/molibra/moliscan'] }] });
-    msg.textContent = LANG === 'pt' ? '✓ Molibra está na sua carteira.' : '✓ Molibra is in your wallet.';
+    msg.textContent = D.walletOk;
   } catch (e) {
-    msg.textContent = e && e.code === 4001 ? (LANG === 'pt' ? 'Cancelado na carteira.' : 'Cancelled in the wallet.') : (e.message || String(e));
+    msg.textContent = e && e.code === 4001 ? D.walletCancel : (e.message || String(e));
   }
 }
 $('addNet').onclick = addNetwork; $('addNet2').onclick = addNetwork;
@@ -511,8 +503,7 @@ if ('IntersectionObserver' in window) {
   for (const el of document.querySelectorAll('.reveal')) io.observe(el);
 } else for (const el of document.querySelectorAll('.reveal')) el.classList.add('in');
 
-applyLang();
-readLive();
+setLang(pick(), false).then(readLive);
 </script>
 </body>
 </html>

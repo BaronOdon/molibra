@@ -8,7 +8,7 @@
  */
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -1232,6 +1232,21 @@ async function handleAudit(node, req, res) {
   if (path === '/molibra/bridgeflow.js') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridgeflow.js');
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  // The front page in other languages: /molibra/i18n/<two letters>.json, and
+  // nothing else - the name is matched, never joined into a path as given.
+  if (path.startsWith('/molibra/i18n/')) {
+    const m = /^\/molibra\/i18n\/([a-z]{2})\.json$/.exec(path);
+    const file = m && join(dirname(fileURLToPath(import.meta.url)), 'web', 'i18n', m[1] + '.json');
+    if (!file || !existsSync(file)) {
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: 'no such language' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
     res.end(readFileSync(file, 'utf8'));
     return;
   }
