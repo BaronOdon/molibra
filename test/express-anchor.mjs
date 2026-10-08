@@ -136,7 +136,7 @@ const clock = { t: Date.parse('2026-10-06T20:00:00Z') };
     state.burns[old].status === 'claimed' && !advanced.includes(old));
   check('a burn from before the fee rule (fixed height) needs no fee: processed', advanced.includes('preRule'));
   check('⛔ a burn after the rule with no fee is still NOT processed (a state reset exempts nothing)',
-    !advanced.includes('postRuleUnpaid') && state.burns.postRuleUnpaid.status === 'unpaid-fee');
+    !advanced.includes('postRuleUnpaid') && state.burns.postRuleUnpaid.status === 'self-claim');
   check('  and the resolved one is not listed for the operator', !bot.pendingItems().some((i) => i.molibraTx === old));
 }
 
@@ -149,17 +149,17 @@ console.log('\nevery cost paid by its user (operator, 6 Oct 2026)\n');
       unpaidOld: { from: B, height: '1000', status: 'new' },
       unpaidNew: { from: B, height: '1095', status: 'new' },
     },
-    expressFees: { f: fee(A, 1003, 5n * MOLI), small: fee(B, 1001, 5n * MOLI - 1n) },
+    expressFees: { f: fee(A, 1003, 5n * MOLI), small: fee(B, 1001, 3n * MOLI - 1n) },
   };
   const { bot } = makeBot({ state, clock });
   const advanced = [];
   bot.advanceClaim = async (hash) => { advanced.push(hash); };
   await bot.claims({ height: 1150n });
-  check('a burn whose sender paid the 5 MOLI claim fee is processed', advanced.includes('paid') && state.burns.paid.feePaid === 'f');
-  check('⛔ an unpaid burn past the window is NOT processed: unpaid-fee', !advanced.includes('unpaidOld') && state.burns.unpaidOld.status === 'unpaid-fee');
-  check('  (a fee 1 wei below the floor does not count)', state.burns.unpaidOld.status === 'unpaid-fee');
+  check('a burn whose sender paid the claim fee is processed', advanced.includes('paid') && state.burns.paid.feePaid === 'f');
+  check('⛔ an unpaid burn past the window is NOT claimed by the bot: self-claim', !advanced.includes('unpaidOld') && state.burns.unpaidOld.status === 'self-claim');
+  check('  (a fee 1 wei below the no-snapshot floor, 3 MOLI, does not count)', state.burns.unpaidOld.status === 'self-claim');
   check('an unpaid burn still inside the window waits: awaiting-fee', !advanced.includes('unpaidNew') && state.burns.unpaidNew.status === 'awaiting-fee');
-  check('  and unpaid-fee is listed for the operator', bot.pendingItems().some((i) => i.molibraTx === 'unpaidOld' && i.status === 'unpaid-fee'));
+  check('  and self-claim is NOT on the operator list (the page lets the burner claim)', !bot.pendingItems().some((i) => i.molibraTx === 'unpaidOld'));
   check('⛔ an unpaid burn never gets an express anchor either',
     (await bot.express({ height: 5000n }), !state.burns.unpaidOld.expressFiredAt));
 }
@@ -186,6 +186,61 @@ console.log('\nevery cost paid by its user (operator, 6 Oct 2026)\n');
   check('⛔ an unpaid return past the window: unpaid-fee', !bot.returnPaid('unpaid', state.returns.unpaid, 650n) && state.returns.unpaid.status === 'unpaid-fee');
   check('  (a bMOLI fee outside the 100-block window does not count)', state.returns.unpaid.status === 'unpaid-fee');
   check('a return recorded before fees existed is grandfathered', bot.returnPaid('legacy', state.returns.legacy, 650n));
+}
+
+/* ----------------- fee reduction (8 Oct 2026): quotes snapshotted, 90% of the lower */
+console.log('\nfees at cost: the bot accepts 90% of the lower quote around the request\n');
+{
+  const { FEES } = await import('../bots/bridge-core.mjs');
+  const Q96 = 1n << 96n;
+  const sqrtP = 576n * Q96;                     // 331,776 MOLI per ETH
+  const gwei = 10n ** 9n;
+  // Two snapshots around height 1000: gas 0.2 then 0.4 gwei.
+  const quotes = [
+    { key: '990', ethKey: '500', gasPrice: (2n * gwei / 10n).toString(), sqrtP: sqrtP.toString(), molibraGasPrice: gwei.toString() },
+    { key: '1010', ethKey: '510', gasPrice: (4n * gwei / 10n).toString(), sqrtP: sqrtP.toString(), molibraGasPrice: (2n * gwei).toString() },
+    { key: '5000', ethKey: '900', gasPrice: (40n * gwei).toString(), sqrtP: sqrtP.toString(), molibraGasPrice: gwei.toString() },
+  ];
+  const low = FEES.claimFeeWei(2n * gwei / 10n, sqrtP);
+  check('the claim quote at 0.2 gwei: 1.2 x 100,000 gas -> ~7.97 MOLI, up to 0.01', low === 797n * 10n ** 16n, (Number(low) / 1e18).toFixed(2));
+  const state = { burns: {
+    ok: { from: A, height: '1000', status: 'new' },
+    short: { from: B, height: '1000', status: 'new' },
+  }, expressFees: {
+    f1: fee(A, 1001, low * 9n / 10n),             // exactly 90% of the lower quote
+    f2: fee(B, 1001, low * 9n / 10n - 1n),
+  }, feeQuotes: quotes };
+  const { bot } = makeBot({ state, clock });
+  check('minClaimFee = 90% of the LOWER of the two snapshots around the burn (the far spike ignored)',
+    bot.minClaimFee(1000n) === low * 9n / 10n);
+  check('  with express: 90% of (claim + one full anchor) at the lower quote',
+    bot.minClaimFee(1000n, true) === (low + FEES.expressFeeWei(2n * gwei / 10n, sqrtP)) * 9n / 10n);
+  const advanced = [];
+  bot.advanceClaim = async (hash) => { advanced.push(hash); };
+  await bot.claims({ height: 1200n });
+  check('a fee at exactly 90% is accepted', advanced.includes('ok'));
+  check('⛔ 1 wei less is not: self-claim', !advanced.includes('short') && state.burns.short.status === 'self-claim');
+  check('minReturnFee = 90% of the lower return quote around the Ethereum block (0.01 bMOLI at 1-2 gwei)',
+    bot.minReturnFee(505n) === 10n ** 16n * 9n / 10n);
+  check('the free hourly batch: expressFeeWei is ONE anchor (160,000 gas), not three', FEES.ANCHOR_GAS === 160000n);
+}
+{
+  // snapshotQuote reads the four prices and keeps a bounded list.
+  const sq = (576n << 96n).toString(16).padStart(64, '0');
+  const state = { burns: {}, expressFees: {} };
+  const bot = new BridgeBot({
+    io: { molibra: { rpc: async () => '0x3b9aca00' },
+      eth: { rpc: async (m) => ({ eth_gasPrice: '0xbebc200', eth_call: '0x' + sq + '0'.repeat(64 * 3), eth_blockNumber: '0x64' })[m] } },
+    keys: null, state, now: () => clock.t, config: { maxFeeQuotes: 2 },
+  });
+  for (const h of [1n, 2n, 3n]) await bot.snapshotQuote({ height: h });
+  check('a quote snapshot per tick, keyed by both heights, the list bounded',
+    state.feeQuotes.length === 2 && state.feeQuotes[1].key === '3' && state.feeQuotes[1].ethKey === '100'
+    && state.feeQuotes[1].gasPrice === '200000000' && BigInt(state.feeQuotes[1].sqrtP) === 576n << 96n);
+  const bad = new BridgeBot({ io: { molibra: { rpc: async () => '0x1' }, eth: { rpc: async () => { throw new Error('down'); } } },
+    keys: null, state: {}, now: () => clock.t });
+  await bad.snapshotQuote({ height: 1n });
+  check('an unreadable quote is skipped, never fatal', bad.state.feeQuotes.length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

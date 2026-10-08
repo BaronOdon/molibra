@@ -40,6 +40,12 @@ import {
 } from '../src/bmoliclaim.js';
 import { buildReturn, RpcDisagreement } from '../src/returnproof.js';
 import { signEip1559, decodeEip1559 } from '../src/eth1559.js';
+import { createRequire } from 'node:module';
+
+// The fee arithmetic the pages quote with, loaded from the very file they load
+// (/molibra/bridgefees.js), so the bot and the pages cannot drift apart.
+createRequire(import.meta.url)('../src/web/bridgefees.js');
+export const FEES = globalThis.MolibraFees;
 
 export const MOLIBRA_CHAIN_ID = 20226n;
 
@@ -87,8 +93,11 @@ const GWEI = 1_000_000_000n;
 export const DEFAULTS = {
   // ⛔ Every system cost is paid by the user who triggers it (operator, 6 Oct
   //    2026). A burn is claimed and a return relayed automatically ONLY when its
-  //    sender paid the fee to EXPRESS_FEE_ADDRESS within the window; unpaid ones
-  //    go to pending-operator.json as 'unpaid-fee'. The page quotes the live fee.
+  //    sender paid the fee to EXPRESS_FEE_ADDRESS within the window. An unpaid
+  //    BURN becomes 'self-claim' (8 Oct 2026): never claimed by the bot, and not
+  //    the operator's problem either - /molibra/ponte lets its burner claim it on
+  //    Ethereum paying only the gas. An unpaid RETURN goes to pending-operator.json
+  //    as 'unpaid-fee'. The page quotes the live fee.
   requireFees: true,
   // ⛔ The user-pays rule went live with the bot restart of 6 Oct 2026 ~19:55 UTC
   //    (first tick at Molibra 153,546; Ethereum ~26,135,500). Burns and returns
@@ -96,9 +105,16 @@ export const DEFAULTS = {
   //    on": a state reset must never exempt new unpaid requests.
   feesFromMolibraHeight: 153_546n,
   feesFromEthBlock: 26_135_500n,
-  claimFeeFloorWei: 5n * 10n ** 18n,      // MOLI, covers the relayer's Ethereum claim gas
-  expressFeeFloorWei: 10n * 10n ** 18n,   // MOLI, on top of the claim fee, for an express anchor
-  returnFeeFloorWei: 1n * 10n ** 18n,     // bMOLI, covers the header commit + return on Molibra
+  // ⭐ Fee reduction (operator, 8 Oct 2026): the bot accepts ACCEPT_BP (90%) of
+  //    the LOWER quote (src/web/bridgefees.js) among the snapshots it took around
+  //    the request's height (state.feeQuotes, one per tick). These floors apply
+  //    only when it holds no snapshot at all (a fresh state).
+  claimFeeFloorWei: 3n * 10n ** 18n,      // MOLI, ~0.00001 ETH: the relayer's Ethereum claim
+  expressFeeFloorWei: 5n * 10n ** 18n,    // MOLI, on top of the claim fee, for an express anchor
+  returnFeeFloorWei: 10n ** 16n,          // bMOLI (0.01), the header commit + return on Molibra
+  maxFeeQuotes: 3000,                     // ~10 days of 5-minute ticks
+  stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227',
+  bmoliPoolId: '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312',
   feeWindowBlocks: 100n,                  // Molibra blocks after the burn
   ethFeeWindowBlocks: 100n,               // Ethereum blocks after the vault transfer
   dryRun: false,
@@ -175,6 +191,7 @@ export class BridgeBot {
     state.spentReturnKeys ??= {};
     state.expressFees ??= {};
     state.ethFees ??= {};
+    state.feeQuotes ??= [];
   }
 
   save() { this.saveState(this.state); }
@@ -198,6 +215,7 @@ export class BridgeBot {
           + `${BOT_HEADER_ACTIVATION}, or the node does not publish the bot rules yet`,
       });
     }
+    await this.snapshotQuote(ctx);
     for (const [name, leg] of [['scan', () => this.scanMolibra(ctx)],
       ['claims', () => this.claims(ctx)], ['express', () => this.express(ctx)], ['returns', () => this.returns(ctx)]]) {
       try { await leg(); } catch (e) {
@@ -208,6 +226,50 @@ export class BridgeBot {
     this.save();
     return { ...this.summary(), height: height.toString(), claimsLive: ctx.claimsLive,
       returnsLive: ctx.returnsLive, errors: ctx.errors };
+  }
+
+  /* ----------------------------------------------------------- fee quotes */
+
+  /**
+   * One quote snapshot per tick: Ethereum's gas price, the bMOLI/ETH pool price
+   * and Molibra's gas price, keyed by both chains' heights. A read that fails
+   * is skipped (the gates then use the snapshots they have).
+   */
+  async snapshotQuote(ctx) {
+    try {
+      const [gp, slot0, ethBlock, mgp] = await Promise.all([
+        this.io.eth.rpc('eth_gasPrice', []),
+        this.io.eth.rpc('eth_call', [{ to: this.cfg.stateView,
+          data: '0xc815641c' + lower(this.cfg.bmoliPoolId).replace(/^0x/, '') }, 'latest']),
+        this.io.eth.rpc('eth_blockNumber', []),
+        this.io.molibra.rpc('eth_gasPrice', []),
+      ]);
+      const sqrtP = BigInt('0x' + (String(slot0).replace(/^0x/, '').slice(0, 64) || '0'));
+      if (sqrtP === 0n || BigInt(gp) === 0n) throw new Error('no pool price or gas price');
+      const q = { key: ctx.height.toString(), ethKey: BigInt(ethBlock).toString(), gasPrice: BigInt(gp).toString(),
+        sqrtP: sqrtP.toString(), molibraGasPrice: BigInt(mgp).toString(), at: new Date(this.now()).toISOString() };
+      const list = this.state.feeQuotes;
+      list.push(q);
+      if (list.length > this.cfg.maxFeeQuotes) list.splice(0, list.length - this.cfg.maxFeeQuotes);
+      ctx.quote = q;
+    } catch (e) {
+      this.log('warn', 'fee-quote-unreadable', { error: e.message });
+    }
+  }
+
+  /** The smallest claim fee (plus the express fee when `express`) the bot accepts for a burn at `height`. */
+  minClaimFee(height, express = false) {
+    const fee = (q) => FEES.claimFeeWei(q.gasPrice, q.sqrtP) + (express ? FEES.expressFeeWei(q.gasPrice, q.sqrtP) : 0n);
+    const quotes = FEES.quotesAround(this.state.feeQuotes.filter((q) => q.gasPrice && q.sqrtP), height);
+    return FEES.minAccepted(quotes.map(fee))
+      ?? this.cfg.claimFeeFloorWei + (express ? this.cfg.expressFeeFloorWei : 0n);
+  }
+
+  /** The smallest return fee (bMOLI) the bot accepts for a vault transfer in Ethereum block `ethBlock`. */
+  minReturnFee(ethBlock) {
+    const keyed = this.state.feeQuotes.filter((q) => q.ethKey && q.molibraGasPrice).map((q) => ({ ...q, key: q.ethKey }));
+    const quotes = FEES.quotesAround(keyed, ethBlock);
+    return FEES.minAccepted(quotes.map((q) => FEES.returnFeeWei(q.molibraGasPrice))) ?? this.cfg.returnFeeFloorWei;
   }
 
   /* ----------------------------------------------------------- Molibra scan */
@@ -307,8 +369,7 @@ export class BridgeBot {
         if (this.now() - Date.parse(b.expressFiredAt) < EXPRESS_RETRY_MS) continue;
         this.log('warn', 'express-not-anchored', { tx: hash, attempts, height: b.height, note: 'refiring' });
       }
-      const fee = expressFeeFor(b, this.state.expressFees,
-        this.cfg.claimFeeFloorWei + this.cfg.expressFeeFloorWei, this.cfg.feeWindowBlocks);
+      const fee = expressFeeFor(b, this.state.expressFees, this.minClaimFee(b.height, true), this.cfg.feeWindowBlocks);
       if (!fee) continue;
       if (ctx.height < BigInt(b.height) + ANCHOR_MIN_DEPTH) {
         if (b.express !== 'waiting-depth') {
@@ -363,13 +424,13 @@ export class BridgeBot {
     }
   }
 
-  /** True when the burner paid the claim fee; otherwise marks awaiting-fee / unpaid-fee. */
+  /** True when the burner paid the claim fee; otherwise marks awaiting-fee / self-claim. */
   claimPaid(hash, b, ctx) {
     if (b.feePaid || !this.cfg.requireFees) return true;
     if (BigInt(b.height) < BigInt(this.cfg.feesFromMolibraHeight)) return true;   // before the rule: grandfathered
-    const fee = expressFeeFor(b, this.state.expressFees, this.cfg.claimFeeFloorWei, this.cfg.feeWindowBlocks);
+    const fee = expressFeeFor(b, this.state.expressFees, this.minClaimFee(b.height), this.cfg.feeWindowBlocks);
     if (fee) { b.feePaid = fee.hash; this.log('info', 'claim-fee-paid', { tx: hash, fee: fee.hash }); return true; }
-    const status = ctx.height > BigInt(b.height) + this.cfg.feeWindowBlocks ? 'unpaid-fee' : 'awaiting-fee';
+    const status = ctx.height > BigInt(b.height) + this.cfg.feeWindowBlocks ? 'self-claim' : 'awaiting-fee';
     if (b.status !== status) this.log('info', 'claim-status', { tx: hash, from: b.status, to: status });
     b.status = status;
     return false;
@@ -389,7 +450,14 @@ export class BridgeBot {
     let replacing = null;
     if (b.status === 'sent') {
       const r = await eth.rpc('eth_getTransactionReceipt', [b.ethTx]).catch(() => null);
-      if (r && BigInt(r.status) === 1n) { set('claimed'); return; }
+      if (r && BigInt(r.status) === 1n) {
+        // What the claim really cost, against the fee the burner paid.
+        const gasUsed = BigInt(r.gasUsed ?? 0), price = BigInt(r.effectiveGasPrice ?? 0);
+        set('claimed', { gasUsed: gasUsed.toString(), effectiveGasPrice: price.toString(), costWei: (gasUsed * price).toString() });
+        this.log('info', 'claim-cost', { tx: hash, ethTx: b.ethTx, gasUsed: gasUsed.toString(),
+          effectiveGasPrice: price.toString(), costWei: (gasUsed * price).toString(), fee: b.feePaid ?? null });
+        return;
+      }
       if (r) { set('new', { note: `claim ${b.ethTx} reverted on chain`, ethTx: null }); return; }
       if (this.now() - Date.parse(b.sentAt) < this.cfg.ethResendAfterMs) {
         if (ctx.claimsLive) await eth.send('eth_sendRawTransaction', [b.raw]).catch(() => {}); // idempotent
@@ -533,7 +601,7 @@ export class BridgeBot {
     if (!r.from) return true;   // recorded before fees existed: grandfathered
     if (BigInt(r.blockNumber) < BigInt(this.cfg.feesFromEthBlock)) return true;   // before the rule: grandfathered
     const fee = expressFeeFor({ from: r.from, height: r.blockNumber }, this.state.ethFees,
-      this.cfg.returnFeeFloorWei, this.cfg.ethFeeWindowBlocks);
+      this.minReturnFee(r.blockNumber), this.cfg.ethFeeWindowBlocks);
     if (fee) { r.feePaid = fee.hash; this.log('info', 'return-fee-paid', { ethTx: hash, fee: fee.hash }); return true; }
     const status = latestEth > BigInt(r.blockNumber) + this.cfg.ethFeeWindowBlocks ? 'unpaid-fee' : 'awaiting-fee';
     if (r.status !== status) this.log('info', 'return-status', { ethTx: hash, from: r.status, to: status });

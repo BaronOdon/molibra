@@ -12,8 +12,10 @@
   One plain transfer per direction, signed in the reader's own wallet; the
   page then waits for the payout and adds bMOLI to the wallet when it lands.
   ⛔ Custodial for the minutes in flight, bounded by the limits in
-  /molibra/fastbridge.json. The user pays every cost: the fee is the larger of
-  0.5%, twice the payout's live gas, and 1 MOLI. Text goes in by textContent only.
+  /molibra/fastbridge.json. The user pays every cost, at cost (operator, 8 Oct
+  2026): 0.1-0.3% by how full the paying side of the inventory is, plus 1.2 x
+  the payout's live gas, rounded up to 0.01 - computed by /molibra/bridgefees.js,
+  the same file the bot loads. Text goes in by textContent only.
 -->
 <style>
   :root{--bg:#07070a;--panel:#111116;--line:#24242c;--ink:#ececf0;--dim:#8b8b94;--gold:#FFD100;--ok:#4ade80;--bad:#ff5c5c}
@@ -68,6 +70,7 @@
 </main>
 
 <script src="/molibra/mobilewallet.js"></script>
+<script src="/molibra/bridgefees.js"></script>
 <script>
 'use strict';
 const NODE = location.origin;
@@ -126,10 +129,10 @@ async function readAll() {
   inv = { moli: BigInt(mBal), bmoli: BigInt(bBal) };
   // The same arithmetic the bot uses (bots/fastbridge-core.mjs gasCosts).
   const tip = BigInt(Math.round(Number(CFG.tipGwei) * 1e9));
-  const maxFee = BigInt(block.baseFeePerGas || '0x0') * 2n + tip;
+  const perGas = BigInt(block.baseFeePerGas || '0x0') + tip;
   const sq = BigInt('0x' + slot0.slice(2, 66));
   const perEth = (sq * sq * WEI) >> 192n;
-  gas = { m2b: (BigInt(CFG.erc20GasLimit) * maxFee * perEth) / WEI, b2m: 21512n * BigInt(mGas) };
+  gas = { m2b: (BigInt(CFG.erc20PayoutGas) * perGas * perEth) / WEI, b2m: 21512n * BigInt(mGas) };
   if (account) {
     const [a, b] = await Promise.all([mrpc('eth_getBalance', [account, 'latest']),
       erpc('eth_call', [{ to: CFG.bmoli, data: '0x70a08231' + pad(account) }, 'latest'])]);
@@ -139,10 +142,10 @@ async function readAll() {
 }
 
 function quoteFor(amount) {
-  let fee = amount * BigInt(CFG.feeBp) / 10000n;
-  const g = (gas ? gas[dir] : 0n) * BigInt(CFG.gasMargin);
-  if (fee < g) fee = g;
-  const min = BigInt(CFG.minFee) * WEI; if (fee < min) fee = min;
+  // The coin the inventory pays out: bMOLI for m2b, MOLI for b2m (unknown = 0, the top rate).
+  const stock = (dir === 'm2b' ? inv.bmoli : inv.moli) ?? 0n;
+  let fee = MolibraFees.fastFeeWei(amount, stock, BigInt(CFG.maxInventory) * WEI, gas ? gas[dir] : 0n);
+  if (fee < MolibraFees.STEP) fee = MolibraFees.STEP;
   return { fee, out: amount > fee ? amount - fee : 0n };
 }
 

@@ -24,11 +24,10 @@
 
   const vaultData = (wei) => TRANSFER + word(VAULT) + word(wei);
   const feeData = (wei) => TRANSFER + word(FEE_ADDRESS) + word(wei);
-  /** header commit + return on Molibra (2 x 500,000 gas) x gas price x 2, rounded up to a whole bMOLI, floor 1. */
+  /** The return fee in bMOLI: /molibra/bridgefees.js (load it first), the file the bot accepts with. */
   function returnFeeWei(molibraGasPriceWei) {
-    const w = 2n * 1000000n * BigInt(molibraGasPriceWei);
-    const whole = (w + 10n ** 18n - 1n) / 10n ** 18n * 10n ** 18n;
-    return whole > 10n ** 18n ? whole : 10n ** 18n;
+    if (!root.MolibraFees) throw new Error('bridgefees.js is not loaded');
+    return root.MolibraFees.returnFeeWei(molibraGasPriceWei);
   }
   /** What the bot can still return automatically right now, from /molibra's outbound.botCap. */
   function capFree(identity) {

@@ -2,6 +2,10 @@
 #
 #   powershell -File deploy\install-anchor-publisher.ps1 -IntervalMinutes 180
 #   powershell -File deploy\install-anchor-publisher.ps1 -Remove
+#   powershell -File deploy\install-anchor-publisher.ps1 -IfBurn -IntervalMinutes 60
+#      the FREE hourly batch (operator, 8 Oct 2026), a second task beside the
+#      daily one: --if-burn anchors only a burn that is ready and otherwise
+#      spends nothing. Both tasks share the publisher's per-host lock.
 #
 # ⛔⛔ EXACTLY ONE HOST MAY RUN THIS. `anchor()` requires strictly increasing
 #    height and work, so a second scheduler racing this one pays full gas for a
@@ -25,11 +29,12 @@ param(
   [int]$IntervalMinutes = 180,
   [string]$Node = 'http://193.123.191.142:8545',
   [int]$Depth = 200,
+  [switch]$IfBurn,
   [switch]$Remove
 )
 
 $ErrorActionPreference = 'Stop'
-$TaskName = 'Molibra anchor publisher'
+$TaskName = if ($IfBurn) { 'Molibra anchor batch' } else { 'Molibra anchor publisher' }
 $Repo = Split-Path -Parent $PSScriptRoot
 
 if ($Remove) {
@@ -57,6 +62,7 @@ $log  = Join-Path $Repo 'anchor-publisher.log'
 #    quotes that make the space in the path survive, and the task fails with
 #    "'C:\Program' is not recognized" - in a log nobody reads.
 $cmd = "`"$nodeExe`" anchor-publisher.mjs --send --node $Node --depth $Depth"
+if ($IfBurn) { $cmd += ' --if-burn' }
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
   -Argument "/c `"$cmd >> `"$log`" 2>&1`"" -WorkingDirectory $Repo
 

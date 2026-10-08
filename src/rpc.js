@@ -1236,6 +1236,15 @@ async function handleAudit(node, req, res) {
     return;
   }
 
+  // Every bridge fee, one file: /molibra/ponte, /buy and /rapido quote with it
+  // and the bridge bot accepts with it (bots/*.mjs load the same file).
+  if (path === '/molibra/bridgefees.js') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'bridgefees.js');
+    res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/return') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'return.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

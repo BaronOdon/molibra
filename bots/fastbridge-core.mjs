@@ -51,6 +51,11 @@ import { BMOLI_CONTRACT } from '../src/molireturn.js';
 import { TRANSFER_TOPIC } from '../src/burnproof.js';
 import { MAX_BLOCK_RANGE } from '../src/limits.js';
 import { signEip1559, decodeEip1559 } from '../src/eth1559.js';
+import { createRequire } from 'node:module';
+
+// The fee arithmetic /molibra/rapido quotes with: the same file (bridgefees.js).
+createRequire(import.meta.url)('../src/web/bridgefees.js');
+const FEES = globalThis.MolibraFees;
 
 export const MOLIBRA_CHAIN_ID = 20226n;
 const GWEI = 1_000_000_000n;
@@ -62,8 +67,10 @@ export const FAST_DEFAULTS = {
   dryRun: false,
   molibraConfirmations: 12n,       // Molibra reorgs to depth ~2 are seen; 12 is a wide margin
   ethConfirmations: 3n,
-  feeBp: 50n,                      // 0.5%
-  minFeeWei: 1n * WEI,             // at least 1 MOLI / 1 bMOLI
+  // ⭐ Fee reduction (operator, 8 Oct 2026): 0.1-0.3% of the amount by how full
+  //    the paying side of the inventory is, plus 1.2 x the payout's gas, rounded
+  //    up to 0.01 (src/web/bridgefees.js fastFeeWei).
+  minFeeWei: 10n ** 16n,           // 0.01 MOLI / bMOLI
   maxPerTransferWei: 2_000n * WEI,
   maxPerHourWei: 10_000n * WEI,    // per direction, rolling
   maxPerDayWei: 30_000n * WEI,     // both directions together, rolling
@@ -73,13 +80,16 @@ export const FAST_DEFAULTS = {
   tipWei: 50_000_000n,             // 0.05 gwei, explicit and low
   maxFeeCapWei: 20n * GWEI,
   erc20GasLimit: 90_000n,          // a plain ERC-20 transfer is ~35-52k; 90k with the appended hash and margin
+  // What a payout is QUOTED at: gas used (52,009 to a fresh holder, 34,897 to an
+  // existing one: payouts 0xca1f…, 0x3fe5…, 8 Oct) x what it pays per gas
+  // (base + tip). The gas LIMIT above stays wide; it is not what is spent.
+  erc20PayoutGas: 60_000n,
   ethResendAfterMs: 20 * 60_000,
   molibraResendAfterMs: 15 * 60_000,
   readFailPauseAfter: 3,
   // ⛔ Every system cost is the user's (operator, 6 Oct 2026): the fee covers the
-  //    payout's gas twice over, read live. MOLI per ETH comes from the bMOLI/ETH
+  //    payout's gas x 1.2, read live. MOLI per ETH comes from the bMOLI/ETH
   //    Uniswap v4 pool (StateView.getSlot0), as /molibra/cotacao reads it.
-  gasMargin: 2n,
   // ⛔ A hot wallet holds only what the route needs (security review, 6 Oct 2026):
   //    above max + 10% the excess goes to the operator's cold wallet, one tx per
   //    tick, gas paid by the inventory, never leaving it below max.
@@ -142,14 +152,15 @@ export function sourceOfErc20Payout(data) {
 }
 /**
  * The fee on `amount` (wei), and what is paid out. The user pays every cost:
- * fee = max(feeBp of the amount, gasMargin x the payout's live gas cost in MOLI,
- * minFee). `gasMoliWei` is that gas cost (0 when unknown, tests of the floor).
+ * fee = fastFeeWei (0.1-0.3% by the paying side's stock against its max, plus
+ * 1.2 x the payout's live gas in the coin paid in), at least minFee.
+ * `gasMoliWei` is that gas cost; `stockWei` what the inventory holds of the
+ * coin it pays out (0 when unknown: the top rate); `dir` picks the max.
  */
-export function quote(amount, cfg = FAST_DEFAULTS, gasMoliWei = 0n) {
+export function quote(amount, cfg = FAST_DEFAULTS, gasMoliWei = 0n, stockWei = 0n, dir = 'm2b') {
   const a = BigInt(amount);
-  let fee = (a * BigInt(cfg.feeBp)) / 10_000n;
-  const gasFee = BigInt(gasMoliWei) * BigInt(cfg.gasMargin ?? 2n);
-  if (fee < gasFee) fee = gasFee;
+  const full = dir === 'm2b' ? cfg.maxInventoryBmoliWei : cfg.maxInventoryMoliWei;
+  let fee = FEES.fastFeeWei(a, stockWei ?? 0n, full, gasMoliWei);
   if (fee < BigInt(cfg.minFeeWei)) fee = BigInt(cfg.minFeeWei);
   return { amount: a, fee, out: a > fee ? a - fee : 0n };
 }
@@ -267,20 +278,29 @@ export class FastBridge {
 
   /**
    * What one payout costs right now, in MOLI-wei: m2b = an Ethereum ERC-20
-   * transfer (gas limit x (2 x base + tip)) converted at the bMOLI/ETH pool;
-   * b2m = a Molibra transfer carrying 32 bytes of data, at the node's gas price.
+   * transfer (erc20PayoutGas x (base + tip), what it really pays) converted at
+   * the bMOLI/ETH pool; b2m = a Molibra transfer carrying 32 bytes of data, at
+   * the node's gas price.
    */
   async gasCosts() {
     const latest = await this.io.eth.rpc('eth_getBlockByNumber', ['latest', false]);
-    const maxFee = BigInt(latest.baseFeePerGas ?? '0x0') * 2n + this.cfg.tipWei;
+    const perGas = BigInt(latest.baseFeePerGas ?? '0x0') + this.cfg.tipWei;
     const slot0 = await this.io.eth.rpc('eth_call', [{ to: this.cfg.stateView,
       data: GET_SLOT0 + lower(this.cfg.bmoliPoolId).replace(/^0x/, '') }, 'latest']);
     const sqrt = BigInt('0x' + String(slot0).replace(/^0x/, '').slice(0, 64));
     if (sqrt === 0n) throw new Error('the bMOLI/ETH pool reports no price');
-    const m2b = (this.cfg.erc20GasLimit * maxFee * bmoliPerEthE18(sqrt)) / WEI;
+    const m2b = (this.cfg.erc20PayoutGas * perGas * bmoliPerEthE18(sqrt)) / WEI;
     const mGasPrice = BigInt(await this.io.molibra.rpc('eth_gasPrice', []));
     const b2m = intrinsicGas({ data: '0x' + '11'.repeat(32) }) * mGasPrice;
-    return { m2b, b2m };
+    // What the inventory holds of the coin each direction PAYS OUT (the rate
+    // falls as it fills). Unreadable = null: the top rate, never a lower one.
+    const stock = { m2b: null, b2m: null };
+    try {
+      stock.m2b = BigInt(await this.io.eth.rpc('eth_call', [{ to: BMOLI_CONTRACT,
+        data: '0x70a08231' + addr32(this.inventory) }, 'latest']));
+    } catch { /* top rate */ }
+    try { stock.b2m = BigInt(await this.io.molibra.rpc('eth_getBalance', [this.inventory, 'latest'])); } catch { /* top rate */ }
+    return { m2b, b2m, stock };
   }
 
   pause(reason, extra = {}) {
@@ -317,7 +337,7 @@ export class FastBridge {
         dir: 'm2b', from: lower(tx.from), amount: BigInt(tx.value).toString(),
         srcBlock: n.toString(), srcBlockHash: header.hash ?? null, status: 'confirmed',
         seenAt: new Date(this.now()).toISOString(), checkFromEth: tips.eth.toString(),
-        feeWei: tips.gas ? quote(tx.value, this.cfg, tips.gas.m2b).fee.toString() : null,
+        feeWei: tips.gas ? quote(tx.value, this.cfg, tips.gas.m2b, tips.gas.stock?.m2b, 'm2b').fee.toString() : null,
       };
       if (this.isFunding(tx.from)) this.markFunding(tx.hash, this.state.items[tx.hash]);
       this.log('info', 'fast-inbound', { dir: 'm2b', tx: tx.hash, from: tx.from, amount: BigInt(tx.value).toString() });
@@ -343,7 +363,7 @@ export class FastBridge {
           dir: 'b2m', from, amount: BigInt(l.data).toString(), srcBlock: BigInt(l.blockNumber).toString(),
           srcBlockHash: lower(l.blockHash), logIndex: Number(BigInt(l.logIndex)), status: 'confirmed',
           seenAt: new Date(this.now()).toISOString(), checkFromMolibra: tips.molibra.toString(),
-          feeWei: tips.gas ? quote(BigInt(l.data), this.cfg, tips.gas.b2m).fee.toString() : null,
+          feeWei: tips.gas ? quote(BigInt(l.data), this.cfg, tips.gas.b2m, tips.gas.stock?.b2m, 'b2m').fee.toString() : null,
         };
         if (this.isFunding(from)) this.markFunding(h, this.state.items[h]);
         this.log('info', 'fast-inbound', { dir: 'b2m', tx: h, from, amount: BigInt(l.data).toString() });
@@ -426,7 +446,9 @@ export class FastBridge {
     if (gasNow === null) { this.set(hash, it, 'ready', { note: 'gas price unreadable this tick; retried' }); return; }
     // The fee is fixed when the transfer is recorded (what the page quoted at send
     // time); an item recorded while gas was unreadable gets it now.
-    if (it.feeWei === null || it.feeWei === undefined) it.feeWei = quote(amount, this.cfg, gasNow).fee.toString();
+    if (it.feeWei === null || it.feeWei === undefined) {
+      it.feeWei = quote(amount, this.cfg, gasNow, tips.gas.stock?.[it.dir], it.dir).fee.toString();
+    }
     const fee = BigInt(it.feeWei);
     const q = { amount, fee, out: amount > fee ? amount - fee : 0n };
     if (q.out === 0n) { this.set(hash, it, 'below-fee'); return; }

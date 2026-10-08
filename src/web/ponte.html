@@ -16,8 +16,12 @@
   never called). The bridge bot claims the bMOLI on Ethereum once the burn's
   block is anchored and BridgedMoli's challenge window (immutable, 7,200
   Ethereum blocks ≈ 24 h) has passed; the mint goes to the burner by contract
-  design. "Âncora imediata": a second signature pays a MOLI fee so the bot runs
-  the anchor publisher at once instead of waiting for its daily run.
+  design. Fees at cost (operator, 8 Oct 2026; /molibra/bridgefees.js, the file
+  the bot accepts with): the claim fee covers the relayer's Ethereum claim x 1.2.
+  The burn's block is anchored by the FREE hourly batch; "Âncora imediata" pays
+  one full anchor to run it as soon as the block is deep enough. "Reivindicar eu
+  mesmo" pays no bridge fee at all: the reader claims on Ethereum (claimFromProof,
+  the bot's own encoder, ported below) and pays only the gas.
 
   bMOLI -> MOLI: the SAME bMOLI.transfer(vault, amount) /molibra/return sends.
   The bot proves it and returns the MOLI to the SENDER on Molibra, automatically
@@ -81,7 +85,10 @@
     <div class="row"><span id="toLabel">Você recebe (Ethereum)</span><span id="toBal">—</span></div>
     <div class="amt" style="font:600 22px var(--sans)" id="receive">0</div>
   </div>
-  <label class="opt" id="expressRow"><input type="checkbox" id="express" checked>
+  <label class="opt" id="selfRow"><input type="checkbox" id="selfClaim">
+    <span><b id="selfTitle">Reivindicar eu mesmo</b><br>
+    <span class="note" id="selfNote">—</span></span></label>
+  <label class="opt" id="expressRow"><input type="checkbox" id="express">
     <span><b id="expressTitle">Âncora imediata</b> <span id="expressFee">(+… MOLI)</span><br>
     <span class="note" id="expressNote">—</span></span></label>
   <button class="go" id="go" type="button">Conectar carteira</button>
@@ -94,10 +101,12 @@
 <section class="card" id="progressCard" hidden>
   <div class="row" style="margin-bottom:6px"><b id="progTitle" style="color:var(--ink)">Andamento</b><span id="progClock"></span></div>
   <ol class="steps" id="steps"></ol>
+  <button class="go" id="claimBtn" type="button" hidden>—</button>
 </section>
 </main>
 
 <script src="/molibra/mobilewallet.js"></script>
+<script src="/molibra/bridgefees.js"></script>
 <script>
 const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
 const ETH_RPC = 'https://ethereum-rpc.publicnode.com';
@@ -133,38 +142,32 @@ function parseAmount(s) {
 }
 function burnData(recipient, wei) { return MOLI_BURN_TAG + addr32(recipient).slice(24) + word(wei); }
 function vaultData(wei) { return TRANSFER + word(VAULT) + word(wei); }
-/**
- * The express-anchor fee in MOLI-wei: max(10 MOLI, ceil(3 x 200,000 gas x the
- * Ethereum gas price x MOLI per ETH)), MOLI per ETH from the bMOLI/ETH v4 pool
- * (sqrtPriceX96^2 / 2^192, both 18 decimals). Rounded UP to a whole MOLI.
- */
-function expressFeeWei(gasPriceWei, sqrtP) {
-  const ethCost = 3n * 200000n * BigInt(gasPriceWei);
-  const sq = BigInt(sqrtP);
-  const moli = (ethCost * sq * sq + (1n << 192n) - 1n) >> 192n;
-  const whole = (moli + 10n ** 18n - 1n) / 10n ** 18n * 10n ** 18n;
-  const floor = 10n * 10n ** 18n;
-  return whole > floor ? whole : floor;
+/* Every fee comes from /molibra/bridgefees.js (MolibraFees): the bot accepts with the same file. */
+const expressFeeWei = (gasPriceWei, sqrtP) => MolibraFees.expressFeeWei(gasPriceWei, sqrtP);
+const claimFeeWei = (gasPriceWei, sqrtP) => MolibraFees.claimFeeWei(gasPriceWei, sqrtP);
+const returnFeeWei = (molibraGasPriceWei) => MolibraFees.returnFeeWei(molibraGasPriceWei);
+
+/* The claim, encoded as src/bmoliclaim.js encodes it for the bot (test/ponte-page.mjs compares them). */
+const CLAIM_SEL = '0x28f2d6f5';          // claim(uint256,bytes,bytes,bytes32[],bool[])
+const hexBody = (h) => String(h).replace(/^0x/, '').toLowerCase();
+function encodeClaim(height, headerRlp, rawTx, siblings, onRight) {
+  const bytesArg = (hex) => {
+    const body = hexBody(hex);
+    return word(body.length / 2) + body.padEnd(Math.ceil(body.length / 64) * 64, '0');
+  };
+  const arrArg = (items) => word(items.length) + items.join('');
+  const tails = [bytesArg(headerRlp), bytesArg(rawTx),
+    arrArg(siblings.map((x) => hexBody(x).padStart(64, '0'))), arrArg(onRight.map((b) => word(b ? 1 : 0)))];
+  let offset = 5 * 32;
+  const heads = tails.map((t) => { const h = word(offset); offset += t.length / 2; return h; });
+  return CLAIM_SEL + word(height) + heads.join('') + tails.join('');
 }
-/** Every cost is paid by its user (operator, 6 Oct 2026). Rounded UP to a whole coin. */
-const roundUpWhole = (wei) => (BigInt(wei) + 10n ** 18n - 1n) / 10n ** 18n * 10n ** 18n;
-/**
- * The claim fee in MOLI-wei: the relayer's Ethereum claim (250,000 gas, above
- * the bot's 150,000 minimum and the claims seen so far) x the gas price x MOLI
- * per ETH x 2 margin, floor 5 MOLI.
- */
-function claimFeeWei(gasPriceWei, sqrtP) {
-  const sq = BigInt(sqrtP);
-  const moli = (2n * 250000n * BigInt(gasPriceWei) * sq * sq + (1n << 192n) - 1n) >> 192n;
-  const whole = roundUpWhole(moli);
-  const floor = 5n * 10n ** 18n;
-  return whole > floor ? whole : floor;
-}
-/** The return fee in bMOLI-wei: header commit + return on Molibra (2 x 500,000 gas) x Molibra gas price x 2, floor 1. */
-function returnFeeWei(molibraGasPriceWei) {
-  const whole = roundUpWhole(2n * 1000000n * BigInt(molibraGasPriceWei));
-  const floor = 10n ** 18n;
-  return whole > floor ? whole : floor;
+/** The claim calldata from the node's /molibra/proof/<tx> answer (both sibling spellings). */
+function claimFromProof(p) {
+  const path = p.proof ?? p.siblings ?? [];
+  const siblings = path.map((x) => x.hash ?? x.sibling ?? x);
+  const onRight = path.map((x) => (x.side ? x.side === 'right' : (x.onRight ?? x.right ?? x.siblingOnRight)));
+  return encodeClaim(p.blockNumber, p.headerRlp, p.raw, siblings, onRight);
 }
 /* PURE-END */
 
@@ -176,13 +179,17 @@ const T = {
     connect: 'Conectar carteira', goOut: 'Enviar {0} MOLI para a Ethereum', goBack: 'Trazer {0} bMOLI de volta',
     typeAmount: 'Digite um valor', busy: 'Em andamento…',
     expressTitle: 'Âncora imediata', expressFee: '(+{0} MOLI)',
-    expressNote: 'A ponte ancora o seu bloco na Ethereum agora, em vez de esperar a rodada diária. A janela de contestação do contrato (7.200 blocos da Ethereum, ~24 h) não muda: com âncora imediata leva ~24 h no total; sem ela, até ~48 h. Uma segunda assinatura paga a taxa em MOLI.',
-    timingOut: 'Uma só interação: você assina na carteira e a página acompanha o resto sozinha. O bMOLI chega à mesma carteira, na Ethereum.',
+    expressNote: 'Sem ela, o seu bloco entra no lote horário gratuito (ancorado ~1–2 h depois da queima). Com ela, a ponte ancora assim que o bloco tem a profundidade mínima (~55 min), pelo preço cheio de uma âncora. A janela de contestação do contrato (7.200 blocos da Ethereum, ~24 h) não muda.',
+    selfTitle: 'Reivindicar eu mesmo (sem taxa da ponte)',
+    selfNote: 'Quando a janela fechar, esta página reivindica com um clique na Ethereum e você paga só o gás (~{0} ETH agora). Precisa de ETH na carteira.',
+    timingOut: 'Você assina na carteira e a página acompanha o resto. Total ~25 h: âncora em ~1–2 h + a janela de contestação de ~24 h. O bMOLI chega à mesma carteira, na Ethereum.',
     timingBack: 'Uma só interação: você assina o envio na Ethereum; o robô da ponte devolve o MOLI ao mesmo endereço na Molibra em ~10–25 min, automático até {0} MOLI por janela de 5.760 blocos (agora livres: {1}). Acima disso, quem processa é o operador.',
     warnOut: '⛔ Queimar MOLI é definitivo: ele só volta pelo caminho de volta (bMOLI → MOLI). Envie de uma carteira cuja chave você tem.',
     warnBack: '⛔ O cofre é definitivo: o bMOLI enviado a ele nunca sai. O MOLI é pago ao endereço que ENVIOU; enviado de um contrato (roteador, Safe), cairia num endereço sem chave.',
     stBurn: 'Queimar MOLI na Molibra', stFee: 'Pagar as taxas (reivindicação + âncora imediata)', stFeeClaim: 'Pagar a taxa de reivindicação', stRetFee: 'Pagar a taxa de devolução (bMOLI)',
-    feesOut: 'Taxas, pagas por você: reivindicação na Ethereum {0} MOLI{1} = {2} MOLI, numa segunda assinatura.', feesExpr: ' + âncora imediata {0} MOLI',
+    feesOut: 'Taxas, pagas por você, a preço de custo: reivindicação na Ethereum {0} MOLI{1} = {2} MOLI, numa segunda assinatura.', feesExpr: ' + âncora imediata {0} MOLI',
+    feesSelf: 'Nenhuma taxa da ponte: você reivindica na Ethereum e paga só o gás (~{0} ETH agora).',
+    stClaimSelf: 'Reivindicar o bMOLI (você, na Ethereum)', claimBtn: 'Reivindicar agora na Ethereum', claimBtnOpt: 'Reivindicar eu mesmo agora (o robô também vai reivindicar)',
     feesBack: 'Taxa, paga por você: devolução na Molibra {0} bMOLI, numa segunda assinatura (além do gás da Ethereum).', stAnchor: 'Bloco ancorado na Ethereum',
     stWindow: 'Janela de contestação', stClaim: 'bMOLI emitido para você (robô da ponte)', stWatch: 'bMOLI adicionado à carteira',
     stSend: 'Enviar bMOLI ao cofre (Ethereum)', stConf: 'Confirmado na Ethereum', stReturn: 'MOLI devolvido na Molibra (robô da ponte)', stNet: 'Rede Molibra na carteira',
@@ -200,13 +207,17 @@ const T = {
     connect: 'Connect wallet', goOut: 'Send {0} MOLI to Ethereum', goBack: 'Bring {0} bMOLI back',
     typeAmount: 'Enter an amount', busy: 'In progress…',
     expressTitle: 'Express anchor', expressFee: '(+{0} MOLI)',
-    expressNote: 'The bridge anchors your block on Ethereum now instead of waiting for the daily run. The contract\'s challenge window (7,200 Ethereum blocks, ~24 h) does not change: express takes ~24 h in total; without it, up to ~48 h. A second signature pays the fee in MOLI.',
-    timingOut: 'One interaction: you sign in the wallet and the page follows the rest by itself. The bMOLI arrives in the same wallet, on Ethereum.',
+    expressNote: 'Without it, your block goes into the free hourly batch (anchored ~1–2 h after the burn). With it, the bridge anchors as soon as the block is deep enough (~55 min), at the full price of one anchor. The contract’s challenge window (7,200 Ethereum blocks, ~24 h) does not change.',
+    selfTitle: 'Claim it myself (no bridge fee)',
+    selfNote: 'When the window closes, this page claims on Ethereum in one click and you pay only the gas (~{0} ETH now). You need ETH in the wallet.',
+    timingOut: 'You sign in the wallet and the page follows the rest. About 25 h in total: anchored in ~1–2 h + the ~24 h challenge window. The bMOLI arrives in the same wallet, on Ethereum.',
     timingBack: 'One interaction: you sign the transfer on Ethereum; the bridge bot returns the MOLI to the same address on Molibra in ~10–25 min, automatic up to {0} MOLI per 5,760-block window (free now: {1}). Above that the operator processes it.',
     warnOut: '⛔ Burning MOLI is final: it only comes back through the return path (bMOLI → MOLI). Send from a wallet whose key you hold.',
     warnBack: '⛔ The vault is final: bMOLI sent to it never leaves. The MOLI is paid to the SENDING address; sent from a contract (router, Safe) it would land where nobody has a key.',
     stBurn: 'Burn MOLI on Molibra', stFee: 'Pay the fees (claim + express anchor)', stFeeClaim: 'Pay the claim fee', stRetFee: 'Pay the return fee (bMOLI)',
-    feesOut: 'Fees, paid by you: Ethereum claim {0} MOLI{1} = {2} MOLI, in a second signature.', feesExpr: ' + express anchor {0} MOLI',
+    feesOut: 'Fees, paid by you, at cost: Ethereum claim {0} MOLI{1} = {2} MOLI, in a second signature.', feesExpr: ' + express anchor {0} MOLI',
+    feesSelf: 'No bridge fee: you claim on Ethereum and pay only the gas (~{0} ETH now).',
+    stClaimSelf: 'Claim the bMOLI (you, on Ethereum)', claimBtn: 'Claim now on Ethereum', claimBtnOpt: 'Claim it myself now (the bot will claim it too)',
     feesBack: 'Fee, paid by you: Molibra return {0} bMOLI, in a second signature (plus Ethereum gas).', stAnchor: 'Block anchored on Ethereum',
     stWindow: 'Challenge window', stClaim: 'bMOLI minted to you (bridge bot)', stWatch: 'bMOLI added to the wallet',
     stSend: 'Send bMOLI to the vault (Ethereum)', stConf: 'Confirmed on Ethereum', stReturn: 'MOLI returned on Molibra (bridge bot)', stNet: 'Molibra network in the wallet',
@@ -230,10 +241,13 @@ const PENDING = 'molibra.ponte.pending';
 let dir = 'out';
 let account = null;
 let node = null;           // /molibra identity (outbound, activations)
-let feeWei = 10n ** 19n;          // express anchor
-let claimFee = 5n * 10n ** 18n;   // always, MOLI
-let retFee = 10n ** 18n;          // always, bMOLI
-const outFee = () => claimFee + ($('express').checked ? feeWei : 0n);
+let feeWei = 5n * 10n ** 18n;     // express anchor (the bot's no-snapshot floors until read)
+let claimFee = 3n * 10n ** 18n;   // MOLI, unless the reader claims it themself
+let retFee = 10n ** 16n;          // always, bMOLI
+let ethGasPrice = null;           // for the self-claim gas estimate
+const selfOn = () => $('selfClaim').checked;
+const outFee = () => (selfOn() ? 0n : claimFee + ($('express').checked ? feeWei : 0n));
+const selfGasEth = () => (ethGasPrice === null ? '—' : fmt(MolibraFees.CLAIM_GAS * ethGasPrice, 6));
 let balMoli = null, balBmoli = null;
 let busy = false;
 
@@ -258,6 +272,7 @@ async function readFee() {
   try {
     const [gp, slot] = await Promise.all([erpc('eth_gasPrice', []), ethCall(STATE_VIEW, SEL.getSlot0 + BMOLI_POOL_ID.slice(2))]);
     const sq = BigInt('0x' + slot.slice(2, 66));
+    ethGasPrice = BigInt(gp);
     feeWei = expressFeeWei(BigInt(gp), sq);
     claimFee = claimFeeWei(BigInt(gp), sq);
   } catch (e) { /* keeps the floors */ }
@@ -286,7 +301,10 @@ function render() {
   $('toBal').textContent = to === null ? '—' : fmt(to) + (dir === 'out' ? ' bMOLI' : ' MOLI');
   const wei = parseAmount($('amount').value);
   $('receive').textContent = wei ? fmt(wei) + (dir === 'out' ? ' bMOLI' : ' MOLI') : '0';
-  $('expressRow').hidden = dir !== 'out';
+  $('expressRow').hidden = dir !== 'out' || selfOn();
+  $('selfRow').hidden = dir !== 'out';
+  $('selfTitle').textContent = t('selfTitle');
+  $('selfNote').textContent = t('selfNote', selfGasEth());
   $('expressTitle').textContent = t('expressTitle');
   $('expressFee').textContent = t('expressFee', fmt(feeWei, 0));
   $('expressNote').textContent = t('expressNote');
@@ -294,9 +312,9 @@ function render() {
   $('timing').textContent = dir === 'out' ? t('timingOut')
     : t('timingBack', bf ? fmt(bf.cap, 0) : '5.000', bf ? fmt(bf.free, 0) : '—');
   $('warn').textContent = t(dir === 'out' ? 'warnOut' : 'warnBack');
-  $('fees').textContent = dir === 'out'
-    ? t('feesOut', fmt(claimFee, 0), $('express').checked ? t('feesExpr', fmt(feeWei, 0)) : '', fmt(outFee(), 0))
-    : t('feesBack', fmt(retFee, 0));
+  $('fees').textContent = dir !== 'out' ? t('feesBack', fmt(retFee, 2))
+    : selfOn() ? t('feesSelf', selfGasEth())
+    : t('feesOut', fmt(claimFee, 2), $('express').checked ? t('feesExpr', fmt(feeWei, 2)) : '', fmt(outFee(), 2));
   $('go').disabled = busy;
   $('go').textContent = busy ? t('busy') : !account ? t('connect')
     : wei ? t(dir === 'out' ? 'goOut' : 'goBack', fmt(wei)) : t('typeAmount');
@@ -350,19 +368,20 @@ async function runOut(wei) {
   const gate = node.activations?.moliBurn;
   if (!gate || !gate.active) throw new Error(t('gateOff'));
   await switchTo(MOLIBRA_HEX);
-  const express = $('express').checked;
+  const selfClaim = selfOn();
+  const express = !selfClaim && $('express').checked;
   await readFee(); await readBalances();
   const fees = outFee();   // claim fee, plus the express fee when on: ONE transfer
   const need = wei + fees + 10n ** 15n;
   if (balMoli !== null && balMoli < need) throw new Error(t('tooMuch'));
-  const p = { dir: 'out', account, amount: wei.toString(), express, fee: fees.toString(), startedAt: Date.now() };
+  const p = { dir: 'out', account, amount: wei.toString(), express, selfClaim, fee: fees.toString(), startedAt: Date.now() };
   drawOut(p, 'sign');
   // ⛔ Gas explicit: estimation simulates a native payload as a contract call.
   p.burnTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: PAYLOAD_TO, data: burnData(account, wei), gas: '0x186a0' }] });
   savePending(p); drawOut(p);
   const r = await waitReceipt(mrpc, p.burnTx, 10);
   p.burnHeight = BigInt(r.blockNumber).toString(); savePending(p);
-  {
+  if (!selfClaim) {
     drawOut(p, 'fee');
     p.feeTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: FEE_ADDRESS, value: '0x' + BigInt(p.fee).toString(16), gas: '0x5208' }] });
     savePending(p); drawOut(p);
@@ -374,14 +393,24 @@ async function runOut(wei) {
 function drawOut(p, phase) {
   const steps = [{ label: t('stBurn') + ' — ' + fmt(p.amount) + ' MOLI', state: p.burnHeight ? 'done' : 'now',
     sub: p.burnTx ? p.burnTx : phase === 'sign' ? t('waitSign') : '' }];
-  steps.push({ label: t(p.express ? 'stFee' : 'stFeeClaim') + ' — ' + fmt(p.fee, 0) + ' MOLI', state: p.feeMined ? 'done' : p.burnHeight ? 'now' : '',
-    sub: p.feeTx ? p.feeTx : phase === 'fee' ? t('waitSign') : '' });
+  if (!p.selfClaim) {
+    steps.push({ label: t(p.express ? 'stFee' : 'stFeeClaim') + ' — ' + fmt(p.fee, 2) + ' MOLI', state: p.feeMined ? 'done' : p.burnHeight ? 'now' : '',
+      sub: p.feeTx ? p.feeTx : phase === 'fee' ? t('waitSign') : '' });
+  }
   const anchored = p.anchoredAt != null;
   steps.push({ label: t('stAnchor'), state: anchored ? 'done' : p.burnHeight ? 'now' : '', sub: anchored ? 'Ethereum ' + p.anchoredAt : '' });
   steps.push({ label: t('stWindow'), state: p.usable ? 'done' : anchored ? 'now' : '', sub: p.windowLeft != null && !p.usable ? t('left', p.windowLeft, human(p.windowLeft * 12)) : '' });
-  steps.push({ label: t('stClaim'), state: p.claimed ? 'done' : p.usable ? 'now' : '' });
+  steps.push({ label: t(p.selfClaim ? 'stClaimSelf' : 'stClaim'), state: p.claimed ? 'done' : p.usable ? 'now' : '',
+    sub: p.claimTx ? p.claimTx : phase === 'claim' ? t('waitSign') : '' });
   steps.push({ label: t('stWatch'), state: p.watched ? 'done' : p.claimed ? 'now' : '' });
   drawSteps(steps);
+  // Anyone may claim a usable burn (the mint goes to the burner by contract
+  // design): the reader's own path when no bridge fee was paid, optional otherwise.
+  const btn = $('claimBtn');
+  btn.hidden = !(p.usable && !p.claimed && !p.claimTx);
+  btn.textContent = t(p.selfClaim ? 'claimBtn' : 'claimBtnOpt');
+  btn.onclick = () => selfClaimNow(p).catch((e) => say(e && e.code === 4001
+    ? (LANG === 'pt' ? 'Cancelado na carteira; nada foi enviado.' : 'Cancelled in the wallet; nothing was sent.') : (e.message || String(e)), 'bad'));
 }
 async function trackOut(p) {
   const wordHash = p.burnTx.replace(/^0x/, '').padStart(64, '0');
@@ -412,6 +441,24 @@ async function trackOut(p) {
     p.watched = true;
   } catch (e) { /* declined: the token is still yours */ }
   drawOut(p); say(t('finishedOut', fmt(p.amount)), 'ok'); savePending(null);
+}
+
+/** The claim on Ethereum, signed in the reader's wallet, pre-flighted with eth_call first. */
+async function selfClaimNow(p) {
+  if (!account) await connect();
+  const proof = await (await fetch(NODE + '/molibra/proof/' + p.burnTx, { cache: 'no-store' })).json();
+  if (proof.error) throw new Error(proof.error);
+  if (BigInt(proof.blockNumber) !== BigInt(p.burnHeight)) throw new Error('proof: another height');
+  const data = claimFromProof(proof);
+  await erpc('eth_call', [{ from: account, to: BMOLI, data }, 'latest']);   // throws on a revert: nothing is signed
+  await switchTo('0x1');
+  drawOut(p, 'claim');
+  const blk = await erpc('eth_getBlockByNumber', ['latest', false]);
+  const bf = BigInt(blk.baseFeePerGas); const tip = 50000000n;     // 0.05 gwei, explicit
+  p.claimTx = await eth().request({ method: 'eth_sendTransaction', params: [{ from: account, to: BMOLI, value: '0x0', data,
+    maxPriorityFeePerGas: '0x' + tip.toString(16), maxFeePerGas: '0x' + (bf * 2n + tip).toString(16) }] });
+  savePending(p); drawOut(p);
+  await waitReceipt(erpc, p.claimTx, 15);
 }
 
 /* ---------------------------------------------------- bMOLI -> MOLI */
@@ -489,7 +536,7 @@ $('maxBtn').onclick = () => {
   if (b > 0n) $('amount').value = (Number(b / 10n ** 12n) / 1e6).toString();
   render();
 };
-$('amount').oninput = render; $('express').onchange = render;
+$('amount').oninput = render; $('express').onchange = render; $('selfClaim').onchange = render;
 $('tabOut').onclick = () => { if (!busy) { dir = 'out'; render(); } };
 $('tabBack').onclick = () => { if (!busy) { dir = 'back'; render(); } };
 const setLang = (l) => { LANG = l; try { localStorage.setItem('molibra.lang', l); } catch (e) {} render(); };

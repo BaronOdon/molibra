@@ -36,14 +36,20 @@
  *
  * ## ⛔ The key
  *
- * Read from CREDENTIALS.md, matched by DERIVING the address rather than
- * trusting a label, used to sign locally, never printed. Only signed
+ * Read from CREDENTIALS.md or, since the 7 Oct 2026 hardening moved every
+ * secret into the operator vault (CREDENTIALS.md keeps only a `[vault: name]`
+ * pointer), from `Server Ops/vault.ps1 get <name>`: DPAPI CurrentUser, which
+ * the S4U task of the same account decrypts (tested 8 Oct 2026). ⛔ The run of
+ * 7 Oct 18:16 failed "no key in CREDENTIALS.md derives 0x8D1F…" and nothing was
+ * anchored until this fix. Either way the key is matched by DERIVING the
+ * address rather than trusting a label, used to sign locally, never printed. Only signed
  * transactions reach the network. Same discipline as bond-publisher.mjs, and
  * for the same reason: a key written from a Uint8Array once became decimal
  * bytes and the write succeeded, so the address is derived from the file's
  * contents every run rather than assumed.
  */
 import { readFileSync, unlinkSync, openSync, closeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -66,6 +72,7 @@ const CHAIN_ID = 1n;                                   // Ethereum mainnet
 const PUBLISHER = '0x8D1F2713EB83e4D55FBEDA47b26fd08eC9170e14';
 const ANCHOR = '0x2beba454d810eac41c6778e351f81d37a07ae03b';
 const CRED = args.credentials ?? 'C:/Users/Administrator/Desktop/Server Ops/CREDENTIALS.md';
+const VAULT_PS1 = args.vault ?? 'C:/Users/Administrator/Desktop/Server Ops/vault.ps1';
 // ⛔ os.tmpdir(), not a hardcoded /tmp: on Windows that resolves to C:\tmp,
 //    which does not exist, so the lock create fails and the run exits reporting
 //    "already in progress" - a false clean exit is the worst failure available
@@ -225,12 +232,25 @@ async function main() {
 
   // --- the key, found by derivation, never by label -------------------------
   let KEY = null;
-  for (const c of new Set(readFileSync(CRED, 'utf8').match(/\b[0-9a-fA-F]{64}\b/g) ?? [])) {
-    try {
-      if (toChecksumAddress(privateToAddress(c)).toLowerCase() === PUBLISHER.toLowerCase()) KEY = c;
-    } catch { /* not a key */ }
+  const derives = (c) => {
+    try { return toChecksumAddress(privateToAddress(c)).toLowerCase() === PUBLISHER.toLowerCase(); } catch { return false; }
+  };
+  const cred = readFileSync(CRED, 'utf8');
+  for (const c of new Set(cred.match(/\b[0-9a-fA-F]{64}\b/g) ?? [])) if (derives(c)) KEY = c;
+  if (!KEY) {
+    // The vault names CREDENTIALS.md points to; a secret read stays in memory.
+    const names = [...new Set([...cred.matchAll(/\[vault: ([\w.-]+)\]/g)].map((m) => m[1]))]
+      .sort((x, y) => Number(y.includes('anchor-publisher')) - Number(x.includes('anchor-publisher')));
+    for (const name of names) {
+      let secret = '';
+      try {
+        secret = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', VAULT_PS1, 'get', name],
+          { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim().replace(/^0x/, '');
+      } catch { continue; }
+      if (/^[0-9a-fA-F]{64}$/.test(secret) && derives(secret)) { KEY = secret; break; }
+    }
   }
-  if (!KEY) throw new Error(`no key in ${CRED} derives ${PUBLISHER}`);
+  if (!KEY) throw new Error(`no key in ${CRED} or the vault it points to derives ${PUBLISHER}`);
   console.log('key            : found, derives the publisher (never printed)');
 
   // --- what does the chain say? ---------------------------------------------
@@ -262,6 +282,14 @@ async function main() {
   const anchoredTip = await callUint(sel('tipHeight()'));
   const burn = await oldestUnanchoredBurn(anchoredTip + 1n, tip - BigInt(MIN_DEPTH));
   const height = burn !== null && burn < routine ? burn : routine;
+  // ⭐ --if-burn: the FREE hourly batch (operator, 8 Oct 2026). It anchors only a
+  //    burn that is ready (deeper than DEPTH); with none it spends nothing. The
+  //    routine anchor stays with the daily run: hourly routine anchors would
+  //    drain the publisher's gas (~52 anchors of runway on 8 Oct) in two days.
+  if (args['if-burn'] && !(burn !== null && burn < routine)) {
+    console.log(`--if-burn      : no burn ready to anchor (tip ${tip}${burn !== null ? `; one waits at ${burn}, still shallow` : ''}) - nothing to do`);
+    return;
+  }
 
   const block = await audit(`/molibra/block/${height}?decoded=1`);
   const blockHash = block.hash;

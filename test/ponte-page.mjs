@@ -11,14 +11,17 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { encodeMoliBurn, decodeMoliBurn, MOLI_BURN_TAG } from '../src/moliburn.js';
 import { keccak256, toHex } from '../src/crypto.js';
+import { claimFromProof as botClaimFromProof, SELECTORS as CLAIM_SELECTORS } from '../src/bmoliclaim.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
 const page = read('src/web/ponte.html');
 const buy = read('src/web/buy.html');
 const rpc = read('src/rpc.js');
-// A browser script: it registers itself on the global (window in a page).
+// Browser scripts: they register themselves on the global (window in a page).
+createRequire(import.meta.url)(join(ROOT, 'src/web/bridgefees.js'));
 createRequire(import.meta.url)(join(ROOT, 'src/web/bridgeflow.js'));
+const FEES = globalThis.MolibraFees;
 const flow = globalThis.MolibraReturn;
 
 let pass = 0, fail = 0;
@@ -35,7 +38,7 @@ const region = page.match(/\/\* PURE-BEGIN \*\/([\s\S]*?)\/\* PURE-END \*\//);
 check('ponte.html has a PURE region', Boolean(region));
 const VAULT = '0x0173f059ce912bb442296f3763746637f7d20fc1';
 const L = new Function(`const VAULT = '${VAULT}';` + region[1]
-  + '\nreturn { MOLI_BURN_TAG, TRANSFER, parseAmount, burnData, vaultData, expressFeeWei, claimFeeWei, returnFeeWei };')();
+  + '\nreturn { MOLI_BURN_TAG, TRANSFER, parseAmount, burnData, vaultData, expressFeeWei, claimFeeWei, returnFeeWei, CLAIM_SEL, claimFromProof };')();
 
 check('the burn tag is the chain\'s MOLI_BURN_TAG', L.MOLI_BURN_TAG === MOLI_BURN_TAG, L.MOLI_BURN_TAG);
 const who = '0x5851cc5884313f7a66697de3bb772466dd5895c7';
@@ -60,18 +63,37 @@ const Q96 = 1n << 96n;
 // sqrtP for 333,322 bMOLI per ETH: sqrt(333322) * 2^96
 const sqrtP = BigInt(Math.round(Math.sqrt(333322) * 1e9)) * Q96 / 1000000000n;
 const gp = 1_000_000_000n;   // 1 gwei
-// express: 3 x 200,000 x 1 gwei = 0.0006 ETH x 333,322 = ~200 MOLI
+// ⭐ Fee reduction (8 Oct 2026): max(1.2 x gas x price, 0.00001 ETH) at the pool, up to 0.01.
+// express = ONE anchor: 1.2 x 160,000 x 1 gwei = 0.000192 ETH x 333,322 = ~64.00 MOLI
 const ex = L.expressFeeWei(gp, sqrtP);
-check('express fee at 1 gwei ≈ 3 x 200k gas x price x MOLI/ETH, rounded up to whole MOLI',
-  ex === 200n * MOLI || ex === 201n * MOLI, `${ex / MOLI} MOLI`);
-check('express fee floor 10 MOLI at near-zero gas', L.expressFeeWei(1n, sqrtP) === 10n * MOLI);
-// claim: 2 x 250,000 x 1 gwei = 0.0005 ETH x 333,322 = ~167 MOLI
+check('express fee at 1 gwei = 1.2 x 160k gas x price x MOLI/ETH (one full anchor)',
+  ex >= 6399n * MOLI / 100n && ex <= 6401n * MOLI / 100n, `${Number(ex) / 1e18} MOLI`);
+// claim: 1.2 x 100,000 x 1 gwei = 0.00012 ETH x 333,322 = ~40.00 MOLI
 const cl = L.claimFeeWei(gp, sqrtP);
-check('claim fee at 1 gwei ≈ 2 x 250k gas x price x MOLI/ETH, whole MOLI', cl === 167n * MOLI || cl === 168n * MOLI, `${cl / MOLI} MOLI`);
-check('claim fee floor 5 MOLI at near-zero gas', L.claimFeeWei(1n, sqrtP) === 5n * MOLI);
-check('fees are whole coins', ex % MOLI === 0n && cl % MOLI === 0n);
-check('return fee floor 1 bMOLI at Molibra\'s 1 gwei', L.returnFeeWei(gp) === MOLI && flow.returnFeeWei(gp) === MOLI);
-check('return fee scales past the floor (1,000 gwei -> 2 bMOLI)', L.returnFeeWei(1000n * gp) === 2n * MOLI);
+check('claim fee at 1 gwei = 1.2 x 100k gas (claims use ~87k) x price x MOLI/ETH', cl >= 3999n * MOLI / 100n && cl <= 4001n * MOLI / 100n, `${Number(cl) / 1e18} MOLI`);
+const floor = L.claimFeeWei(1n, sqrtP);
+check('floor 0.00001 ETH at near-zero gas (~3.34 MOLI), for claim and express alike',
+  floor === L.expressFeeWei(1n, sqrtP) && floor >= 333n * MOLI / 100n && floor <= 334n * MOLI / 100n, `${Number(floor) / 1e18}`);
+check('fees are rounded UP to 0.01', ex % 10n ** 16n === 0n && cl % 10n ** 16n === 0n && FEES.roundUp(1n) === 10n ** 16n);
+check('the page fees ARE the shared file (MolibraFees)', cl === FEES.claimFeeWei(gp, sqrtP) && ex === FEES.expressFeeWei(gp, sqrtP));
+check('live 8 Oct (0.169 gwei, ~331,972/ETH): claim ~6.74 MOLI, was ~28 under the old 2 x 250k',
+  (() => { const q = FEES.claimFeeWei(169000000n, 576n * Q96); return q > 6n * MOLI && q < 8n * MOLI; })());
+check('return fee at Molibra\'s 1 gwei: 1.2 x 1,000,000 gas -> min 0.01 bMOLI', L.returnFeeWei(gp) === 10n ** 16n && flow.returnFeeWei(gp) === 10n ** 16n);
+check('return fee scales (1,000 gwei -> 1.2 bMOLI)', L.returnFeeWei(1000n * gp) === 12n * MOLI / 10n);
+check('fast rate: 0.3% empty, 0.1% full, linear', FEES.fastFeeBp(0n, 100n) === 30n && FEES.fastFeeBp(100n, 100n) === 10n && FEES.fastFeeBp(50n, 100n) === 20n);
+check('minAccepted: 90% of the lowest quote; none -> null', FEES.minAccepted([10n, 20n]) === 9n && FEES.minAccepted([]) === null);
+
+/* ------------------------------------------------- the self-claim encoder */
+check('the page\'s claim selector is BridgedMoli.claim', L.CLAIM_SEL === CLAIM_SELECTORS.claim);
+{
+  const proof = { blockNumber: 153653, headerRlp: '0x' + 'ab'.repeat(77), raw: '0x' + 'cd'.repeat(161),
+    siblings: [{ hash: '0x' + '11'.repeat(32), side: 'right' }, { hash: '0x' + '22'.repeat(32), side: 'left' }] };
+  check('self-claim calldata = the bot\'s claimFromProof, byte for byte', L.claimFromProof(proof) === botClaimFromProof(proof));
+  const alt = { ...proof, siblings: undefined, proof: [{ sibling: '0x' + '33'.repeat(32), right: true }] };
+  check('  also for the other sibling spelling', L.claimFromProof(alt) === botClaimFromProof(alt));
+  const none = { ...proof, siblings: [] };
+  check('  and for a one-transaction block (no siblings)', L.claimFromProof(none) === botClaimFromProof(none));
+}
 check('cap: free = cap - usedInWindow', flow.capFree({ outbound: { botCap: { cap: '5000000000000000000000', usedInWindow: '165000000000000000000' } } }) === 4835n * MOLI);
 check('cap: unknown when the node does not publish it', flow.capFree({}) === null);
 
@@ -79,18 +101,24 @@ check('cap: unknown when the node does not publish it', flow.capFree({}) === nul
 check('⛔ ponte.html never uses innerHTML (textContent only)', !/innerHTML/.test(page));
 check('the burn goes to the never-called payload contract with explicit gas',
   page.includes("to: PAYLOAD_TO, data: burnData(account, wei), gas: '0x186a0'"));
-check('the OUT fee is ONE transfer to the fee address (claim + express combined)',
-  page.includes('const outFee = () => claimFee + ') && page.includes('to: FEE_ADDRESS, value:'));
+check('the OUT fee is ONE transfer to the fee address (claim + express combined), none when self-claiming',
+  page.includes('const outFee = () => (selfOn() ? 0n : claimFee + ') && page.includes('to: FEE_ADDRESS, value:') && page.includes('if (!selfClaim) {'));
+check('the page loads the shared fee file before its own code', page.indexOf('<script src="/molibra/bridgefees.js"></script>') > 0
+  && page.indexOf('<script src="/molibra/bridgefees.js"></script>') < page.indexOf('/* PURE-BEGIN */'));
+check('express is OFF by default (the free hourly batch is the default)', /<input type="checkbox" id="express">/.test(page));
+check('⛔ self-claim pre-flights with eth_call before anything is signed',
+  page.indexOf("erpc('eth_call', [{ from: account, to: BMOLI, data }") > 0
+  && page.indexOf("erpc('eth_call', [{ from: account, to: BMOLI, data }") < page.indexOf("p.claimTx = await eth().request"));
 check('the BACK fee is a bMOLI transfer to the fee address after the vault transfer',
   page.indexOf('vaultData(wei)') < page.indexOf('word(FEE_ADDRESS) + word(retFee)'));
 check('every fee is shown before signing', page.includes("$('fees').textContent") && /feesOut:|feesBack:/.test(page));
-check('express says the window is immutable: ~24 h instead of up to ~48 h', page.includes('~24 h no total') && page.includes('até ~48 h'));
+check('the timing is stated honestly: hourly batch ~1–2 h + the immutable ~24 h window', page.includes('lote horário gratuito') && page.includes('~24 h'));
 check('a pending crossing is kept in localStorage and resumed on load', page.includes("'molibra.ponte.pending'") && page.includes('Resume a crossing'));
 check('when claimed, bMOLI is added to the wallet with its logo', page.includes("wallet_watchAsset") && page.includes('bmoli-200.png'));
 check('the bot cap is stated (automatic up to N per 5,760 blocks)', page.includes('5.760 blocos') && page.includes('botCap'));
 
 /* ---------------------------------------------------------------- buy */
-check('buy.html loads bridgeflow.js', buy.includes('<script src="/molibra/bridgeflow.js"></script>'));
+check('buy.html loads bridgefees.js, then bridgeflow.js', buy.includes('<script src="/molibra/bridgefees.js"></script>\n<script src="/molibra/bridgeflow.js"></script>'));
 check('"Receber como MOLI" is ON by default', /<input type="checkbox" id="asMoli" checked>/.test(buy));
 check('⛔ the cap is checked BEFORE the swap is signed, with the keep-as-bMOLI way out',
   buy.indexOf("t('overCap'") > 0 && buy.indexOf("t('overCap'") < buy.indexOf("busy = t('confirmWallet')"));
@@ -101,6 +129,7 @@ check('only bMOLI offers it (WSRO has no way back)', buy.includes('$("asMoliRow"
 /* ------------------------------------------------------------ routing */
 check('rpc.js serves /molibra/ponte', rpc.includes("path === '/molibra/ponte'") && rpc.includes("'web', 'ponte.html'"));
 check('rpc.js serves /molibra/bridgeflow.js as javascript', rpc.includes("path === '/molibra/bridgeflow.js'"));
+check('rpc.js serves /molibra/bridgefees.js as javascript', rpc.includes("path === '/molibra/bridgefees.js'") && rpc.includes("'web', 'bridgefees.js'"));
 check('the operator pages stay served', rpc.includes("path === '/molibra/return'") && rpc.includes("'/molibra/bridgedmoli'"));
 const swap = read('src/web/swap.html');
 check('swap links both directions to /molibra/ponte', swap.includes('href="/molibra/ponte"') && swap.includes('href="/molibra/ponte?dir=back"'));

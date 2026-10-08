@@ -154,11 +154,17 @@ function bridge(W, state = {}, config = {}, log = () => {}) {
 /* ------------------------------------------------------------------ pure */
 console.log('\n1. the pure parts\n');
 {
+  const FULL = FAST_DEFAULTS.maxInventoryBmoliWei;
   const q = quote(100n * WEI);
-  check('fee is 0.5% with a 1-MOLI floor: 100 MOLI pays 99', q.fee === 1n * WEI && q.out === 99n * WEI);
-  const q2 = quote(1000n * WEI);
-  check('1,000 MOLI pays 995 (0.5%)', q2.fee === 5n * WEI && q2.out === 995n * WEI);
-  check('below the fee pays nothing', quote(WEI / 2n).out === 0n);
+  check('fee with the stock unknown is the top rate, 0.3%: 100 MOLI pays 99.7', q.fee === 3n * WEI / 10n && q.out === 997n * WEI / 10n);
+  check('1,000 MOLI with the paying side full: 0.1%, pays 999', quote(1000n * WEI, FAST_DEFAULTS, 0n, FULL, 'm2b').fee === 1n * WEI);
+  check('  half full: 0.2%', quote(1000n * WEI, FAST_DEFAULTS, 0n, FULL / 2n, 'm2b').fee === 2n * WEI);
+  check('  the b2m rate reads the MOLI side max', quote(1000n * WEI, FAST_DEFAULTS, 0n, FAST_DEFAULTS.maxInventoryMoliWei, 'b2m').fee === 1n * WEI);
+  check('plus 1.2 x the payout gas: 1,000 MOLI, 10 MOLI of gas, full side -> 13 MOLI',
+    quote(1000n * WEI, FAST_DEFAULTS, 10n * WEI, FULL, 'm2b').fee === 13n * WEI);
+  check('rounded UP to 0.01, never below 0.01', quote(10n * WEI, FAST_DEFAULTS, 1n, FULL, 'm2b').fee === 2n * 10n ** 16n
+    && quote(1n, FAST_DEFAULTS, 0n, FULL, 'm2b').fee === 10n ** 16n);
+  check('below the fee pays nothing', quote(10n ** 15n).out === 0n);
   const src = randHash(); const d = erc20PayoutData('0x' + '12'.repeat(20), 7n, src);
   check('the ERC-20 payout carries the source hash and reads it back', sourceOfErc20Payout(d) === lower(src));
   check('defaults: 12 Molibra / 3 Ethereum confirmations, 2,000 per transfer, 10,000 per hour',
@@ -181,11 +187,14 @@ console.log('\n2. MOLI -> bMOLI\n');
   check('and a bMOLI payout was sent in the same tick', state.items[src]?.status === 'sent' && W.e.sent.length === 1);
   const tx = decodeEip1559(W.e.sent[0]);
   check('the payout goes to the bMOLI contract from the inventory', lower(tx.to) === lower(BMOLI_CONTRACT) && tx.from === W.inv);
-  check('it pays the sender amount - fee (99 bMOLI) and carries the source hash',
-    tx.data.slice(34, 74) === ua.slice(2) && BigInt('0x' + tx.data.slice(74, 138)) === 99n * WEI && sourceOfErc20Payout(tx.data) === lower(src));
+  const g2 = await fb.gasCosts();
+  const fee2 = quote(100n * WEI, fb.cfg, g2.m2b, g2.stock.m2b, 'm2b').fee;
+  check('the fee recorded is the shared quote (bridgefees.js) at that tick', BigInt(state.items[src].feeWei) === fee2, (Number(fee2) / 1e18).toFixed(2));
+  check('it pays the sender amount - fee and carries the source hash',
+    tx.data.slice(34, 74) === ua.slice(2) && BigInt('0x' + tx.data.slice(74, 138)) === 100n * WEI - fee2 && sourceOfErc20Payout(tx.data) === lower(src));
   check('chain id 1, value 0, low explicit tip', tx.chainId === 1n && tx.value === 0n && tx.maxPriorityFeePerGas === 50_000_000n);
   W.mineEthPayouts(); await fb.tick();
-  check('paid once its receipt is in', state.items[src].status === 'paid' && W.e.bmoli.get(ua) === 99n * WEI);
+  check('paid once its receipt is in', state.items[src].status === 'paid' && W.e.bmoli.get(ua) === 100n * WEI - fee2);
   await fb.tick();
   check('and never sent again', W.e.sent.length === 0);
 }
@@ -202,32 +211,37 @@ console.log('\n3. bMOLI -> MOLI\n');
   W.e.block = 5004n; await fb.tick();
   check('recorded at 3 confirmations and MOLI sent', state.items[src]?.status === 'sent' && W.m.sent.length === 1);
   const tx = decodeTransaction(W.m.sent[0], 20226n);
-  check('the MOLI payout: inventory -> sender, 497.5 MOLI, data = source hash',
-    lower(tx.from) === W.inv && lower(tx.to) === ua && tx.value === 4975n * WEI / 10n && lower(tx.data) === lower(src));
+  const g3 = await fb.gasCosts();
+  const fee3 = BigInt(state.items[src].feeWei);
+  check('the b2m fee is the shared quote: 0.3% (stock far below max) + 1.2 x Molibra gas',
+    fee3 === quote(500n * WEI, fb.cfg, g3.b2m, g3.stock.b2m, 'b2m').fee && fee3 >= 15n * 10n ** 17n && fee3 < 16n * 10n ** 17n,
+    (Number(fee3) / 1e18).toFixed(4));
+  check('the MOLI payout: inventory -> sender, 500 - fee MOLI, data = source hash',
+    lower(tx.from) === W.inv && lower(tx.to) === ua && tx.value === 500n * WEI - fee3 && lower(tx.data) === lower(src));
   W.mineMolibraPayouts(); await fb.tick();
-  check('paid once mined', state.items[src].status === 'paid' && W.m.balance.get(ua) === 4975n * WEI / 10n);
+  check('paid once mined', state.items[src].status === 'paid' && W.m.balance.get(ua) === 500n * WEI - fee3);
 }
 
 /* ----------------------------------------------- the user pays every cost */
 console.log('\n3b. the fee covers the payout gas\n');
 {
-  check('quote() takes the larger of 0.5%, 2 x gas and the floor', quote(1_000n * WEI, FAST_DEFAULTS, 60n * WEI).fee === 120n * WEI
-    && quote(1_000n * WEI, FAST_DEFAULTS, 1n * WEI).fee === 5n * WEI);
+  check('quote() = rate + 1.2 x gas: 1,000 MOLI, 60 MOLI gas, stock unknown -> 3 + 72',
+    quote(1_000n * WEI, FAST_DEFAULTS, 60n * WEI).fee === 75n * WEI);
   const W = world(); W.e.perEth = 333_322; W.e.baseFee = 1n * GWEI;   // real price, a 1-gwei base fee
   const state = {}; const fb = bridge(W, state);
   await fb.tick();
   const g = await fb.gasCosts();
-  // 90,000 gas x (2 x 1 gwei + 0.05 gwei) = 0.0001845 ETH x 333,322 = ~61.5 MOLI
-  check('the Ethereum payout gas, in MOLI, read live (~61.5 at 1 gwei)', g.m2b > 61n * WEI && g.m2b < 62n * WEI, (Number(g.m2b) / 1e18).toFixed(2));
+  // 60,000 gas x (1 gwei + 0.05 gwei) = 0.000063 ETH x 333,322 = ~21.0 MOLI
+  check('the Ethereum payout gas, in MOLI, read live (~21.0 at 1 gwei: gas used x base + tip)', g.m2b > 20n * WEI && g.m2b < 22n * WEI, (Number(g.m2b) / 1e18).toFixed(2));
   const src = W.userSendsMoli(keyHex(), 1_000n * WEI, 1001n);
   W.m.height = 1013n; await fb.tick();
   const tx = decodeEip1559(W.e.sent[0]);
   const paid = BigInt('0x' + tx.data.slice(74, 138));
-  check('1,000 MOLI pays 1,000 - 2 x gas (~877): the user, not the operator, pays the gas',
-    paid === 1_000n * WEI - BigInt(state.items[src].feeWei) && BigInt(state.items[src].feeWei) > 2n * 61n * WEI, (Number(paid) / 1e18).toFixed(2));
-  const small = W.userSendsMoli(keyHex(), 100n * WEI, 1014n);
+  check('1,000 MOLI pays 1,000 - (rate + 1.2 x gas) (~972): the user, not the operator, pays the gas',
+    paid === 1_000n * WEI - BigInt(state.items[src].feeWei) && BigInt(state.items[src].feeWei) >= g.m2b * 12n / 10n, (Number(paid) / 1e18).toFixed(2));
+  const small = W.userSendsMoli(keyHex(), 20n * WEI, 1014n);
   W.m.height = 1026n; await fb.tick();
-  check('a transfer smaller than 2 x gas: below-fee, nothing sent', state.items[small].status === 'below-fee');
+  check('a transfer smaller than 1.2 x gas: below-fee, nothing sent', state.items[small].status === 'below-fee');
 }
 {
   const W = world(); const state = {}; const fb = bridge(W, state);
@@ -363,7 +377,12 @@ console.log('\n8. the service and the page\n');
   check('the node serves /molibra/rapido and /molibra/fastbridge.json', rpc.includes("'/molibra/rapido'") && rpc.includes("'/molibra/fastbridge.json'"));
   const page = readFileSync(new URL('../src/web/rapido.html', import.meta.url), 'utf8');
   const cfg = JSON.parse(readFileSync(new URL('../src/web/fastbridge.json', import.meta.url), 'utf8'));
-  check('fastbridge.json publishes the inventory, fee and limits', /^0x[0-9a-f]{40}$/.test(cfg.inventory) && cfg.feeBp === 50 && cfg.maxPerTransfer === '2000');
+  check('fastbridge.json publishes the inventory, fee and limits', /^0x[0-9a-f]{40}$/.test(cfg.inventory) && cfg.maxPerTransfer === '2000');
+  check('  and the fee inputs equal the bot defaults (payout gas, max inventory, min fee)',
+    BigInt(cfg.erc20PayoutGas) === FAST_DEFAULTS.erc20PayoutGas && BigInt(cfg.maxInventory) * WEI === FAST_DEFAULTS.maxInventoryBmoliWei
+    && FAST_DEFAULTS.maxInventoryBmoliWei === FAST_DEFAULTS.maxInventoryMoliWei && cfg.minFee === '0.01' && FAST_DEFAULTS.minFeeWei === 10n ** 16n);
+  check('the page quotes with the shared bridgefees.js (fastFeeWei), not its own copy',
+    page.includes('<script src="/molibra/bridgefees.js"></script>') && page.includes('MolibraFees.fastFeeWei') && !page.includes('feeBp'));
   check('the published limits equal the bot defaults',
     BigInt(cfg.maxPerTransfer) * WEI === FAST_DEFAULTS.maxPerTransferWei && BigInt(cfg.maxPerHour) * WEI === FAST_DEFAULTS.maxPerHourWei
     && BigInt(cfg.maxPerDay) * WEI === FAST_DEFAULTS.maxPerDayWei && cfg.molibraConfirmations === 12 && cfg.ethConfirmations === 3);
