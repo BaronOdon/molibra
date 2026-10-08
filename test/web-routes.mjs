@@ -114,12 +114,14 @@ for (const name of readdirSync(webDir).filter((f) => f.endsWith('.html'))) {
 
 const index = readFileSync(join(ROOT, 'src/web/index.html'), 'utf8');
 const routes = new Set([...rpc.matchAll(/path === '(\/[^']*)'/g)].map((m) => m[1]));
+// Prefix routes (/molibra/token/<SYM>, /molibra/block/<n>, ...) serve a whole family.
+const prefixes = [...rpc.matchAll(/path\.startsWith\('(\/[^']*\/)'\)/g)].map((m) => m[1]);
 const hrefs = [...new Set([...index.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]))];
 
 check('the front page links somewhere at all', hrefs.length > 5, `${hrefs.length} internal links`);
 for (const h of hrefs) {
-  check(`  ${h} is a route rpc.js serves`, routes.has(h),
-    routes.has(h) ? '' : 'the front page links into nothing');
+  const ok = routes.has(h) || prefixes.some((p) => h.startsWith(p) && h.length > p.length);
+  check(`  ${h} is a route rpc.js serves`, ok, ok ? '' : 'the front page links into nothing');
 }
 check('and the site itself is routed at the root', routes.has('/'),
   "a front page nobody can open is a file, not a site");
