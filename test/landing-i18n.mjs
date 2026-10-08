@@ -59,5 +59,21 @@ check('right-to-left languages flip the page', page.includes("const RTL = new Se
 check('rpc.js serves /molibra/i18n/<two letters>.json by a matched name, never a raw path',
   rpc.includes("path.startsWith('/molibra/i18n/')") && rpc.includes('/^\\/molibra\\/i18n\\/([a-z]{2})\\.json$/'));
 
+/* -------- any device (8 Oct 2026; proved by a 16-device x 16-language CDP matrix) */
+console.log('\nany device\n');
+check('viewport meta: device width, safe areas (viewport-fit=cover)', page.includes('content="width=device-width,initial-scale=1,viewport-fit=cover"'));
+check('  and the safe areas are actually padded (notch, home bar)', page.includes('env(safe-area-inset-left)') && page.includes('env(safe-area-inset-top)') && page.includes('env(safe-area-inset-bottom)'));
+check('card grid never wider than the screen (minmax(min(290px,100%),1fr))', page.includes('minmax(min(290px,100%),1fr)'));
+check('long words wrap instead of pushing the page sideways', page.includes('overflow-wrap:anywhere'));
+check('⛔ sections hide for the fade-in only when the script runs (.js gate)', page.includes(".js .reveal{opacity:0") && !/\n\s*\.reveal\{opacity:0/.test(page)
+  && page.includes("document.documentElement.classList.add('js')"));
+check('touch: no sticky hover lift, 44 px targets, 16 px picker (no iOS zoom)',
+  page.includes('@media (hover:none)') && page.includes('@media (pointer:coarse)') && page.includes('.lang select{font-size:16px;min-height:44px}'));
+check('phones/tablets get the section links as a swipeable row, not hidden', /@media \(max-width:820px\)\{[\s\S]*?\.nav\{order:3/.test(page) && !/\.nav\{display:none\}/.test(page));
+check('short landscape screens keep the header to one row', page.includes('@media (max-height:500px) and (orientation:landscape)'));
+check('folded phones (≤300 px) and 4K screens have their own rules', page.includes('@media (max-width:300px)') && page.includes('@media (min-width:3200px)'));
+check('⛔ no syntax older Safari cannot parse (??=, replaceChildren)', !page.includes('??=') && !page.includes('replaceChildren'));
+check('text size not inflated by mobile browsers', page.includes('text-size-adjust:100%'));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

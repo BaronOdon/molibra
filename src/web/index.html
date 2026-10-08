@@ -34,7 +34,7 @@
     --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   }
   *{box-sizing:border-box}
-  html{scroll-behavior:smooth}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;text-size-adjust:100%}
   body{margin:0;color:var(--ink);background:var(--void);font:15px/1.6 var(--sans);overflow-x:hidden}
   body::before{
     content:"";position:fixed;inset:0;z-index:-2;
@@ -45,10 +45,11 @@
       var(--void);
   }
   a{color:inherit}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+  /* Side gutters clear a notch or rounded corner in landscape (viewport-fit=cover). */
+  .wrap{max-width:1080px;margin:0 auto;padding:0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left))}
 
   /* ---------------------------------------------------------------- top bar */
-  .bar{position:sticky;top:0;z-index:10;background:rgba(7,7,10,.78);
+  .bar{position:sticky;top:0;z-index:10;background:rgba(7,7,10,.78);padding-top:env(safe-area-inset-top);
        -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--edge)}
   .bar .wrap{display:flex;align-items:center;gap:14px;height:56px}
   .logo{font:700 16px var(--mono);letter-spacing:.3em;color:var(--gold);text-decoration:none;white-space:nowrap}
@@ -77,7 +78,7 @@
   .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok);animation:pulse 2s infinite}
   .dot.off{background:var(--warn);box-shadow:0 0 10px var(--warn)}
   @keyframes pulse{50%{opacity:.35}}
-  .word{font:800 clamp(52px,13vw,128px)/.95 var(--mono);letter-spacing:.08em;margin:22px 0 0;
+  .word{font:800 clamp(38px,13vw,128px)/.95 var(--mono);letter-spacing:.08em;margin:22px 0 0;
         background:linear-gradient(180deg,#fff6c2 0%,var(--gold) 45%,#b38f00 100%);
         -webkit-background-clip:text;background-clip:text;color:transparent;
         filter:drop-shadow(0 0 28px rgba(255,209,0,.35))}
@@ -119,7 +120,7 @@
   .step .d{color:var(--dim);font-size:14px;margin-top:6px}
   .step .go{font:600 12px var(--mono);color:var(--gold);margin-top:12px}
 
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;margin-top:26px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(290px,100%),1fr));gap:12px;margin-top:26px}
   a.card{display:flex;flex-direction:column;text-decoration:none;padding:18px;border-radius:14px;border:1px solid var(--edge);
          background:var(--glass);transition:border-color .15s, box-shadow .15s, transform .15s;min-height:132px}
   a.card:hover{border-color:var(--gold);box-shadow:0 0 30px -10px var(--gold-glow);transform:translateY(-3px)}
@@ -155,21 +156,85 @@
   .honest{margin-top:26px;padding:16px 18px;border-left:3px solid var(--gold-dk);background:rgba(255,209,0,.05);border-radius:0 12px 12px 0;
           color:var(--dim);font-size:14px}
   .honest b{color:var(--ink)}
-  footer{border-top:1px solid var(--edge);margin-top:72px;padding:26px 0 60px;color:var(--dimmer);font-size:12.5px}
+  footer{border-top:1px solid var(--edge);margin-top:72px;padding:26px 0 calc(60px + env(safe-area-inset-bottom));color:var(--dimmer);font-size:12.5px}
   footer a{color:var(--gold-dk)}
 
   /* Measures in ch are Latin widths: a CJK character is about two, so the caps double. */
   :lang(ja) h2,:lang(zh) h2,:lang(ko) h2,:lang(ja) .headline,:lang(zh) .headline,:lang(ko) .headline{max-width:none}
   :lang(ja) .sub,:lang(zh) .sub,:lang(ko) .sub{max-width:44em}
-  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease, transform .6s ease}
-  .reveal.in{opacity:1;transform:none}
+  /* Long words (German compounds, URLs) wrap instead of pushing the page sideways. */
+  h2,.headline,.lede,.sub,.honest,a.card .t,a.card .d,.step .t,.step .d,a.meme .d,.stat .s,.livenote,.dir a{overflow-wrap:anywhere}
+  .lede,.sub,.honest,a.card .d,.step .d,a.meme .d{hyphens:auto}
+
+  /* Sections fade in only when the script runs: no script, an old browser or a
+     failed load still shows every word (the class is set by the page's script). */
+  .js .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease, transform .6s ease}
+  .js .reveal.in{opacity:1;transform:none}
   @media (prefers-reduced-motion: reduce){
-    html{scroll-behavior:auto} .orb,.dot{animation:none} .reveal{opacity:1;transform:none;transition:none}
+    html{scroll-behavior:auto} .orb,.dot{animation:none} .js .reveal{opacity:1;transform:none;transition:none}
     .btn,a.card,a.meme,.step{transition:none}
   }
+
+  /* Touch screens: no hover lift that sticks after a tap; press feedback instead;
+     targets at least ~44 px; 16 px in the picker so iOS does not zoom on focus. */
+  @media (hover:none){
+    .btn:hover,a.card:hover,a.meme:hover,.step:hover{transform:none;box-shadow:none}
+    .btn.primary:hover{background:var(--gold)}
+    .btn:active,a.card:active,a.meme:active,.step:active{transform:scale(.98);border-color:var(--gold)}
+  }
+  @media (pointer:coarse){
+    .lang select{font-size:16px;min-height:44px}
+    .dir a{padding:10px 0}
+    footer a{display:inline-flex;align-items:center;min-height:44px}
+    .nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 14px}
+    .logo{display:inline-flex;align-items:center;min-height:44px}
+  }
+
+  /* Tablets and phones: the section links become a swipeable row under the logo,
+     and the bar stops being sticky so it never eats a short screen. */
   @media (max-width:820px){
     .live{grid-template-columns:repeat(2,1fr)} .steps,.memes{grid-template-columns:1fr} .wallet{grid-template-columns:1fr}
-    .nav{display:none} .lang{margin-left:auto} .hero{padding-top:48px}
+    .bar{position:relative}
+    .bar .wrap{flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:6px;row-gap:6px}
+    .lang{margin-left:auto}
+    [dir="rtl"] .lang{margin-left:0;margin-right:auto}
+    .nav{order:3;flex:1 1 100%;margin:0;padding-bottom:4px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+    .nav a{scroll-snap-align:start;border:1px solid var(--edge);background:rgba(255,209,0,.04)}
+    .hero{padding-top:44px} section{padding-top:52px;scroll-margin-top:12px}
+    .wallet{padding:20px}
+  }
+  /* Small phones: everything stacks, buttons go full width. */
+  @media (max-width:420px){
+    .ctas .btn{flex:1 1 100%;justify-content:center}
+    .logo{font-size:14px;letter-spacing:.2em}
+    .lang select{max-width:132px}
+    .stat{padding:14px 12px} .stat .k{letter-spacing:.08em}
+    .kv{grid-template-columns:1fr;gap:2px} .kv dd{margin-bottom:8px}
+    .dir{columns:1}
+    h2{max-width:none}
+  }
+  /* Folded phones and watches-sized screens. */
+  @media (max-width:300px){
+    .live{grid-template-columns:1fr}
+    .kicker{letter-spacing:.08em;padding:6px 10px}
+    .step,.wallet{padding-left:14px;padding-right:14px}
+  }
+  /* Phones turned sideways: little height, so less air above the fold. */
+  @media (max-height:500px) and (orientation:landscape){
+    .bar .wrap{flex-wrap:nowrap;padding-top:4px;padding-bottom:4px}
+    .nav{order:0;flex:1 1 auto;min-width:0;padding-bottom:0}
+    .hero{padding-top:24px;padding-bottom:16px} .word{font-size:clamp(38px,9vh,72px)}
+    .orb{width:min(360px,60vh)} .live{margin-top:24px}
+  }
+  /* Big screens and TVs: a little more room and size, never a sea of black. */
+  @media (min-width:1600px){
+    .wrap{max-width:1240px} body{font-size:16px}
+  }
+  @media (min-width:2400px){ html{zoom:1.35} }
+  @media (min-width:3200px){ html{zoom:1.8} }
+  @media print{
+    .bar{position:static} .orb,.ctas,.walletmsg{display:none}
+    .js .reveal{opacity:1;transform:none}
   }
 </style>
 </head>
@@ -369,6 +434,7 @@
 <script src="/molibra/mobilewallet.js"></script>
 <script>
 // ⛔ Follow the origin that served this page - see the note in bridgedmoli.html.
+document.documentElement.classList.add('js');
 const NODE = location.protocol.startsWith('http') ? location.origin : 'http://193.123.191.142:8545';
 const RPC = NODE + '/molibra';
 const $ = (id) => document.getElementById(id);
@@ -393,7 +459,9 @@ const PT_DYN = {
 };
 // The Portuguese original of every tagged element, kept as nodes so emphasis survives.
 const PT_NODES = {};
-for (const el of document.querySelectorAll('[data-t]')) PT_NODES[el.dataset.t] ??= [...el.childNodes].map((n) => n.cloneNode(true));
+for (const el of document.querySelectorAll('[data-t]')) {
+  if (!PT_NODES[el.dataset.t]) PT_NODES[el.dataset.t] = Array.from(el.childNodes).map((n) => n.cloneNode(true));
+}
 const DICTS = { pt: null };
 let LANG = 'pt', D = PT_DYN;
 
@@ -422,7 +490,11 @@ function applyLang() {
   const dict = DICTS[LANG];
   for (const el of document.querySelectorAll('[data-t]')) {
     const k = el.dataset.t;
-    if (!dict || dict[k] == null) { el.replaceChildren(...PT_NODES[k].map((n) => n.cloneNode(true))); continue; }
+    if (!dict || dict[k] == null) {
+      el.textContent = '';
+      for (const n of PT_NODES[k]) el.appendChild(n.cloneNode(true));
+      continue;
+    }
     rich(el, dict[k]);
   }
   D = dict ? { ...PT_DYN, ...dict } : PT_DYN;
