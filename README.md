@@ -252,6 +252,18 @@ and it creates no MOLI. It is a cost function for a faucet, and the page says so
 words. It must never be shipped inside the mobile application — mining in an app is banned by
 Apple 3.1.5(ii) and by Google Play, and the app's path is the linking-proof grant instead.
 
+## Fast bridge (inventory leg): funding and test transfers
+
+- Transfers INTO the inventory (`0x24f2d04cb6F15dE0B2ec531f6F985140182e9a61`) from the cold
+  wallet (`coldWallet` in `bots/fastbridge-core.mjs`) or from any address in
+  `fast.fundingSenders` (bot config.json) are **inventory funding**: status `funding`, never
+  paid, never on `pending-operator.json`, never counted against the limits.
+- **A test of the route must come from a wallet that is NOT the cold wallet.** Sent from the
+  cold wallet it is recorded as funding and nothing is paid back.
+- A sender whose Ethereum code is an EIP-7702 delegation designator (exactly 23 bytes,
+  `0xef0100` + the delegate address, e.g. a MetaMask smart account) is an EOA and is paid
+  normally; a sender with real contract code is still refused (`contract-sender`).
+
 ## Not financial advice
 
 MOLI is the coin of a young network run by its users. **It has no market price**: nothing has

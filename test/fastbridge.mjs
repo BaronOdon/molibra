@@ -4,7 +4,7 @@
  * bots/fastbridge-core.mjs makes, and every payout is decoded and checked.
  */
 import { readFileSync } from 'node:fs';
-import { FastBridge, FAST_DEFAULTS, quote, erc20PayoutData, sourceOfErc20Payout } from '../bots/fastbridge-core.mjs';
+import { FastBridge, FAST_DEFAULTS, quote, erc20PayoutData, sourceOfErc20Payout, isRealContractCode, isDelegationDesignator } from '../bots/fastbridge-core.mjs';
 import { signTransaction, decodeTransaction } from '../src/tx.js';
 import { decodeEip1559 } from '../src/eth1559.js';
 import { generatePrivateKey, privateToAddress, toHex, normalizeAddress } from '../src/crypto.js';
@@ -390,6 +390,88 @@ console.log('\n8. the service and the page\n');
   const fb2 = bridge(W2, {}, { maxInventoryMoliWei: 1n * WEI, maxInventoryBmoliWei: 1n * WEI });
   try { await fb2.sweep({ live: true, ethSent: true, molibraSent: true }); } catch (e) { sent.push(e.message); }
   check('⛔ no sweep on a chain where this tick already sent a payout (no nonce races)', sent.length === 0);
+}
+
+/* ------------------------------ funding and EIP-7702 senders (8 Oct 2026) */
+console.log('\n9. cold-wallet funding and EIP-7702 accounts\n');
+{
+  check('7702 designator (0xef0100 + 20 bytes) is not a contract', !isRealContractCode('0xef0100' + '63c0c19a282a1b52b07dd5a65b58948a07dae32b'));
+  check('real contract code is a contract', isRealContractCode('0x6080604052') && isRealContractCode('0xef0100' + '11'.repeat(21)));
+  check('empty code is not a contract', !isRealContractCode('0x') && !isRealContractCode(null));
+  check('isDelegationDesignator is exact (23 bytes, prefix ef0100)', isDelegationDesignator('0xEF0100' + 'AB'.repeat(20))
+    && !isDelegationDesignator('0xef0100' + 'ab'.repeat(19)) && !isDelegationDesignator('0xef0200' + 'ab'.repeat(20)));
+}
+{
+  // bMOLI from an EIP-7702 delegated account (a MetaMask smart account) is paid.
+  const W = world(); const state = {}; const fb = bridge(W, state);
+  await fb.tick();
+  const ua = addrOf(keyHex()); W.e.code.set(ua, '0xef0100' + '63c0c19a282a1b52b07dd5a65b58948a07dae32b');
+  const src = W.userSendsBmoli(ua, 50n * WEI, 5001n);
+  W.e.block = 5004n; await fb.tick();
+  check('bMOLI from an EIP-7702 account (code = 0xef0100 || delegate): treated as an EOA and paid',
+    state.items[src].status === 'sent' && W.m.sent.length === 1 && lower(decodeTransaction(W.m.sent[0], 20226n).to) === ua);
+}
+{
+  // The cold wallet funds the inventory, both chains: never paid, never pending.
+  const W = world(); const state = {}; const fb = bridge(W, state);
+  await fb.tick();
+  const coldKey = keyHex(); const cold = addrOf(coldKey);
+  const fb2 = bridge(W, state, { coldWallet: cold });
+  const m = W.userSendsMoli(coldKey, 100n * WEI, 1001n);
+  const b = W.userSendsBmoli(cold, 100n * WEI, 5001n);
+  W.m.height = 1013n; W.e.block = 5004n; await fb2.tick(); await fb2.tick();
+  check('MOLI in from the cold wallet: funding, nothing paid', state.items[m]?.status === 'funding' && W.e.sent.length === 0);
+  check('bMOLI in from the cold wallet: funding, nothing paid', state.items[b]?.status === 'funding' && W.m.sent.length === 0);
+  check('funding is never on the operator\'s pending list', !fb2.pendingItems().some((p) => p.sourceTx === m || p.sourceTx === b));
+  check('funding does not count against the limits', fb2.usedSince(0) === 0n);
+}
+{
+  const W = world(); const state = {}; const funder = addrOf(keyHex());
+  const fb = bridge(W, state, { fundingSenders: [funder.toUpperCase().replace('0X', '0x')] });
+  await fb.tick();
+  const b = W.userSendsBmoli(funder, 100n * WEI, 5001n);
+  W.e.block = 5004n; await fb.tick();
+  check('an address in fundingSenders: funding, nothing paid', state.items[b]?.status === 'funding' && W.m.sent.length === 0);
+}
+{
+  // Migration of the live state of 8 Oct: two fundings marked over-limit, the
+  // operator's 7702 transfer marked contract-sender, a stranger's 7702 transfer
+  // marked contract-sender, and a cold-wallet item already sent (left alone).
+  const W = world(); const COLD = FAST_DEFAULTS.coldWallet;
+  const stranger = addrOf(keyHex()); W.e.code.set(stranger, '0xef0100' + '22'.repeat(20));
+  const realC = addrOf(keyHex()); W.e.code.set(realC, '0x6080');
+  const s1 = W.userSendsBmoli(stranger, 50n * WEI, 4990n);
+  const s2 = W.userSendsBmoli(realC, 50n * WEI, 4991n);
+  const base = { srcBlock: '4990', status: 'over-limit', seenAt: '2026-10-08T07:00:00.000Z', feeWei: (1n * WEI).toString() };
+  const state = { version: 1, readFailures: 0, molibraNext: '1001', ethNext: '5001', items: {
+    '0x3c7d428a53bea5ac6231c6d66a9945c0acaf2486b38846f1784bb13025aaaf38': { ...base, dir: 'm2b', from: COLD, amount: (10_000n * WEI).toString() },
+    '0xfca52007473ea9148f11e15549a32922b6869db8dcd78da173d8f988115fa92a': { ...base, dir: 'b2m', from: COLD, amount: (10_000n * WEI).toString() },
+    '0xcb86036a55baec026c531e3d72ab249613412ef744f016a122c10dcf2b3fc684': { ...base, dir: 'b2m', from: COLD, amount: (50n * WEI).toString(), status: 'contract-sender' },
+    [s1]: { ...base, dir: 'b2m', from: stranger, amount: (50n * WEI).toString(), status: 'contract-sender', srcBlockHash: W.e.receipts.get(s1).blockHash, logIndex: 0 },
+    [s2]: { ...base, dir: 'b2m', from: realC, amount: (50n * WEI).toString(), status: 'contract-sender', srcBlockHash: W.e.receipts.get(s2).blockHash, logIndex: 0 },
+  } };
+  const fb = bridge(W, state);
+  const it = state.items;
+  const sentState = { items: { '0x4ba7086e1ae909903ad46dc3581ded67754ed10f6fee6c1021937a2d50528300': { ...base, dir: 'm2b', from: COLD,
+    amount: (50n * WEI).toString(), status: 'sent', payoutTx: randHash(), sentAt: '2026-10-08T07:40:00.000Z' } } };
+  bridge(W, sentState);
+  check('migration: the 10,000 MOLI funding (0x3c7d...) is funding',
+    it['0x3c7d428a53bea5ac6231c6d66a9945c0acaf2486b38846f1784bb13025aaaf38'].status === 'funding');
+  check('migration: the 10,000 bMOLI funding (0xfca5...) is funding',
+    it['0xfca52007473ea9148f11e15549a32922b6869db8dcd78da173d8f988115fa92a'].status === 'funding');
+  check('migration: the operator\'s contract-sender item (0xcb86...) is funding, not re-paid',
+    it['0xcb86036a55baec026c531e3d72ab249613412ef744f016a122c10dcf2b3fc684'].status === 'funding');
+  check('migration: a cold-wallet item already SENT is left to its receipt',
+    sentState.items['0x4ba7086e1ae909903ad46dc3581ded67754ed10f6fee6c1021937a2d50528300'].status === 'sent');
+  check('migration: other contract-sender items are re-evaluated', it[s1].status === 'confirmed' && it[s2].status === 'confirmed');
+  W.e.block = 5004n; await fb.tick();
+  check('re-evaluated: the 7702 stranger is paid, the real contract is refused again',
+    it[s1].status === 'sent' && it[s2].status === 'contract-sender' && W.m.sent.length === 1
+    && lower(decodeTransaction(W.m.sent[0], 20226n).to) === stranger);
+  check('no funding item was paid or is on the pending list', !fb.pendingItems().some((p) => p.from === lower(COLD))
+    && W.e.sent.length === 0);
+  const again = bridge(W, state);
+  check('the re-evaluation runs once (a refused contract stays refused)', it[s2].status === 'contract-sender' && Boolean(state.migrations?.contractSender7702) && again);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

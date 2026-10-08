@@ -36,6 +36,14 @@
  *    dir pauses only this leg (handled by the service).
  * ⛔ Rebalancing is the operator's, by the slow bridge: MOLI -> bMOLI by burn
  *    and claim, bMOLI -> MOLI by the vault and return. This leg never bridges.
+ * ⛔ A transfer INTO the inventory from the cold wallet (or any address in
+ *    `fundingSenders`) is inventory FUNDING, never a payout request: status
+ *    'funding', terminal, never paid, never on the operator's list (8 Oct 2026).
+ *    A TEST of the route must therefore come from a wallet that is NOT the cold
+ *    wallet - from the cold wallet it is recorded as funding and nothing is paid.
+ * ⛔ A sender with code is refused ('contract-sender': no key on Molibra), EXCEPT
+ *    an EIP-7702 delegated account (MetaMask smart account): its code is exactly
+ *    0xef0100 || 20-byte delegate (23 bytes) and its own key exists - an EOA.
  */
 import { decodeTransaction, signTransaction, intrinsicGas } from '../src/tx.js';
 import { toHex, normalizeAddress, privateToAddress } from '../src/crypto.js';
@@ -79,6 +87,8 @@ export const FAST_DEFAULTS = {
   maxInventoryBmoliWei: 15_000n * WEI,
   sweepTriggerBp: 11_000n,                 // 110% of max
   coldWallet: '0xf51ac8fd4112bf1d45fd5c38d5abfe0c61ec3f5a',
+  // Inbound from these (and from coldWallet) is FUNDING, never a request.
+  fundingSenders: [],
   stateView: '0x7ffe42c4a5deea5b0fec41c94c136cf115597227',
   bmoliPoolId: '0x200f192a14c85d09943f76ae3def3ffe596d93594b6d8ab55b99cdf612b4c312',
 };
@@ -101,6 +111,23 @@ const isHash = (h) => /^0x[0-9a-f]{64}$/.test(lower(h));
 const topicAddr = (t) => '0x' + lower(t).slice(-40);
 const word = (v) => BigInt(v).toString(16).padStart(64, '0');
 const addr32 = (a) => lower(a).replace(/^0x/, '').padStart(64, '0');
+
+/**
+ * True when `code` (eth_getCode) is an EIP-7702 delegation designator:
+ * exactly 23 bytes, 0xef0100 followed by the 20-byte delegate address.
+ */
+export function isDelegationDesignator(code) {
+  return /^0xef0100[0-9a-f]{40}$/.test(lower(code ?? ''));
+}
+/** Code that makes an address a contract with no key: anything but empty or a 7702 designator. */
+export function isRealContractCode(code) {
+  const c = lower(code ?? '');
+  if (!c || c === '0x' || c === '0x0') return false;
+  return !isDelegationDesignator(c);
+}
+
+/** Statuses after which an item is never advanced again. */
+export const FAST_TERMINAL = ['paid', 'over-limit', 'below-fee', 'contract-sender', 'reorged', 'payout-reverted', 'funding'];
 
 /** ERC-20 transfer(recipient, amount) with the 32-byte source hash appended. */
 export function erc20PayoutData(recipient, amount, srcHash) {
@@ -155,6 +182,36 @@ export class FastBridge {
     state.version ??= 1;
     state.items ??= {};       // keyed by SOURCE tx hash
     state.readFailures ??= 0;
+    this.funders = new Set([this.cfg.coldWallet, ...(this.cfg.fundingSenders ?? [])]
+      .filter(Boolean).map((a) => lower(a)));
+    this.migrate();
+  }
+
+  /** An inbound from the cold wallet or a configured funder: inventory funding. */
+  isFunding(from) { return this.funders.has(lower(from ?? '')); }
+
+  /**
+   * Runs on every start, idempotent. (a) Any item from a funder that was never
+   * paid becomes 'funding' (the 8 Oct 10,000 MOLI / 10,000 bMOLI fundings were
+   * recorded as over-limit requests). A 'sent' or 'paid' item is left alone: its
+   * payout exists and its receipt still decides. (b) Once: items refused as
+   * 'contract-sender' before the EIP-7702 rule are re-evaluated from 'confirmed'.
+   */
+  migrate() {
+    const items = this.state.items;
+    if (!this.state.migrations?.contractSender7702) {
+      for (const [h, it] of Object.entries(items)) {
+        if (it.status === 'contract-sender' && !this.isFunding(it.from)) {
+          this.set(h, it, 'confirmed', { note: 're-evaluated: EIP-7702 delegated accounts are EOAs' });
+        }
+      }
+      this.state.migrations = { ...(this.state.migrations ?? {}), contractSender7702: new Date(this.now()).toISOString() };
+    }
+    for (const [h, it] of Object.entries(items)) {
+      if (this.isFunding(it.from) && !['sent', 'paid', 'funding'].includes(it.status)) {
+        this.set(h, it, 'funding', { note: 'inventory funding from the cold wallet / a funding sender: never a payout', wasStatus: it.status });
+      }
+    }
   }
 
   save() { this.saveState(this.state); }
@@ -262,6 +319,7 @@ export class FastBridge {
         seenAt: new Date(this.now()).toISOString(), checkFromEth: tips.eth.toString(),
         feeWei: tips.gas ? quote(tx.value, this.cfg, tips.gas.m2b).fee.toString() : null,
       };
+      if (this.isFunding(tx.from)) this.markFunding(tx.hash, this.state.items[tx.hash]);
       this.log('info', 'fast-inbound', { dir: 'm2b', tx: tx.hash, from: tx.from, amount: BigInt(tx.value).toString() });
     }
   }
@@ -287,6 +345,7 @@ export class FastBridge {
           seenAt: new Date(this.now()).toISOString(), checkFromMolibra: tips.molibra.toString(),
           feeWei: tips.gas ? quote(BigInt(l.data), this.cfg, tips.gas.b2m).fee.toString() : null,
         };
+        if (this.isFunding(from)) this.markFunding(h, this.state.items[h]);
         this.log('info', 'fast-inbound', { dir: 'b2m', tx: h, from, amount: BigInt(l.data).toString() });
       }
       next = to + 1n;
@@ -299,7 +358,7 @@ export class FastBridge {
 
   async payouts(tips, ctx) {
     const open = Object.entries(this.state.items)
-      .filter(([, it]) => !['paid', 'over-limit', 'below-fee', 'contract-sender', 'reorged', 'payout-reverted'].includes(it.status))
+      .filter(([, it]) => !FAST_TERMINAL.includes(it.status))
       .sort(([, a], [, b]) => (a.seenAt < b.seenAt ? -1 : 1));
     for (const [hash, it] of open) {
       if (this.state.paused) return;
@@ -308,6 +367,10 @@ export class FastBridge {
         this.log('warn', 'fast-item-error', { tx: hash, error: it.lastError });
       }
     }
+  }
+
+  markFunding(hash, it) {
+    this.set(hash, it, 'funding', { note: 'inventory funding from the cold wallet / a funding sender: never a payout' });
   }
 
   set(hash, it, status, extra = {}) {
@@ -326,6 +389,8 @@ export class FastBridge {
   async advance(hash, it, tips, ctx) {
     const isM2b = it.dir === 'm2b';
     const busy = isM2b ? ctx.ethSent : ctx.molibraSent;
+    // ⛔ Funding is never a request (a 'sent' payout still goes to its receipt).
+    if (it.status !== 'sent' && this.isFunding(it.from)) { this.markFunding(hash, it); return; }
 
     // 1. A payout already sent: its receipt decides.
     if (it.status === 'sent') {
@@ -416,9 +481,9 @@ export class FastBridge {
       && BigInt(l.data) === BigInt(it.amount));
   }
 
+  /** A real contract (no key). An EIP-7702 delegated account is an EOA: false. */
   async isContract(address) {
-    const code = await this.io.eth.rpc('eth_getCode', [address, 'latest']);
-    return Boolean(code && code !== '0x' && code !== '0x0');
+    return isRealContractCode(await this.io.eth.rpc('eth_getCode', [address, 'latest']));
   }
 
   /** A payout carrying this source hash, already on chain - or null. */
