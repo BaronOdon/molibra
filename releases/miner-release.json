@@ -1,0 +1,22 @@
+{
+  "manifest": {
+    "product": "molibra-miner",
+    "version": "1.1.0",
+    "seq": 1,
+    "commit": "d0c18695532a22f8743cd3998cd38a569c1f8866",
+    "tree": "sha256:b04655ce3dd9f799d12b7acc0c2b9a50d33ef68e055b767981ffcb6b81b742e8",
+    "publishedAt": "2026-10-08T20:43:30.098Z",
+    "rollout": {
+      "hours": 24
+    },
+    "mandatory": null,
+    "minLauncher": 4,
+    "notes": "Signed updates, rollback, flag-day guard, full peer with consent"
+  },
+  "signatures": [
+    {
+      "signer": "molibra-release-2026-10",
+      "sig": "3SwAngzpb8APQ94TCQg1j9FvCOQjlUgYQ5jjKlOCkU0m7QhALuL+dMKAaGXBRTw7a9vChJZFoK1mutYzmuU6Cw=="
+    }
+  ]
+}
