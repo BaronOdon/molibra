@@ -749,6 +749,19 @@ async function handleAudit(node, req, res) {
     return json(res, 200, { peers: [...node.peers] });
   }
 
+  // The caller's address as this node sees it - how a miner learns the public
+  // IP it should advertise. Behind Caddy, the same rightmost-XFF rule as the
+  // rate limiter (clientKey): a client cannot choose what is reported.
+  if (path === '/molibra/whoami') {
+    return json(res, 200, { ip: clientKey(req) });
+  }
+
+  // How many nodes answer, walking peer lists from here: COUNTS only, cached
+  // ten minutes (Node.census). The download page shows it.
+  if (path === '/molibra/network') {
+    return json(res, 200, node.census ? await node.census() : { reachableNodes: 1 });
+  }
+
   /**
    * Every node the operator runs, as one answer, for the status page.
    *
@@ -1170,6 +1183,19 @@ async function handleAudit(node, req, res) {
    * which is what matters before a flag day, when a miner on older code forks
    * at the activation height. There is no separate "release" to forget to bump.
    */
+  // ⭐ The signed miner release (8 Oct 2026). Installed miners accept a release
+  //    ONLY with a valid signature from the release keys built into the
+  //    supervisor, so this node is just one mirror among many: every node
+  //    serves the same file from its checkout, and a tampered copy is refused
+  //    by every miner that reads it.
+  if (path === '/download/release.json') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'releases', 'miner-release.json');
+    if (!existsSync(file)) return json(res, 404, { error: 'no signed release published yet' });
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/download/version.json') {
     const commit = currentCommit();
     return json(res, commit ? 200 : 503, commit
@@ -1715,12 +1741,20 @@ async function handlePeerPost(node, path, payload, res) {
       if (node.peers.size >= MAX_PEERS) {
         return json(res, 429, { error: `peer set full (${MAX_PEERS})`, peers: node.peers.size });
       }
+      // ⭐ Dial it back first (8 Oct 2026). An announcement is only a claim; a
+      //    peer that cannot be reached would cost a failed sync every tick and
+      //    would be counted as a node by the census. The answer also tells the
+      //    announcer whether the world can reach it - the miner's
+      //    "is my port open?" test.
+      if (node.probePeer && !(await node.probePeer(url))) {
+        return json(res, 200, { peers: node.peers.size, reachable: false, added: false });
+      }
       node.addPeer(url);
       // ⛔ Follow them back. A node started without --peers never created a sync
       //    timer, so before this it could accept an announcement and still
       //    never pull from anyone - deaf for as long as it ran.
       node.followPeersIfIdle?.();
-      return json(res, 200, { peers: node.peers.size, added: url, following: Boolean(node.syncTimer) });
+      return json(res, 200, { peers: node.peers.size, added: url, reachable: true, following: Boolean(node.syncTimer) });
     }
 
     if (path === '/molibra/submit-block') {

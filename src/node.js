@@ -16,7 +16,17 @@ import { Issuer } from './issuer.js';
 // ⛔ The sync's walk-back window is DERIVED from the deepest reorg the chain
 //    will accept, never a number of its own: a window shallower than that could
 //    miss a common ancestor the chain would still reorganise to.
-import { MAX_REORG_DEPTH } from './limits.js';
+import { MAX_REORG_DEPTH, MAX_PEERS } from './limits.js';
+import { checkPeerUrl } from './netguard.js';
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+/** Consecutive failed syncs (10 s apart) before a LEARNED peer is forgotten: ~10 min. */
+export const PEER_DROP_AFTER_FAILURES = 60;
+/** Sync ticks between rounds of asking peers for their peers: ~5 min at 10 s. */
+export const DISCOVER_EVERY_TICKS = 30;
+/** New peers taken from one peer's list per round: a stranger's list cannot flood the set. */
+export const DISCOVER_PER_PEER = 8;
 
 /** How many blocks a sync verifies between yielding the loop AND writing to
  *  disk. One number, deliberately, so the two cadences cannot drift apart:
@@ -66,6 +76,13 @@ export class Node {
     this.ready = this.chain.init();
     this.miner = miner ? normalizeAddress(miner) : null;
     this.peers = new Set(peers.filter(Boolean));
+    // The peers this node was TOLD about (--peers) are never dropped for being
+    // unreachable; peers it learned (announce, discovery) are, after a while.
+    this.configuredPeers = new Set(this.peers);
+    this.peerFailures = new Map();
+    this.syncTicks = 0;
+    this.discovering = false;
+    this.censusCache = null;
     this.minGasPrice = BigInt(minGasPrice);
     this.miningRounds = 20000; // nonces per slice before yielding to the event loop
     this.mining = false;
@@ -96,6 +113,7 @@ export class Node {
   async start({ host = '127.0.0.1', port = 8545, advertise = null } = {}) {
     this.server = await startRpcServer(this, { host, port });
     this.rpcUrl = advertise ? advertise.replace(/\/$/, '') : `http://${host}:${port}`;
+    this.loadPeers();
     return this;
   }
 
@@ -190,7 +208,143 @@ export class Node {
   // ---------------------------------------------------------------- peers
 
   addPeer(url) {
-    this.peers.add(url.replace(/\/$/, ''));
+    const u = url.replace(/\/$/, '');
+    if (this.peers.has(u)) return;
+    this.peers.add(u);
+    this.savePeers();
+  }
+
+  /**
+   * ⭐ Every miner is a full peer (operator, 8 Oct 2026): the network must not
+   * depend on two operator nodes. A node REMEMBERS the peers it learned
+   * (announce, discovery) in <datadir>/peers.json, so after a restart it still
+   * knows more than the addresses it was started with.
+   */
+  peersFile() {
+    return this.chain?.dataDir ? join(this.chain.dataDir, 'peers.json') : null;
+  }
+
+  loadPeers() {
+    const file = this.peersFile();
+    if (!file) return;
+    try {
+      const list = JSON.parse(readFileSync(file, 'utf8'));
+      for (const u of (Array.isArray(list) ? list : []).slice(0, MAX_PEERS)) {
+        if (typeof u === 'string' && /^https?:\/\/[\w.\-:[\]]+$/.test(u) && u !== this.rpcUrl) this.peers.add(u);
+      }
+    } catch { /* no file yet */ }
+  }
+
+  savePeers() {
+    const file = this.peersFile();
+    if (!file) return;
+    try {
+      mkdirSync(this.chain.dataDir, { recursive: true });
+      writeFileSync(file + '.tmp', JSON.stringify([...this.peers], null, 1));
+      renameSync(file + '.tmp', file);
+    } catch { /* remembering peers is a convenience, never a reason to stop */ }
+  }
+
+  /** One sync outcome for `peer`; a learned peer that keeps failing is forgotten. */
+  notePeerResult(peer, ok) {
+    if (ok) { this.peerFailures.delete(peer); return; }
+    const n = (this.peerFailures.get(peer) ?? 0) + 1;
+    this.peerFailures.set(peer, n);
+    if (n >= PEER_DROP_AFTER_FAILURES && !this.configuredPeers.has(peer)) {
+      this.peers.delete(peer);
+      this.peerFailures.delete(peer);
+      this.savePeers();
+      console.log(`[molibra] forgot peer ${peer}: unreachable for ${n} syncs`);
+    }
+  }
+
+  /** True when `url` answers as a Molibra node on this chain, within `timeoutMs`. */
+  async probePeer(url, timeoutMs = 4000) {
+    try {
+      const r = await fetch(url.replace(/\/$/, '') + '/molibra/head', { signal: AbortSignal.timeout(timeoutMs) });
+      if (!r.ok) return false;
+      const head = await r.json();
+      return Number.isFinite(Number(head?.header?.number));
+    } catch { return false; }
+  }
+
+  /**
+   * Ask each peer for ITS peers and follow the ones that answer. This is how a
+   * newcomer that knows only the operator's nodes comes to know every
+   * reachable miner - and how the network keeps working without them.
+   * ⛔ A peer's list is a stranger's input: every address passes the same SSRF
+   * guard as an announcement, must answer as a node, and at most
+   * DISCOVER_PER_PEER are taken from any one list.
+   */
+  async discoverPeers({ check = checkPeerUrl } = {}) {
+    if (this.discovering) return 0;
+    this.discovering = true;
+    let added = 0;
+    try {
+      for (const peer of [...this.peers]) {
+        if (this.peers.size >= MAX_PEERS) break;
+        let list = [];
+        try {
+          const r = await fetch(peer.replace(/\/$/, '') + '/molibra/peers', { signal: AbortSignal.timeout(5000) });
+          list = (await r.json())?.peers ?? [];
+        } catch { continue; }
+        let taken = 0;
+        for (const raw of (Array.isArray(list) ? list : []).slice(0, 64)) {
+          if (taken >= DISCOVER_PER_PEER || this.peers.size >= MAX_PEERS) break;
+          let url;
+          try { url = await check(String(raw)); } catch { continue; }
+          if (url === this.rpcUrl || this.peers.has(url)) continue;
+          if (!(await this.probePeer(url))) continue;
+          this.addPeer(url);
+          added++; taken++;
+          console.log(`[molibra] discovered peer ${url} (via ${peer})`);
+        }
+      }
+    } finally { this.discovering = false; }
+    return added;
+  }
+
+  /**
+   * How many Molibra nodes answer, found by walking peer lists from here.
+   * Counts only - never the addresses - and cached for ten minutes, so the
+   * download page can say how decentralized the network is without this node
+   * becoming a crawler anyone can trigger.
+   */
+  async census({ maxNodes = 64, ttlMs = 10 * 60_000, check = checkPeerUrl } = {}) {
+    if (this.censusCache && Date.now() - this.censusCache.at < ttlMs) return this.censusCache.value;
+    const seen = new Set(this.rpcUrl && Node.isDialable(this.rpcUrl) ? [this.rpcUrl] : []);
+    const queue = [...this.peers];
+    let reachable = 0;
+    const heights = [];
+    while (queue.length && seen.size < maxNodes) {
+      const batch = queue.splice(0, 8).filter((u) => !seen.has(u));
+      batch.forEach((u) => seen.add(u));
+      await Promise.all(batch.map(async (url) => {
+        try {
+          const base = url.replace(/\/$/, '');
+          const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(4000) })).json();
+          const h = Number(head?.header?.number);
+          if (!Number.isFinite(h)) return;
+          reachable++;
+          heights.push(h);
+          const list = (await (await fetch(base + '/molibra/peers', { signal: AbortSignal.timeout(4000) })).json())?.peers ?? [];
+          for (const raw of (Array.isArray(list) ? list : []).slice(0, 64)) {
+            try { const u = await check(String(raw)); if (!seen.has(u)) queue.push(u); } catch { /* refused */ }
+          }
+        } catch { /* not answering */ }
+      }));
+    }
+    const top = heights.length ? Math.max(...heights) : null;
+    const value = {
+      // This node, plus every other node that answered.
+      reachableNodes: reachable + 1,
+      inSync: heights.filter((h) => top !== null && h >= top - 10).length + 1,
+      crawled: seen.size,
+      crawledAt: new Date().toISOString(),
+      note: 'a floor, not a census: nodes behind NAT that serve nobody are not counted',
+    };
+    this.censusCache = { at: Date.now(), value };
+    return value;
   }
 
   /**
@@ -261,16 +415,20 @@ export class Node {
             // Best effort, and unimportant if it fails: it only lets the peer
             // push to us, which is latency, not correctness.
             await this.announceTo(peer).catch(() => {});
+            this.notePeerResult(peer, true);
           } catch (error) {
             // A peer being unreachable is normal and must never stop the loop.
             if (!this.quietSync) {
               console.warn(`[molibra] sync from ${peer} failed: ${error.message}`);
             }
+            this.notePeerResult(peer, false);
           }
         }
       } finally {
         this.syncing = false;
       }
+      // Learn the peers of our peers, now and then, beside the sync - never in its way.
+      if (this.syncTicks++ % DISCOVER_EVERY_TICKS === 0) this.discoverPeers().catch(() => {});
     };
 
     this.syncTimer = setInterval(tick, intervalMs);

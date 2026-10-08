@@ -125,6 +125,9 @@ try {
     check(`refused: ${bad}`, r.status === 400, `${r.status} ${JSON.stringify(r.body).slice(0, 80)}`);
   }
   check('nothing refused became a peer', a.peers.size === 0, String(a.peers.size));
+  // A public address passes the guard; the dial-back (a separate check, see
+  // test/peering.mjs) is stubbed here so this tests the guard alone.
+  a.probePeer = async () => true;
   const ok = await announce('http://203.0.113.9:8545');
   check('a public http address is still accepted', ok.status === 200 && ok.body.added === 'http://203.0.113.9:8545',
     JSON.stringify(ok.body));

@@ -49,6 +49,19 @@ try {
   check('it starts with no peers', miner.peers.size === 0);
   check('  so it has no sync timer', !miner.syncTimer);
 
+  // ⭐ 8 Oct 2026: an announcement is dialled back before it is accepted.
+  //    203.0.113.9 is a documentation address nobody answers on, so first:
+  //    refused as unreachable, and nothing changes.
+  const silent = await (await fetch('http://127.0.0.1:18583/molibra/announce', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'http://203.0.113.9:8545' }),
+  })).json();
+  check('⛔ an address that does not answer is NOT added (dial-back)', silent.added === false && silent.reachable === false
+    && miner.peers.size === 0 && !miner.syncTimer, JSON.stringify(silent));
+  // Then the same newcomer, reachable (the probe stands in for a live node).
+  const realProbe = miner.probePeer.bind(miner);
+  miner.probePeer = async (url) => url === 'http://203.0.113.9:8545' || realProbe(url);
+
   // The newcomer announces itself, exactly as startSyncing does each tick.
   const answer = await (await fetch('http://127.0.0.1:18583/molibra/announce', {
     method: 'POST',
@@ -59,7 +72,7 @@ try {
   check('the announcement is accepted', answer.added === 'http://203.0.113.9:8545', JSON.stringify(answer));
   check('  and the miner now has a peer', miner.peers.size === 1);
   check('  ⭐ and it is now FOLLOWING, without a restart', Boolean(miner.syncTimer));
-  check('  which the answer says out loud', answer.following === true);
+  check('  which the answer says out loud', answer.following === true && answer.reachable === true);
 
   miner.stopSyncing();
 
