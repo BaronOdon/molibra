@@ -40,6 +40,17 @@ Minerar para a sua propria carteira
   carteira. O que ja foi minerado continua na carteira antiga; para mover,
   importe a chave antiga uma vez e envie os MOLI.
 
+Atualizacoes assinadas e no completo (versao 1.1)
+  O Miner so instala atualizacoes ASSINADAS pelas chaves de lancamento da
+  Molibra e confere cada arquivo contra a assinatura antes de usar. Uma
+  atualizacao que falhe e desfeita sozinha. Seu computador e um no completo:
+  confere cada bloco por conta propria.
+  "Ajudar a rede" (opcional): o no tambem SERVE a cadeia a outros nos - abre
+  a porta 20226 no roteador (UPnP) e outros nos veem o IP deste computador.
+  Para mudar: na pasta do Miner, rode  runtime
+ode molibra-miner.mjs public on
+  (ou off) e reinicie o computador.
+
 Mais informacoes: molibra.org - molibra.org/download
 
 
@@ -65,3 +76,13 @@ IF THE INSTALLER CREATED A NEW WALLET FOR YOU
   3. Add the Molibra network: molibra.org/molibra/connect, or chain ID 20226,
      RPC https://molibra.org, symbol MOLI.
   Never send the private key to anyone. Molibra will never ask for it.
+
+Signed updates and full node (version 1.1)
+  The Miner installs only updates SIGNED by the Molibra release keys and checks
+  every file against the signature before using it. An update that fails is
+  undone by itself. Your computer is a full node: it checks every block itself.
+  "Help the network" (optional): the node also SERVES the chain to other nodes -
+  it opens port 20226 on your router (UPnP) and other nodes see this computer's IP.
+  To change it: in the Miner folder run  runtime
+ode molibra-miner.mjs public on
+  (or off) and restart the computer.

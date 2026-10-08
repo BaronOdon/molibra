@@ -10,7 +10,7 @@
   4. ⛔ scan the output with Microsoft Defender and refuse to publish anything it flags;
   5. write SHA256SUMS entries for the release.
 #>
-param([string]$Iscc = 'ISCC.exe', [string]$Version = '1.0.0', [int]$WindowVersion = 2)
+param([string]$Iscc = 'ISCC.exe', [string]$Version = '1.1.0', [int]$WindowVersion = 3)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -40,10 +40,21 @@ $sig = Get-AuthenticodeSignature (Join-Path $Stage 'runtime\node.exe')
 if ($sig.Status -ne 'Valid') { throw "node.exe is not validly signed: $($sig.Status)" }
 Write-Host "runtime  $NodeVersion, node.exe signed by: $($sig.SignerCertificate.Subject)"
 
-# ---- 2. app, from one commit
-$commit = (git -C $Repo rev-parse HEAD).Trim()
+# ---- 2. app: EXACTLY the signed release (supervisor v4, 8 Oct 2026). The
+#          installer ships the commit releases/miner-release.json names, whole,
+#          with that signed file as app\RELEASE.json - so a new install starts on
+#          the signed release instead of waiting for its rollout turn, and the
+#          build refuses a release that does not verify or whose tree digest
+#          differs from the commit's.
+$node = Join-Path $Stage 'runtime\node.exe'
+& $node (Join-Path $Repo 'installers\release-tool.mjs') verify
+if ($LASTEXITCODE -ne 0) { throw 'releases\miner-release.json does not verify - sign a release first' }
+$release = Get-Content -Raw (Join-Path $Repo 'releases\miner-release.json') | ConvertFrom-Json
+$commit = $release.manifest.commit
+$digest = (& $node (Join-Path $Repo 'installers\release-tool.mjs') digest $commit | Out-String).Trim()
+if ($digest -ne $release.manifest.tree) { throw "commit $commit digests to $digest, the release says $($release.manifest.tree)" }
 $tar = Join-Path $env:TEMP 'molibra-app.tar'
-git -C $Repo archive --format=tar -o $tar HEAD src genesis.json package.json package-lock.json LICENSE NOTICE
+git -C $Repo -c core.autocrlf=false archive --format=tar -o $tar $commit
 New-Item -ItemType Directory -Force -Path (Join-Path $Stage 'app') | Out-Null
 # ⛔ Windows' own tar, by full path. A bare `tar` can resolve to Git's MSYS tar,
 #    which reads "C:" as a REMOTE HOST, extracts nothing and says so only on
@@ -60,12 +71,13 @@ Push-Location (Join-Path $Stage 'app')
 if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
 Pop-Location
 Set-Content -Path (Join-Path $Stage 'app\COMMIT') -Value $commit -Encoding ASCII
+Copy-Item (Join-Path $Repo 'releases\miner-release.json') (Join-Path $Stage 'app\RELEASE.json')
 # From git, not the working tree: byte-identical (LF) to what the self-update
 # later fetches, so an install does not restart itself once over line endings.
 # ⛔ git archive, never `git show | Out-String`: PowerShell 5.1 re-encodes native
 #    output through the console code page and would corrupt every non-ASCII byte.
 $ltar = Join-Path $env:TEMP 'molibra-launcher.tar'
-git -C $Repo archive --format=tar -o $ltar HEAD installers/launcher/molibra-miner.mjs installers/launcher/status.html installers/launcher/LEIA-ME.txt
+git -C $Repo -c core.autocrlf=false archive --format=tar -o $ltar $commit installers/launcher/molibra-miner.mjs installers/launcher/status.html installers/launcher/LEIA-ME.txt
 & (Join-Path $env:SystemRoot 'System32\tar.exe') -xf $ltar -C $Stage --strip-components 2
 Remove-Item $ltar
 foreach ($f in 'molibra-miner.mjs', 'status.html', 'LEIA-ME.txt') {

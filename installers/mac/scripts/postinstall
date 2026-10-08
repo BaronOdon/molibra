@@ -89,6 +89,13 @@ if [ ! -f "$ROOT/config.json" ]; then
   done
   sudo -u "$USER_NAME" "$NODE" "$ROOT/molibra-miner.mjs" init $ADDR >/dev/null
 fi
+# ---- 3b. help the network (8 Oct 2026): serve the chain to other nodes, asked
+#          ONCE, plainly. No answer (nobody watching) = no consent = private.
+if ! grep -q '"public"' "$ROOT/config.json" 2>/dev/null; then
+  CHOICE="$(as_user osascript -e 'button returned of (display dialog "Help the Molibra network?\n\nYour miner always checks every block itself. If you also let it SERVE the chain, other nodes connect to this Mac: it opens port 20226 on your router (UPnP) and other nodes see this computer'"'"'s IP address.\n\nYou can change this later." buttons {"Not now", "Help the network"} default button 2 with title "Molibra Miner" giving up after 900)' 2>/dev/null || true)"
+  if [ "$CHOICE" = "Help the network" ]; then PUB=public; else PUB=private; fi
+  sudo -u "$USER_NAME" "$NODE" "$ROOT/molibra-miner.mjs" init - "$PUB" >/dev/null
+fi
 SUMMARY="$ROOT/install-summary.json"
 MINER="$(sed -n 's/.*"miner": *"\([^"]*\)".*/\1/p' "$SUMMARY" 2>/dev/null | head -1)"
 [ -z "$MINER" ] && MINER="$(sed -n 's/.*"miner": *"\([^"]*\)".*/\1/p' "$ROOT/config.json" | head -1)"

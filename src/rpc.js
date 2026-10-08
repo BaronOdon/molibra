@@ -1746,7 +1746,17 @@ async function handlePeerPost(node, path, payload, res) {
       //    would be counted as a node by the census. The answer also tells the
       //    announcer whether the world can reach it - the miner's
       //    "is my port open?" test.
+      // A failed dial-back is remembered for 10 min: an unreachable miner
+      // re-announces every sync tick, and each would otherwise cost this node a
+      // 4-second probe.
+      node.refusedAnnounce ??= new Map();
+      const refusedAt = node.refusedAnnounce.get(url);
+      if (refusedAt && Date.now() - refusedAt < 10 * 60_000) {
+        return json(res, 200, { peers: node.peers.size, reachable: false, added: false, cached: true });
+      }
       if (node.probePeer && !(await node.probePeer(url))) {
+        if (node.refusedAnnounce.size > 10_000) node.refusedAnnounce.clear();
+        node.refusedAnnounce.set(url, Date.now());
         return json(res, 200, { peers: node.peers.size, reachable: false, added: false });
       }
       node.addPeer(url);

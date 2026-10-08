@@ -83,6 +83,7 @@ export class Node {
     this.syncTicks = 0;
     this.discovering = false;
     this.censusCache = null;
+    this.netAbort = null;
     this.minGasPrice = BigInt(minGasPrice);
     this.miningRounds = 20000; // nonces per slice before yielding to the event loop
     this.mining = false;
@@ -126,6 +127,10 @@ export class Node {
   async stop() {
     this.stopMining();
     this.stopSyncing();
+    // Abort discovery and census requests in flight: a node stopped mid-request
+    // must not leave sockets for the process exit to trip over.
+    this.netAbort?.abort();
+    this.netAbort = null;
     if (this.server) {
       // close() alone only stops NEW connections and then waits for every
       // keep-alive socket to go idle - so a node with a wallet or a syncing
@@ -258,10 +263,16 @@ export class Node {
     }
   }
 
+  /** A timeout signal that also fires when the node stops. */
+  netSignal(ms) {
+    this.netAbort ??= new AbortController();
+    return AbortSignal.any([AbortSignal.timeout(ms), this.netAbort.signal]);
+  }
+
   /** True when `url` answers as a Molibra node on this chain, within `timeoutMs`. */
   async probePeer(url, timeoutMs = 4000) {
     try {
-      const r = await fetch(url.replace(/\/$/, '') + '/molibra/head', { signal: AbortSignal.timeout(timeoutMs) });
+      const r = await fetch(url.replace(/\/$/, '') + '/molibra/head', { signal: this.netSignal(timeoutMs) });
       if (!r.ok) return false;
       const head = await r.json();
       return Number.isFinite(Number(head?.header?.number));
@@ -285,7 +296,7 @@ export class Node {
         if (this.peers.size >= MAX_PEERS) break;
         let list = [];
         try {
-          const r = await fetch(peer.replace(/\/$/, '') + '/molibra/peers', { signal: AbortSignal.timeout(5000) });
+          const r = await fetch(peer.replace(/\/$/, '') + '/molibra/peers', { signal: this.netSignal(5000) });
           list = (await r.json())?.peers ?? [];
         } catch { continue; }
         let taken = 0;
@@ -322,12 +333,12 @@ export class Node {
       await Promise.all(batch.map(async (url) => {
         try {
           const base = url.replace(/\/$/, '');
-          const head = await (await fetch(base + '/molibra/head', { signal: AbortSignal.timeout(4000) })).json();
+          const head = await (await fetch(base + '/molibra/head', { signal: this.netSignal(4000) })).json();
           const h = Number(head?.header?.number);
           if (!Number.isFinite(h)) return;
           reachable++;
           heights.push(h);
-          const list = (await (await fetch(base + '/molibra/peers', { signal: AbortSignal.timeout(4000) })).json())?.peers ?? [];
+          const list = (await (await fetch(base + '/molibra/peers', { signal: this.netSignal(4000) })).json())?.peers ?? [];
           for (const raw of (Array.isArray(list) ? list : []).slice(0, 64)) {
             try { const u = await check(String(raw)); if (!seen.has(u)) queue.push(u); } catch { /* refused */ }
           }
@@ -428,7 +439,8 @@ export class Node {
         this.syncing = false;
       }
       // Learn the peers of our peers, now and then, beside the sync - never in its way.
-      if (this.syncTicks++ % DISCOVER_EVERY_TICKS === 0) this.discoverPeers().catch(() => {});
+      // First round on the third tick (~30 s), then every DISCOVER_EVERY_TICKS.
+      if (++this.syncTicks % DISCOVER_EVERY_TICKS === 3) this.discoverPeers().catch(() => {});
     };
 
     this.syncTimer = setInterval(tick, intervalMs);

@@ -59,6 +59,8 @@ try {
   check('⛔ an address that does not answer is NOT added (dial-back)', silent.added === false && silent.reachable === false
     && miner.peers.size === 0 && !miner.syncTimer, JSON.stringify(silent));
   // Then the same newcomer, reachable (the probe stands in for a live node).
+  // ...ten minutes later (the refusal is cached that long), the same newcomer is reachable.
+  miner.refusedAnnounce?.clear();
   const realProbe = miner.probePeer.bind(miner);
   miner.probePeer = async (url) => url === 'http://203.0.113.9:8545' || realProbe(url);
 
@@ -109,4 +111,4 @@ try {
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exitCode = failed ? 1 : 0;

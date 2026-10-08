@@ -133,6 +133,7 @@ curl <span id="peerCurl">…</span>/molibra   # the public node's view</pre>
     <dt>height now</dt><dd id="height">…</dd>
     <dt>block reward</dt><dd id="reward">2 MOLI</dd>
     <dt>public node</dt><dd id="peerNode">…</dd>
+    <dt>public nodes now</dt><dd id="nodes">…</dd>
   </dl>
 </div>
 
@@ -190,6 +191,14 @@ fetch(NODE + '/molibra').then((r) => r.json()).then((s) => {
     document.getElementById('reward').textContent += '  (burn gate opens at ' + gate.height + ')';
   }
 }).catch(() => {});
+
+/* How decentralized the network is right now: nodes that answer, found by
+   walking peer lists (counts only, cached ten minutes on the node). A floor:
+   miners that serve nobody are not counted. */
+fetch(NODE + '/molibra/network').then((r) => r.json()).then((n) => {
+  document.getElementById('nodes').textContent = n.reachableNodes + ' reachable'
+    + (n.inSync !== undefined ? ', ' + n.inSync + ' in sync' : '') + '  (miners behind closed routers are not counted)';
+}).catch(() => { document.getElementById('nodes').textContent = '—'; });
 </script>
 </body>
 </html>

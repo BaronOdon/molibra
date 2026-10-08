@@ -49,6 +49,8 @@
       <dt>Your wallet</dt><dd id="wallet">—</dd>
       <dt>Blocks on this computer</dt><dd id="height">—</dd>
       <dt>Blocks on the network</dt><dd id="network">—</dd>
+      <dt>Network role</dt><dd id="role">—</dd>
+      <dt>Software</dt><dd id="software">—</dd>
     </dl>
     <div class="detail" style="margin-top:10px" id="explorerLine"></div>
   </div>
@@ -110,7 +112,14 @@ async function tick() {
       $('balance').textContent = fmt(r.result) + ' MOLI';
     } catch { $('balance').textContent = 'cannot reach molibra.org'; }
   }
-  $('log').textContent = [...s.log, '', ...s.nodeLog].join('\n') + `\n\nversion ${s.commit?.slice(0, 7) ?? '?'} · since ${s.startedAt}`;
+  const net = s.network ?? {};
+  $('role').textContent = net.public === false ? 'Full node, private (verifies every block, serves nobody)'
+    : net.reachable === true ? `Full node serving the network${net.peers !== null && net.peers !== undefined ? ` · ${net.peers} peers` : ''}`
+    : net.reachable === false ? 'Full node · not reachable from the internet (router port closed)'
+    : 'Full node';
+  $('software').textContent = `${s.release ? 'Molibra ' + s.release + ' (signed)' : (s.commit?.slice(0, 7) ?? '?')}`
+    + `${s.update ? ' · ' + s.update : ''}`;
+  $('log').textContent = [...s.log, '', ...s.nodeLog].join('\n') + `\n\nversion ${s.commit?.slice(0, 7) ?? '?'} · supervisor ${s.launcher ?? '?'} · since ${s.startedAt}`;
 }
 tick();
 setInterval(tick, 3000);

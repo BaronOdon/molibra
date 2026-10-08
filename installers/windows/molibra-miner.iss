@@ -12,7 +12,7 @@
 ; task runs node.exe directly, as the user who installed it, never as SYSTEM.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 #define TaskName "Molibra Miner"
 
@@ -67,9 +67,17 @@ Name: "{group}\Uninstall Molibra Miner"; Filename: "{uninstallexe}"
 ; The read-me says where a created wallet's key lives and how to back it up.
 Name: "{group}\Leia-me - carteira e backup"; Filename: "{app}\LEIA-ME.txt"
 
+[Tasks]
+; Every miner can be a full PEER (8 Oct 2026). Ticked by default, and said plainly:
+; serving the chain means other nodes connect to this computer and see its IP.
+Name: "publicnode"; Description: "Ajudar a rede: servir a blockchain a outros nos (abre a porta 20226 no roteador; outros nos veem o IP deste computador) / Help the network: serve the chain to other nodes (opens port 20226 on the router; other nodes see this computer's IP)"
+
 [Run]
-; 1. the wallet: an address typed on the wallet page, or a new wallet
-Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" init {code:WalletArg}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Setting up your wallet..."
+; 0. the firewall: let node.exe accept connections on the miner's port - only if the owner chose to help the network
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Molibra Miner"""; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Molibra Miner"" dir=in action=allow program=""{app}\runtime\node.exe"" protocol=TCP localport=20226 enable=yes"; Flags: runhidden waituntilterminated; Tasks: publicnode; StatusMsg: "Allowing the miner to serve the network..."
+; 1. the wallet: an address typed on the wallet page, or a new wallet; and public or private
+Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" init {code:WalletArg} {code:PublicArg}";WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Setting up your wallet..."
 ; 2. the always-on task (XML written by the supervisor, UTF-16 as schtasks wants), then start it now
 Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" taskxml"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
 Filename: "{sys}\schtasks.exe"; Parameters: "/Create /TN ""{#TaskName}"" /XML ""{app}\task.xml"" /F"; Flags: runhidden waituntilterminated; StatusMsg: "Registering Molibra Miner to start with Windows..."
@@ -77,6 +85,7 @@ Filename: "{sys}\schtasks.exe"; Parameters: "/Run /TN ""{#TaskName}"""; Flags: r
 Filename: "{app}\Molibra Miner.exe"; WorkingDir: "{app}"; Description: "Open Molibra Miner"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Molibra Miner"""; Flags: runhidden waituntilterminated; RunOnceId: "DeleteFirewallRule"
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""{#TaskName}"" /F"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteTask"
 Filename: "{app}\runtime\node.exe"; Parameters: """{app}\molibra-miner.mjs"" stop"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopMiner"
 
@@ -241,6 +250,14 @@ begin
   // ⛔ Checked again here, because a silent install never shows the page that
   //    validates it: a malformed /WALLET= must not reach the command line.
   if (Result <> '') and not IsAddress(Result) then Result := '';
+  // An empty argument would vanish from the command line: '-' means "make a new wallet".
+  if Result = '' then Result := '-';
+end;
+
+// "public" when the owner chose to help the network (the task above), else "private".
+function PublicArg(Param: String): String;
+begin
+  if WizardIsTaskSelected('publicnode') then Result := 'public' else Result := 'private';
 end;
 
 function JsonField(Json, Name: String): String;

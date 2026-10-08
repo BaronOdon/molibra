@@ -91,4 +91,4 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+process.exitCode = failed ? 1 : 0;
