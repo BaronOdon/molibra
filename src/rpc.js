@@ -1222,6 +1222,14 @@ async function handleAudit(node, req, res) {
 
   /** bMOLI back to MOLI: send to the keyless vault, commit the header, return. */
   // The one-click bridge page (MOLI <-> bMOLI) and the shared return flow it and /molibra/buy use.
+  // Terms, risks, privacy and the compliance position (PT + EN).
+  if (path === '/molibra/legal') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'legal.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
   if (path === '/molibra/ponte') {
     const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'ponte.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });

@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<meta name="theme-color" content="#07070a">
+<title>MOLIBRA · Termos, riscos, privacidade e conformidade</title>
+<meta name="description" content="Quem opera os serviços da Molibra, o que cada um é, os riscos, os termos de uso, a privacidade e o estado de conformidade com a lei.">
+<!--
+  The legal page (8 Oct 2026, operator decisions: services operated by American
+  Ltd t/a Xpirit AI; the fast route stays live with disclosure; the compliance
+  roadmap is public). Portuguese and English are the authoritative texts; other
+  languages are served by the browser's translator. Every statement here must
+  stay TRUE of the running system - change the page in the same commit as the
+  system. Text by textContent only; no script from anywhere else.
+-->
+<style>
+  :root{color-scheme:dark;--void:#07070a;--ink:#f5f3ea;--dim:#a3a091;--dimmer:#6b685e;--gold:#FFD100;--gold-dk:#c9a600;
+        --edge:rgba(255,209,0,.16);--edge-hi:rgba(255,209,0,.45);--glass:rgba(20,20,16,.6);--warn:#ffa62b;
+        --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-behavior:smooth}
+  body{margin:0;background:var(--void);color:var(--ink);font:15px/1.7 var(--sans)}
+  .wrap{max-width:860px;margin:0 auto;padding:0 max(16px, env(safe-area-inset-right)) calc(60px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))}
+  header{display:flex;align-items:center;gap:12px;padding:calc(14px + env(safe-area-inset-top)) 0 14px;border-bottom:1px solid var(--edge);flex-wrap:wrap}
+  .logo{font:700 15px var(--mono);letter-spacing:.28em;color:var(--gold);text-decoration:none}
+  .lang{margin-left:auto;display:flex;border:1px solid var(--edge-hi);border-radius:999px;overflow:hidden}
+  .lang button{background:none;border:0;color:var(--dim);font:600 12px var(--mono);padding:8px 12px;cursor:pointer;min-height:40px}
+  .lang button.on{background:var(--gold);color:#111}
+  nav.toc{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 0}
+  nav.toc a{font-size:13px;color:var(--dim);text-decoration:none;border:1px solid var(--edge);border-radius:999px;padding:8px 12px}
+  nav.toc a:hover{color:var(--gold);border-color:var(--gold)}
+  h1{font:800 clamp(26px,5vw,38px)/1.15 var(--sans);margin:26px 0 6px}
+  h2{font:800 22px/1.25 var(--sans);margin:40px 0 8px;color:var(--gold);scroll-margin-top:16px}
+  h3{font:700 16px var(--sans);margin:22px 0 4px}
+  p,li{color:var(--dim);overflow-wrap:anywhere} b,strong{color:var(--ink)}
+  .note{border-left:3px solid var(--gold-dk);background:rgba(255,209,0,.05);padding:12px 16px;border-radius:0 10px 10px 0;margin:16px 0}
+  .risk{border:1px solid var(--warn);background:rgba(255,166,43,.07);padding:14px 16px;border-radius:12px;margin:16px 0}
+  .risk b{color:var(--warn)}
+  .table{width:100%;overflow-x:auto;margin:12px 0}
+  table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+  th,td{border:1px solid var(--edge);padding:9px 10px;text-align:left;vertical-align:top;color:var(--dim)}
+  th{color:var(--ink);background:rgba(255,209,0,.06)}
+  .k{font:12px var(--mono);color:var(--dimmer)}
+  code{font:12.5px var(--mono);color:var(--gold);overflow-wrap:anywhere}
+  a{color:var(--gold)}
+  footer{margin-top:40px;border-top:1px solid var(--edge);padding-top:16px;font-size:13px;color:var(--dimmer)}
+  [hidden]{display:none!important}
+  @media (pointer:coarse){ nav.toc a{padding:11px 14px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <a class="logo" href="/">MOLIBRA</a>
+  <div class="lang"><button id="lpt" class="on" type="button">PT</button><button id="len" type="button">EN</button></div>
+</header>
+
+<!-- =========================================================== PORTUGUÊS -->
+<main id="pt" lang="pt-BR">
+<h1>Termos, riscos, privacidade e conformidade</h1>
+<p class="k">Versão de 8 de outubro de 2026. O português e o inglês são os textos de referência; outras línguas são tradução do navegador.</p>
+<nav class="toc">
+  <a href="#pt-quem">Quem opera</a><a href="#pt-servicos">Serviços</a><a href="#pt-riscos">Riscos</a>
+  <a href="#pt-termos">Termos de uso</a><a href="#pt-privacidade">Privacidade</a><a href="#pt-conformidade">Conformidade</a>
+</nav>
+
+<h2 id="pt-quem">1. Quem opera</h2>
+<p>O <b>protocolo Molibra</b> é software livre (Apache-2.0, <a href="https://github.com/BaronOdon/molibra">código público</a>): qualquer pessoa pode rodar um nó, minerar e conferir a cadeia. Ninguém é dono da rede.</p>
+<p>Os <b>serviços</b> oferecidos em molibra.org — este site, os nós públicos, o robô da ponte e a ponte rápida — são operados por <b>American Ltd</b>, nome comercial <b>Xpirit AI</b>, sociedade limitada inglesa nº <b>11138952</b> (Inglaterra e País de Gales), sede registrada em 13 Hanger View Way, London W3 0EX, Reino Unido. Contato: <a href="https://github.com/BaronOdon/molibra/issues">github.com/BaronOdon/molibra/issues</a>.</p>
+
+<h2 id="pt-servicos">2. O que cada serviço é</h2>
+<div class="table"><table>
+<tr><th>Serviço</th><th>Quem guarda os fundos</th><th>Taxa</th><th>O que saber</th></tr>
+<tr><td>Rede Molibra (MOLI)</td><td>Você (sua carteira)</td><td>Gás da rede</td><td>MOLI só é emitido por mineração; não houve pré-venda nem ICO. Hoje os dois nós públicos e boa parte da mineração são do operador; a descentralização está em andamento (seção 6).</td></tr>
+<tr><td>Ponte MOLI ⇄ bMOLI (<a href="/molibra/ponte">/molibra/ponte</a>)</td><td>Contratos na Ethereum (BridgedMoli imutável; cofre sem chave)</td><td>Gás × 1,2, mín. 0,00001 ETH (ida); 0,01 bMOLI (volta)</td><td>Você pode reivindicar sozinho, sem taxa da ponte. O lastro é uma atestação com caução, não prova de trabalho.</td></tr>
+<tr><td>Robô da ponte</td><td>Não guarda fundos</td><td>A taxa acima, paga ao operador</td><td>Encaminha reivindicações e devoluções automaticamente; uma devolução acima do limite automático vai ao operador.</td></tr>
+<tr><td>Ponte rápida (<a href="/molibra/rapido">/molibra/rapido</a>)</td><td><b>O operador, por minutos</b> (carteira de estoque)</td><td>0,1–0,3% conforme o estoque + gás × 1,2</td><td><b>É custodial</b> enquanto a troca está em curso. Limites: 2.000 por transferência, 10.000 por hora, 30.000 por dia. Ver seção 3 e seção 6.</td></tr>
+<tr><td>Mercado e páginas (troca, liquidez, pagamento)</td><td>Você e os contratos</td><td>Taxa dos pools</td><td>Interface sem custódia: cada transação é assinada na sua carteira.</td></tr>
+<tr><td>Memecoins CARAMELO, BOLSO, FAZOL</td><td>Contratos</td><td>—</td><td>1% semeou o pool, 95% está numa curva de preço, 4% do operador em vesting (6 meses de carência, 24 de liberação). <b>A partir de 26/10/2026 a liquidez de cada curva pode ser retirada pela carteira do operador.</b></td></tr>
+</table></div>
+
+<h2 id="pt-riscos">3. Riscos</h2>
+<div class="risk"><b>Você pode perder todo o valor que colocar.</b> Criptoativos são voláteis e não têm garantia de nenhum governo nem fundo garantidor. Nada aqui é recomendação de investimento, e não há promessa de lucro.</div>
+<ul>
+  <li><b>Transações são irreversíveis.</b> Endereço errado, rede errada ou chave perdida não têm volta.</li>
+  <li><b>Contratos e software podem ter falhas</b>, inclusive os da ponte; o código é público, mas não foi auditado por terceiros.</li>
+  <li><b>A ponte depende de uma atestação com caução</b>, não da segurança da Ethereum por prova de trabalho.</li>
+  <li><b>A ponte rápida é custodial por minutos:</b> durante esse tempo, os fundos dependem do operador e da carteira de estoque.</li>
+  <li><b>Liquidez pequena:</b> preços podem variar muito com pouco volume; memecoins podem chegar a zero.</li>
+  <li><b>Regras mudam:</b> leis e regulação podem afetar ou interromper serviços (seção 6).</li>
+</ul>
+
+<h2 id="pt-termos">4. Termos de uso</h2>
+<ol>
+  <li><b>Software no estado em que se encontra.</b> O software é fornecido sob a licença Apache-2.0, sem garantias.</li>
+  <li><b>Sem aconselhamento.</b> Nada neste site é aconselhamento financeiro, jurídico ou tributário.</li>
+  <li><b>Quem pode usar.</b> Maiores de 18 anos, com capacidade civil, que não estejam sujeitos a sanções (ONU, Reino Unido, UE, EUA) e para quem o uso seja legal onde vivem.</li>
+  <li><b>Usos proibidos.</b> Lavagem de dinheiro, financiamento do terrorismo, fraude, evasão de sanções ou qualquer atividade ilícita. O operador pode deixar de processar operações ligadas a esses usos.</li>
+  <li><b>Taxas.</b> São mostradas antes de você assinar e pagas por você; cobrem o custo da operação e, na ponte rápida, uma margem de 0,1–0,3%.</li>
+  <li><b>Suas chaves, sua responsabilidade.</b> O operador nunca pede nem guarda sua chave privada.</li>
+  <li><b>Responsabilidade.</b> Na medida permitida em lei, a responsabilidade do operador se limita às taxas que você pagou nos 12 meses anteriores. <b>Nada nestes termos afasta direitos irrenunciáveis do consumidor</b>, inclusive os do Código de Defesa do Consumidor (Lei 8.078/1990) para consumidores no Brasil.</li>
+  <li><b>Lei aplicável.</b> Lei da Inglaterra e do País de Gales, sem prejuízo das normas de proteção do consumidor do país de residência do usuário.</li>
+  <li><b>Mudanças.</b> Estes termos podem mudar; a data da versão fica no topo e o histórico fica no código público.</li>
+</ol>
+
+<h2 id="pt-privacidade">5. Privacidade</h2>
+<ul>
+  <li><b>Sem contas, sem cookies, sem rastreadores de terceiros.</b> O idioma escolhido fica guardado só no seu navegador.</li>
+  <li><b>Endereço IP:</b> o nó o mantém <b>apenas na memória</b>, por alguns minutos, para limitar abusos (excesso de requisições). Só uma <b>contagem</b> de leitores dos últimos 15 minutos é publicada; os endereços não são publicados nem gravados em disco pelo nó, e o servidor web público não mantém registro de acesso.</li>
+  <li><b>Dados na blockchain são públicos e permanentes</b> (endereços, valores, transações). Isso é da natureza da rede e não pode ser apagado por ninguém.</li>
+  <li><b>Base legal:</b> legítimo interesse em manter o serviço seguro (LGPD, Lei 13.709/2018, art. 7º, IX; UK GDPR, art. 6(1)(f)). Nenhum dado é vendido.</li>
+  <li><b>Seus direitos</b> (acesso, correção, oposição) podem ser exercidos pelo contato da seção 1.</li>
+</ul>
+
+<h2 id="pt-conformidade">6. Conformidade: onde estamos e o que vem</h2>
+<div class="note"><b>Compromisso.</b> A Molibra cresce no seu próprio ritmo, e a conformidade acompanha esse crescimento: ela está planejada e em andamento, <b>não é evitada nem ignorada</b>. Esta seção diz, com franqueza, quais leis se aplicam ou podem se aplicar, o que já foi feito e o que vem a seguir.</div>
+<h3>Leis consideradas</h3>
+<ul>
+  <li><b>Reino Unido:</b> Money Laundering Regulations 2017 (reg. 14A — prestadores de troca e custódia de criptoativos); Financial Services and Markets Act 2000, s. 21 (promoções financeiras de criptoativos); Financial Services and Markets Act 2000 (Cryptoassets) Regulations 2026 (SI 2026/102), regime da FCA a partir de 25/10/2027.</li>
+  <li><b>Brasil:</b> Lei 14.478/2022 (prestadoras de serviços de ativos virtuais) e Resoluções BCB 519, 520 e 521/2025; Lei 6.385/1976 e Parecer de Orientação CVM 40/2022 (valores mobiliários); Código de Defesa do Consumidor (Lei 8.078/1990); Decreto 7.962/2013 (comércio eletrônico); LGPD (Lei 13.709/2018).</li>
+  <li><b>União Europeia:</b> Regulamento (UE) 2023/1114 (MiCA).</li>
+  <li><b>Sanções:</b> listas da ONU, do Reino Unido (OFSI), da UE e dos EUA (OFAC).</li>
+</ul>
+<h3>Situação atual</h3>
+<ul>
+  <li><b>Já feito:</b> código público; taxas mostradas antes da assinatura; caminho sem custódia na ponte (reivindicação pelo próprio usuário); limites na ponte rápida; operador identificado; termos, riscos e privacidade publicados; nenhuma promessa de lucro; nenhum dado pessoal vendido.</li>
+  <li><b>A ponte rápida é o único serviço custodial.</b> Ela opera com limites baixos e com estas divulgações enquanto é substituída por trocas atômicas, nas quais ninguém — nem o operador — guarda os fundos de outra pessoa. A necessidade de registro ou autorização (Reino Unido, Brasil, UE) será avaliada com assessoria jurídica especializada, e as medidas exigidas serão adotadas.</li>
+  <li><b>A American Ltd não tem hoje autorização de nenhum regulador</b> (FCA, Banco Central do Brasil, CVM ou autoridade da UE). Nenhum serviço aqui é apresentado como regulado.</li>
+</ul>
+<h3>Próximos passos</h3>
+<ol>
+  <li>Mais nós e mineradores independentes: cada minerador instalado passa a ser um nó completo, com atualizações assinadas.</li>
+  <li>Papéis do protocolo abertos a qualquer pessoa: publicação de âncoras e encaminhamento da ponte por participantes independentes, após revisão de segurança.</li>
+  <li>Troca rápida sem custódia, em substituição à ponte rápida atual.</li>
+  <li>Triagem de sanções nas operações automáticas.</li>
+  <li>Parcerias e listagens com corretoras autorizadas, que cuidam da identificação de clientes (KYC) e da prevenção à lavagem de dinheiro.</li>
+  <li>Revisão periódica: quando um serviço custodial justificar o custo, ele será prestado com a licença exigida ou por um parceiro licenciado.</li>
+</ol>
+</main>
+
+<!-- ============================================================= ENGLISH -->
+<main id="en" lang="en" hidden>
+<h1>Terms, risks, privacy and compliance</h1>
+<p class="k">Version of 8 October 2026. Portuguese and English are the authoritative texts; other languages are the browser's translation.</p>
+<nav class="toc">
+  <a href="#en-who">Who operates</a><a href="#en-services">Services</a><a href="#en-risks">Risks</a>
+  <a href="#en-terms">Terms of use</a><a href="#en-privacy">Privacy</a><a href="#en-compliance">Compliance</a>
+</nav>
+
+<h2 id="en-who">1. Who operates</h2>
+<p>The <b>Molibra protocol</b> is free software (Apache-2.0, <a href="https://github.com/BaronOdon/molibra">public source</a>): anyone can run a node, mine and verify the chain. Nobody owns the network.</p>
+<p>The <b>services</b> offered on molibra.org — this site, the public nodes, the bridge bot and the fast bridge — are operated by <b>American Ltd</b>, trading as <b>Xpirit AI</b>, a private limited company no. <b>11138952</b> (England and Wales), registered office 13 Hanger View Way, London W3 0EX, United Kingdom. Contact: <a href="https://github.com/BaronOdon/molibra/issues">github.com/BaronOdon/molibra/issues</a>.</p>
+
+<h2 id="en-services">2. What each service is</h2>
+<div class="table"><table>
+<tr><th>Service</th><th>Who holds the funds</th><th>Fee</th><th>What to know</th></tr>
+<tr><td>Molibra network (MOLI)</td><td>You (your wallet)</td><td>Network gas</td><td>MOLI is only issued by mining; there was no pre-sale and no ICO. Today both public nodes and much of the mining are the operator's; decentralization is in progress (section 6).</td></tr>
+<tr><td>MOLI ⇄ bMOLI bridge (<a href="/molibra/ponte">/molibra/ponte</a>)</td><td>Contracts on Ethereum (immutable BridgedMoli; keyless vault)</td><td>Gas × 1.2, min. 0.00001 ETH (out); 0.01 bMOLI (back)</td><td>You can claim yourself, with no bridge fee. The backing is a bonded attestation, not proof of work.</td></tr>
+<tr><td>Bridge bot</td><td>Holds no funds</td><td>The fee above, paid to the operator</td><td>Relays claims and returns automatically; a return above the automatic cap goes to the operator.</td></tr>
+<tr><td>Fast bridge (<a href="/molibra/rapido">/molibra/rapido</a>)</td><td><b>The operator, for minutes</b> (inventory wallet)</td><td>0.1–0.3% by inventory + gas × 1.2</td><td><b>It is custodial</b> while the swap is in flight. Limits: 2,000 per transfer, 10,000 per hour, 30,000 per day. See sections 3 and 6.</td></tr>
+<tr><td>Market and pages (swap, liquidity, pay)</td><td>You and the contracts</td><td>Pool fees</td><td>Non-custodial interface: every transaction is signed in your wallet.</td></tr>
+<tr><td>CARAMELO, BOLSO, FAZOL memecoins</td><td>Contracts</td><td>—</td><td>1% seeded the pool, 95% is on a price curve, 4% is the operator's on vesting (6-month cliff, 24 months linear). <b>From 26 Oct 2026 each curve's liquidity can be withdrawn by the operator's wallet.</b></td></tr>
+</table></div>
+
+<h2 id="en-risks">3. Risks</h2>
+<div class="risk"><b>You can lose all the value you put in.</b> Cryptoassets are volatile and are not protected by any government or compensation scheme. Nothing here is investment advice, and there is no promise of profit.</div>
+<ul>
+  <li><b>Transactions are irreversible.</b> A wrong address, wrong network or lost key cannot be undone.</li>
+  <li><b>Contracts and software can have bugs</b>, the bridge's included; the code is public but has not been audited by a third party.</li>
+  <li><b>The bridge rests on a bonded attestation</b>, not on Ethereum's proof-of-work security.</li>
+  <li><b>The fast bridge is custodial for minutes:</b> during that time the funds depend on the operator and the inventory wallet.</li>
+  <li><b>Thin liquidity:</b> prices can move sharply on little volume; memecoins can go to zero.</li>
+  <li><b>Rules change:</b> laws and regulation may affect or stop services (section 6).</li>
+</ul>
+
+<h2 id="en-terms">4. Terms of use</h2>
+<ol>
+  <li><b>As-is software.</b> The software is provided under the Apache-2.0 licence, without warranties.</li>
+  <li><b>No advice.</b> Nothing on this site is financial, legal or tax advice.</li>
+  <li><b>Who may use it.</b> Adults (18+), with legal capacity, not subject to sanctions (UN, UK, EU, US), for whom use is lawful where they live.</li>
+  <li><b>Prohibited uses.</b> Money laundering, terrorist financing, fraud, sanctions evasion or any unlawful activity. The operator may stop processing operations linked to such uses.</li>
+  <li><b>Fees.</b> They are shown before you sign and paid by you; they cover the operation's cost and, on the fast bridge, a 0.1–0.3% margin.</li>
+  <li><b>Your keys, your responsibility.</b> The operator never asks for or holds your private key.</li>
+  <li><b>Liability.</b> To the extent the law allows, the operator's liability is limited to the fees you paid in the preceding 12 months. <b>Nothing in these terms removes consumer rights that cannot be waived</b>, including those of the Brazilian Consumer Code (Lei 8.078/1990) for consumers in Brazil.</li>
+  <li><b>Governing law.</b> The law of England and Wales, without prejudice to the consumer-protection rules of the user's country of residence.</li>
+  <li><b>Changes.</b> These terms may change; the version date is at the top and the history is in the public code.</li>
+</ol>
+
+<h2 id="en-privacy">5. Privacy</h2>
+<ul>
+  <li><b>No accounts, no cookies, no third-party trackers.</b> Your chosen language is kept only in your browser.</li>
+  <li><b>IP address:</b> the node keeps it <b>in memory only</b>, for a few minutes, to limit abuse (too many requests). Only a <b>count</b> of readers in the last 15 minutes is published; addresses are neither published nor written to disk by the node, and the public web server keeps no access log.</li>
+  <li><b>Blockchain data is public and permanent</b> (addresses, amounts, transactions). That is the nature of the network and nobody can erase it.</li>
+  <li><b>Legal basis:</b> legitimate interest in keeping the service secure (UK GDPR art. 6(1)(f); LGPD, Lei 13.709/2018, art. 7, IX). No data is sold.</li>
+  <li><b>Your rights</b> (access, rectification, objection) can be exercised through the contact in section 1.</li>
+</ul>
+
+<h2 id="en-compliance">6. Compliance: where we are and what comes next</h2>
+<div class="note"><b>Commitment.</b> Molibra grows at its own pace, and compliance grows with it: it is planned and under way, <b>not avoided or ignored</b>. This section states plainly which laws apply or may apply, what has been done and what comes next.</div>
+<h3>Laws considered</h3>
+<ul>
+  <li><b>United Kingdom:</b> Money Laundering Regulations 2017 (reg. 14A — cryptoasset exchange and custodian wallet providers); Financial Services and Markets Act 2000, s. 21 (cryptoasset financial promotions); Financial Services and Markets Act 2000 (Cryptoassets) Regulations 2026 (SI 2026/102), FCA regime from 25 Oct 2027.</li>
+  <li><b>Brazil:</b> Lei 14.478/2022 (virtual-asset service providers) and BCB Resolutions 519, 520 and 521/2025; Lei 6.385/1976 and CVM Guidance Opinion 40/2022 (securities); Consumer Code (Lei 8.078/1990); Decreto 7.962/2013 (e-commerce); LGPD (Lei 13.709/2018).</li>
+  <li><b>European Union:</b> Regulation (EU) 2023/1114 (MiCA).</li>
+  <li><b>Sanctions:</b> UN, UK (OFSI), EU and US (OFAC) lists.</li>
+</ul>
+<h3>Current position</h3>
+<ul>
+  <li><b>Done:</b> public code; fees shown before signing; a non-custodial path on the bridge (self-claim); limits on the fast bridge; operator identified; terms, risks and privacy published; no promise of profit; no personal data sold.</li>
+  <li><b>The fast bridge is the only custodial service.</b> It runs with low limits and these disclosures while it is replaced by atomic swaps, in which nobody — the operator included — holds anyone else's funds. Whether registration or authorisation is required (UK, Brazil, EU) will be assessed with specialist legal counsel, and the measures required will be taken.</li>
+  <li><b>American Ltd holds no regulatory authorisation today</b> (FCA, Banco Central do Brasil, CVM or any EU authority). No service here is presented as regulated.</li>
+</ul>
+<h3>Next steps</h3>
+<ol>
+  <li>More independent nodes and miners: every installed miner becomes a full node, with signed updates.</li>
+  <li>Protocol roles open to anyone: anchor publishing and bridge relaying by independent participants, after security review.</li>
+  <li>Non-custodial fast swaps, replacing today's fast bridge.</li>
+  <li>Sanctions screening on automated operations.</li>
+  <li>Partnerships and listings with authorised exchanges, which handle customer identification (KYC) and anti-money-laundering checks.</li>
+  <li>Periodic review: when a custodial service justifies the cost, it will be provided under the licence required or through a licensed partner.</li>
+</ol>
+</main>
+
+<footer>American Ltd (Xpirit AI) · 11138952 · England and Wales · <a href="/">molibra.org</a> · <a href="https://github.com/BaronOdon/molibra">source</a></footer>
+</div>
+<script>
+// PT or EN, from the browser or the visitor's choice (the landing page's key).
+let lang = (navigator.language || 'pt').toLowerCase().startsWith('pt') ? 'pt' : 'en';
+try { const l = localStorage.getItem('molibra.lang'); if (l) lang = l === 'pt' ? 'pt' : 'en'; } catch (e) {}
+// A deep link to a section in the other language switches to it.
+if (location.hash.startsWith('#en-')) lang = 'en'; else if (location.hash.startsWith('#pt-')) lang = 'pt';
+function show(l) {
+  lang = l;
+  document.getElementById('pt').hidden = l !== 'pt'; document.getElementById('en').hidden = l !== 'en';
+  document.documentElement.lang = l === 'pt' ? 'pt-BR' : 'en';
+  document.getElementById('lpt').className = l === 'pt' ? 'on' : ''; document.getElementById('len').className = l === 'en' ? 'on' : '';
+  document.title = l === 'pt' ? 'MOLIBRA · Termos, riscos, privacidade e conformidade' : 'MOLIBRA · Terms, risks, privacy and compliance';
+}
+document.getElementById('lpt').onclick = () => show('pt');
+document.getElementById('len').onclick = () => show('en');
+show(lang);
+if (location.hash) { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+</script>
+</body>
+</html>

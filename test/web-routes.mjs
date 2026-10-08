@@ -116,7 +116,8 @@ const index = readFileSync(join(ROOT, 'src/web/index.html'), 'utf8');
 const routes = new Set([...rpc.matchAll(/path === '(\/[^']*)'/g)].map((m) => m[1]));
 // Prefix routes (/molibra/token/<SYM>, /molibra/block/<n>, ...) serve a whole family.
 const prefixes = [...rpc.matchAll(/path\.startsWith\('(\/[^']*\/)'\)/g)].map((m) => m[1]);
-const hrefs = [...new Set([...index.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1]))];
+// A #section anchor is part of the same route.
+const hrefs = [...new Set([...index.matchAll(/href="(\/[^"]*)"/g)].map((m) => m[1].split('#')[0]))];
 
 check('the front page links somewhere at all', hrefs.length > 5, `${hrefs.length} internal links`);
 for (const h of hrefs) {

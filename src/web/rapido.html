@@ -63,6 +63,8 @@
 </div>
 
 <div class="card note">
+  <p data-t="custody"><b>⚠ Serviço custodial: durante a troca (minutos), seus fundos ficam na carteira de estoque do operador, American Ltd (Xpirit AI, Inglaterra e País de Gales nº 11138952). Este serviço não é autorizado por nenhum regulador (FCA, Banco Central do Brasil, CVM ou UE); a necessidade de registro será avaliada com assessoria jurídica especializada, e ele será substituído por trocas sem custódia. A ponte normal não tem custódia.</b></p>
+  <p><a href="/molibra/legal#pt-servicos" id="legalLink" data-t="legalLink">Termos, riscos e conformidade →</a></p>
   <p data-t="how1">Como funciona: uma carteira de estoque guarda MOLI na Molibra e bMOLI na Ethereum. Você envia de um lado e recebe do outro no mesmo endereço, em minutos.</p>
   <p data-t="how2">⛔ Envie de uma carteira cuja chave é sua (MetaMask, Trust…), nunca de uma corretora ou contrato: o pagamento vai para o endereço que enviou.</p>
   <p data-t="how3">Acima dos limites ou do estoque disponível, a ponte rápida não paga automaticamente: use a ponte normal (24 h, sem custódia) em <a href="/molibra/bridgedmoli">/molibra/bridgedmoli</a> e <a href="/molibra/return">/molibra/return</a>.</p>
@@ -88,7 +90,8 @@ const T = {
     sent: 'Enviado. Aguardando a ponte…', done: 'Pronto: {0} chegou na sua carteira.', cancelled: 'Cancelado na carteira; nada foi enviado.',
     how1: 'Como funciona: uma carteira de estoque guarda MOLI na Molibra e bMOLI na Ethereum. Você envia de um lado e recebe do outro no mesmo endereço, em minutos.',
     how2: '⛔ Envie de uma carteira cuja chave é sua (MetaMask, Trust…), nunca de uma corretora ou contrato: o pagamento vai para o endereço que enviou.',
-    how3: 'Acima dos limites ou do estoque disponível, a ponte rápida não paga automaticamente: use a ponte normal (24 h, sem custódia).' },
+    how3: 'Acima dos limites ou do estoque disponível, a ponte rápida não paga automaticamente: use a ponte normal (24 h, sem custódia).',
+    custody: '⚠ Serviço custodial: durante a troca (minutos), seus fundos ficam na carteira de estoque do operador, American Ltd (Xpirit AI, Inglaterra e País de Gales nº 11138952). Este serviço não é autorizado por nenhum regulador (FCA, Banco Central do Brasil, CVM ou UE); a necessidade de registro será avaliada com assessoria jurídica especializada, e ele será substituído por trocas sem custódia. A ponte normal não tem custódia.', legalLink: 'Termos, riscos e conformidade →' },
   en: { title: 'Fast bridge · minutes', sub: 'MOLI ⇄ bMOLI in minutes, one click and one signature.', amount: 'Amount to send',
     youGet: 'You receive', fee: 'Fee (includes gas)', avail: 'Available in the bridge', limits: 'Limits', eta: 'Time', bal: 'Your balance',
     goM2B: 'Send MOLI, receive bMOLI', goB2M: 'Send bMOLI, receive MOLI', connect: 'Connect wallet',
@@ -99,7 +102,8 @@ const T = {
     sent: 'Sent. Waiting for the bridge…', done: 'Done: {0} arrived in your wallet.', cancelled: 'Cancelled in the wallet; nothing was sent.',
     how1: 'How it works: an inventory wallet holds MOLI on Molibra and bMOLI on Ethereum. You send on one side and receive on the other, same address, in minutes.',
     how2: '⛔ Send from a wallet whose key you hold (MetaMask, Trust…), never from an exchange or a contract: the payout goes to the sending address.',
-    how3: 'Above the limits or the available inventory the fast bridge does not pay automatically: use the normal bridge (24 h, non-custodial).' },
+    how3: 'Above the limits or the available inventory the fast bridge does not pay automatically: use the normal bridge (24 h, non-custodial).',
+    custody: '⚠ Custodial service: during the swap (minutes) your funds sit in the operator’s inventory wallet, American Ltd (Xpirit AI, England and Wales no. 11138952). This service is not authorised by any regulator (FCA, Banco Central do Brasil, CVM or the EU); whether registration is required will be assessed with specialist counsel, and it will be replaced by non-custodial swaps. The normal bridge is non-custodial.', legalLink: 'Terms, risks and compliance →' },
 };
 let LANG = 'pt';
 const t = (k, ...a) => String(T[LANG][k] ?? k).replace(/\{(\d)\}/g, (_, i) => a[i]);
