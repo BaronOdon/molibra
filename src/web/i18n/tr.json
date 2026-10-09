@@ -131,7 +131,7 @@
  "hBridge": "MOLI ⇄ bMOLI. *Düşük ücret, açıkça.*",
  "hBuild": "Bilgisayarın kazar. *Fikrin token olur.*",
  "hVerify": "İnanma. *Doğrula.*",
- "honest": "**Kâr vaadi yok.** MOLI madencilikle çıkarılır; değeri yalnızca onu kullanmak isteyen insanlardan gelir. Köprü proof of work’e değil, teminatlı bir onaya dayanır — hâlâ eksik olanlar dahil her şey white paper’da.",
+ "honest": "**Sıfır edebilir. Milyarlar edebilir. Kimse bilmiyor — biz bile.** MOLI madencilikle çıkarılır; değeri yalnızca onu kullanmak isteyen insanlardan gelir. Köprü proof of work’e değil, teminatlı bir onaya dayanır — hâlâ eksik olanlar dahil her şey white paper’da.",
  "liveOn": "ağ canlı",
  "liveOff": "düğüm yanıt vermiyor",
  "liveFail": "Bu düğüm yanıt vermedi: ",

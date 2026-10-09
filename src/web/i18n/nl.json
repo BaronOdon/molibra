@@ -131,7 +131,7 @@
  "hBridge": "MOLI ⇄ bMOLI. *Lage kosten, in het openbaar.*",
  "hBuild": "Jouw computer minet. *Jouw idee wordt een token.*",
  "hVerify": "Niet geloven. *Controleren.*",
- "honest": "**Geen winstbelofte.** MOLI ontstaat door minen; de waarde komt alleen van mensen die het willen gebruiken. De bridge steunt op een attestatie met onderpand, niet op proof of work — het staat allemaal in de whitepaper, inclusief wat nog ontbreekt.",
+ "honest": "**Het kan nul waard zijn. Het kan miljarden waard zijn. Niemand weet het — wij ook niet.** MOLI ontstaat door minen; de waarde komt alleen van mensen die het willen gebruiken. De bridge steunt op een attestatie met onderpand, niet op proof of work — het staat allemaal in de whitepaper, inclusief wat nog ontbreekt.",
  "liveOn": "netwerk live",
  "liveOff": "node reageert niet",
  "liveFail": "Deze node reageerde niet: ",

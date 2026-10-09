@@ -52,7 +52,9 @@ check('the meme curves\' 26 Oct 2026 unlock to the operator is disclosed (legal 
 check('no pre-sale / no ICO wording, never "no sale"', both('não houve pré-venda nem ICO', 'no pre-sale and no ICO')
   && !index.includes('não há venda'));
 check('⛔ "at cost" is not claimed for the bridge as a whole', !index.includes('A preço de custo') && !/At cost\./.test(read('src/web/i18n/en.json')));
-check('no promise of profit, in both languages', both('não há promessa de lucro', 'there is no promise of profit'));
+check('⭐ the value line is IMPARTIAL (operator, 9 Oct 2026): zero OR billions, never a one-sided "no promise of profit"',
+  both('Pode valer zero. Pode valer bilhões.', 'It could be worth zero. It could be worth billions.')
+  && index.includes('Pode valer zero. Pode valer bilhões.') && !/promessa de lucro|promise of profit/i.test(legal + index + read('src/web/i18n/en.json')));
 check('consumer rights that cannot be waived are preserved (CDC)', both('Lei 8.078/1990', 'Lei 8.078/1990') && both('direitos irrenunciáveis', 'cannot be waived'));
 check('privacy: IPs in memory only, only a count published - as rpc.js and ratelimit.js do',
   both('apenas na memória', 'in memory only') && rpc.includes('A COUNT of distinct clients'));

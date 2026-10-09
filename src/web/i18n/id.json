@@ -131,7 +131,7 @@
  "hBridge": "MOLI ⇄ bMOLI. *Biaya rendah, terbuka.*",
  "hBuild": "Komputermu menambang. *Idemu jadi token.*",
  "hVerify": "Jangan percaya. *Verifikasi.*",
- "honest": "**Tanpa janji keuntungan.** MOLI diterbitkan lewat penambangan; nilainya hanya datang dari orang-orang yang ingin memakainya. Jembatan dijamin oleh atestasi berjaminan, bukan proof of work — semuanya ada di white paper, termasuk apa yang masih kurang.",
+ "honest": "**Bisa bernilai nol. Bisa bernilai miliaran. Tak ada yang tahu — bahkan kami.** MOLI diterbitkan lewat penambangan; nilainya hanya datang dari orang-orang yang ingin memakainya. Jembatan dijamin oleh atestasi berjaminan, bukan proof of work — semuanya ada di white paper, termasuk apa yang masih kurang.",
  "liveOn": "jaringan aktif",
  "liveOff": "node tidak merespons",
  "liveFail": "Node ini tidak merespons: ",

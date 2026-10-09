@@ -131,7 +131,7 @@
  "hBridge": "MOLI ⇄ bMOLI. *Niedrige Gebühren, offen.*",
  "hBuild": "Dein Rechner mint. *Deine Idee wird zum Token.*",
  "hVerify": "Nicht glauben. *Prüfen.*",
- "honest": "**Kein Gewinnversprechen.** MOLI entsteht durch Mining; sein Wert kommt allein von Menschen, die es nutzen wollen. Die Bridge stützt sich auf eine besicherte Attestierung, nicht auf Proof of Work — alles steht im Whitepaper, auch das, was noch fehlt.",
+ "honest": "**Es kann null wert sein. Es kann Milliarden wert sein. Niemand weiß es — auch wir nicht.** MOLI entsteht durch Mining; sein Wert kommt allein von Menschen, die es nutzen wollen. Die Bridge stützt sich auf eine besicherte Attestierung, nicht auf Proof of Work — alles steht im Whitepaper, auch das, was noch fehlt.",
  "liveOn": "Netzwerk live",
  "liveOff": "Node antwortet nicht",
  "liveFail": "Dieser Node hat nicht geantwortet: ",

@@ -131,7 +131,7 @@
  "hBridge": "MOLI ⇄ bMOLI. *Low fees, in the open.*",
  "hBuild": "Your computer mines. *Your idea becomes a token.*",
  "hVerify": "Don’t believe. *Verify.*",
- "honest": "**No promise of profit.** MOLI is issued by mining; its value comes only from people who want to use it. The bridge is backed by a bonded attestation, not proof of work — it is all in the white paper, including what is still missing.",
+ "honest": "**It could be worth zero. It could be worth billions. Nobody knows — not even us.** MOLI is issued by mining; its value comes only from people who want to use it. The bridge is backed by a bonded attestation, not proof of work — it is all in the white paper, including what is still missing.",
  "liveOn": "live network",
  "liveOff": "node not answering",
  "liveFail": "This node did not answer: ",
