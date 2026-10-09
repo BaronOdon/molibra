@@ -87,5 +87,16 @@
    "name": "中文",
    "title": "Molibra：意见即服务（OaaS）区块链"
   }
- ]
+ ],
+ "edition": 1,
+ "registration": {
+  "record": 3,
+  "block": 163858,
+  "time": "2026-10-09T19:36:48Z",
+  "tx": "0x38f4b8145dcb4e25dad8aed357641b45b684062b84f84e6ee914366554e3bd33",
+  "signedBlock": 163861,
+  "signedTime": "2026-10-09T19:39:08Z",
+  "signTx": "0x08ac65fd9316162849ffa55dca886e04ba8f0f32d290e05863792e93e7279da9",
+  "signer": "0xf51ac8FD4112bF1d45fD5C38D5aBfe0c61Ec3F5a"
+ }
 }

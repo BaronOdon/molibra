@@ -68,24 +68,24 @@ const LANGS = [
   ['nl','Nederlands'],['pl','Polski'],['ru','Русский'],['tr','Türkçe'],['id','Bahasa Indonesia'],['hi','हिन्दी'],
   ['ar','العربية'],['ja','日本語'],['ko','한국어'],['zh','中文'],
 ];
-// UI strings: [h1, sub, read, langs, sha, auth, manifest, registry, record, ok, wait, no, verify, original, loading, connect+authenticate]
+// UI strings: [h1, sub, read, langs, sha, auth, manifest, registry, record, ok, wait, no, verify, original, loading, connect+authenticate, edition, registered, signed, eth anchor, anchored, awaiting anchor]
 const T = {
-  pt: ['Artigos','Os artigos em todas as línguas do site. Cada conjunto é autenticado na Molibra por um registro na DocumentRegistry.','Ler em PDF','Idiomas','SHA-256','Autenticação na rede','Manifesto','Registro','Registro nº','registrado · assinado','registrado · aguardando assinatura','ainda não registrado','Confira um download: o SHA-256 do PDF está no manifesto, e o SHA-256 do manifesto é o registro.','original','carregando…','Conectar carteira e autenticar'],
-  en: ['Articles','The papers in every language the site speaks. Each set is authenticated on Molibra by one DocumentRegistry record.','Read the PDF','Languages','SHA-256','Authentication on the network','Manifest','Registry','Record no.','registered · signed','registered · awaiting signature','not registered yet','Check a download: the PDF’s SHA-256 is in the manifest, and the manifest’s SHA-256 is the record.','original','loading…','Connect wallet and authenticate'],
-  es: ['Artículos','Los artículos en todos los idiomas del sitio. Cada conjunto se autentica en Molibra con un registro en la DocumentRegistry.','Leer el PDF','Idiomas','SHA-256','Autenticación en la red','Manifiesto','Registro','Registro n.º','registrado · firmado','registrado · esperando firma','aún no registrado','Compruebe una descarga: el SHA-256 del PDF está en el manifiesto, y el SHA-256 del manifiesto es el registro.','original','cargando…','Conectar cartera y autenticar'],
-  fr: ['Articles','Les articles dans toutes les langues du site. Chaque ensemble est authentifié sur Molibra par un enregistrement dans la DocumentRegistry.','Lire le PDF','Langues','SHA-256','Authentification sur le réseau','Manifeste','Registre','Enregistrement n°','enregistré · signé','enregistré · en attente de signature','pas encore enregistré','Vérifiez un téléchargement : le SHA-256 du PDF figure dans le manifeste, et le SHA-256 du manifeste est l’enregistrement.','original','chargement…','Connecter le portefeuille et authentifier'],
-  de: ['Artikel','Die Artikel in allen Sprachen der Website. Jede Fassung wird auf Molibra durch einen Eintrag in der DocumentRegistry beglaubigt.','PDF lesen','Sprachen','SHA-256','Beglaubigung im Netzwerk','Manifest','Register','Eintrag Nr.','eingetragen · signiert','eingetragen · wartet auf Signatur','noch nicht eingetragen','Download prüfen: Der SHA-256 der PDF steht im Manifest, und der SHA-256 des Manifests ist der Eintrag.','Original','lädt…','Wallet verbinden und beglaubigen'],
-  it: ['Articoli','Gli articoli in tutte le lingue del sito. Ogni insieme è autenticato su Molibra da una registrazione nella DocumentRegistry.','Leggi il PDF','Lingue','SHA-256','Autenticazione sulla rete','Manifesto','Registro','Registrazione n.','registrato · firmato','registrato · in attesa di firma','non ancora registrato','Verifica un download: lo SHA-256 del PDF è nel manifesto, e lo SHA-256 del manifesto è la registrazione.','originale','caricamento…','Collega il portafoglio e autentica'],
-  nl: ['Artikelen','De artikelen in alle talen van de site. Elke set wordt op Molibra gewaarmerkt door één registratie in de DocumentRegistry.','PDF lezen','Talen','SHA-256','Waarmerking op het netwerk','Manifest','Register','Registratie nr.','geregistreerd · ondertekend','geregistreerd · wacht op handtekening','nog niet geregistreerd','Controleer een download: de SHA-256 van de pdf staat in het manifest, en de SHA-256 van het manifest is de registratie.','origineel','laden…','Wallet verbinden en waarmerken'],
-  pl: ['Artykuły','Artykuły we wszystkich językach serwisu. Każdy zestaw jest uwierzytelniony w Molibrze jednym wpisem w DocumentRegistry.','Czytaj PDF','Języki','SHA-256','Uwierzytelnienie w sieci','Manifest','Rejestr','Wpis nr','zarejestrowany · podpisany','zarejestrowany · czeka na podpis','jeszcze niezarejestrowany','Sprawdź pobrany plik: SHA-256 PDF-u jest w manifeście, a SHA-256 manifestu jest wpisem.','oryginał','ładowanie…','Połącz portfel i uwierzytelnij'],
-  ru: ['Статьи','Статьи на всех языках сайта. Каждый комплект заверен в Molibra одной записью в DocumentRegistry.','Читать PDF','Языки','SHA-256','Подтверждение в сети','Манифест','Реестр','Запись №','зарегистрировано · подписано','зарегистрировано · ожидает подписи','ещё не зарегистрировано','Проверьте загрузку: SHA-256 PDF указан в манифесте, а SHA-256 манифеста — это запись.','оригинал','загрузка…','Подключить кошелёк и заверить'],
-  tr: ['Makaleler','Makaleler sitenin tüm dillerinde. Her set Molibra’da DocumentRegistry’deki tek bir kayıtla doğrulanır.','PDF’yi oku','Diller','SHA-256','Ağda doğrulama','Manifesto','Kayıt defteri','Kayıt no.','kayıtlı · imzalı','kayıtlı · imza bekliyor','henüz kayıtlı değil','İndirmeyi doğrulayın: PDF’nin SHA-256’sı manifestoda, manifestonun SHA-256’sı ise kayıttır.','orijinal','yükleniyor…','Cüzdanı bağla ve doğrula'],
-  id: ['Artikel','Artikel dalam semua bahasa situs. Setiap set diautentikasi di Molibra oleh satu catatan di DocumentRegistry.','Baca PDF','Bahasa','SHA-256','Autentikasi di jaringan','Manifes','Registri','Catatan no.','terdaftar · ditandatangani','terdaftar · menunggu tanda tangan','belum terdaftar','Periksa unduhan: SHA-256 PDF ada di manifes, dan SHA-256 manifes adalah catatannya.','asli','memuat…','Hubungkan dompet dan autentikasi'],
-  hi: ['लेख','साइट की सभी भाषाओं में लेख। हर सेट Molibra पर DocumentRegistry के एक रिकॉर्ड से प्रमाणित है।','PDF पढ़ें','भाषाएँ','SHA-256','नेटवर्क पर प्रमाणीकरण','मैनिफ़ेस्ट','रजिस्ट्री','रिकॉर्ड सं.','पंजीकृत · हस्ताक्षरित','पंजीकृत · हस्ताक्षर की प्रतीक्षा','अभी पंजीकृत नहीं','डाउनलोड जाँचें: PDF का SHA-256 मैनिफ़ेस्ट में है, और मैनिफ़ेस्ट का SHA-256 ही रिकॉर्ड है।','मूल','लोड हो रहा है…','वॉलेट जोड़ें और प्रमाणित करें'],
-  ar: ['مقالات','المقالات بجميع لغات الموقع. كل مجموعة موثّقة على Molibra بسجلّ واحد في DocumentRegistry.','اقرأ ملف PDF','اللغات','SHA-256','التوثيق على الشبكة','البيان','السجلّ','السجلّ رقم','مسجّل · موقّع','مسجّل · بانتظار التوقيع','غير مسجّل بعد','تحقّق من التنزيل: بصمة SHA-256 لملف PDF موجودة في البيان، وبصمة SHA-256 للبيان هي السجلّ.','الأصل','جارٍ التحميل…','اربط المحفظة ووثّق'],
-  ja: ['論文','サイトのすべての言語で読める論文です。各セットは DocumentRegistry の 1 件の記録で Molibra 上に認証されています。','PDF を読む','言語','SHA-256','ネットワーク上の認証','マニフェスト','レジストリ','記録番号','登録済み・署名済み','登録済み・署名待ち','未登録','ダウンロードの確認：PDF の SHA-256 はマニフェストに記載され、マニフェストの SHA-256 が記録です。','原文','読み込み中…','ウォレットを接続して認証'],
-  ko: ['논문','사이트의 모든 언어로 제공되는 논문입니다. 각 묶음은 DocumentRegistry의 기록 1건으로 Molibra에서 인증됩니다.','PDF 읽기','언어','SHA-256','네트워크 인증','매니페스트','레지스트리','기록 번호','등록됨 · 서명됨','등록됨 · 서명 대기','아직 등록되지 않음','다운로드 확인: PDF의 SHA-256은 매니페스트에 있고, 매니페스트의 SHA-256이 기록입니다.','원문','불러오는 중…','지갑 연결 후 인증'],
-  zh: ['文章','以本站所有语言提供的文章。每一组都由 DocumentRegistry 中的一条记录在 Molibra 上认证。','阅读 PDF','语言','SHA-256','网络认证','清单','登记处','记录编号','已登记 · 已签署','已登记 · 等待签署','尚未登记','核对下载：PDF 的 SHA-256 列在清单中，清单的 SHA-256 就是链上记录。','原文','加载中…','连接钱包并认证'],
+  pt: ['Artigos','Os artigos em todas as línguas do site. Cada conjunto é autenticado na Molibra por um registro na DocumentRegistry.','Ler em PDF','Idiomas','SHA-256','Autenticação na rede','Manifesto','Registro','Registro nº','registrado · assinado','registrado · aguardando assinatura','ainda não registrado','Confira um download: o SHA-256 do PDF está no manifesto, e o SHA-256 do manifesto é o registro.','original','carregando…','Conectar carteira e autenticar','edição','Registrado','Assinado','Âncora na Ethereum','ancorado — altura finalizada','aguardando a próxima âncora'],
+  en: ['Articles','The papers in every language the site speaks. Each set is authenticated on Molibra by one DocumentRegistry record.','Read the PDF','Languages','SHA-256','Authentication on the network','Manifest','Registry','Record no.','registered · signed','registered · awaiting signature','not registered yet','Check a download: the PDF’s SHA-256 is in the manifest, and the manifest’s SHA-256 is the record.','original','loading…','Connect wallet and authenticate','edition','Registered','Signed','Ethereum anchor','anchored — finalized height','awaiting the next anchor'],
+  es: ['Artículos','Los artículos en todos los idiomas del sitio. Cada conjunto se autentica en Molibra con un registro en la DocumentRegistry.','Leer el PDF','Idiomas','SHA-256','Autenticación en la red','Manifiesto','Registro','Registro n.º','registrado · firmado','registrado · esperando firma','aún no registrado','Compruebe una descarga: el SHA-256 del PDF está en el manifiesto, y el SHA-256 del manifiesto es el registro.','original','cargando…','Conectar cartera y autenticar','edición','Registrado','Firmado','Ancla en Ethereum','anclado — altura finalizada','esperando la próxima ancla'],
+  fr: ['Articles','Les articles dans toutes les langues du site. Chaque ensemble est authentifié sur Molibra par un enregistrement dans la DocumentRegistry.','Lire le PDF','Langues','SHA-256','Authentification sur le réseau','Manifeste','Registre','Enregistrement n°','enregistré · signé','enregistré · en attente de signature','pas encore enregistré','Vérifiez un téléchargement : le SHA-256 du PDF figure dans le manifeste, et le SHA-256 du manifeste est l’enregistrement.','original','chargement…','Connecter le portefeuille et authentifier','édition','Enregistré','Signé','Ancrage sur Ethereum','ancré — hauteur finalisée','en attente du prochain ancrage'],
+  de: ['Artikel','Die Artikel in allen Sprachen der Website. Jede Fassung wird auf Molibra durch einen Eintrag in der DocumentRegistry beglaubigt.','PDF lesen','Sprachen','SHA-256','Beglaubigung im Netzwerk','Manifest','Register','Eintrag Nr.','eingetragen · signiert','eingetragen · wartet auf Signatur','noch nicht eingetragen','Download prüfen: Der SHA-256 der PDF steht im Manifest, und der SHA-256 des Manifests ist der Eintrag.','Original','lädt…','Wallet verbinden und beglaubigen','Ausgabe','Eingetragen','Signiert','Ethereum-Anker','verankert — finalisierte Höhe','wartet auf den nächsten Anker'],
+  it: ['Articoli','Gli articoli in tutte le lingue del sito. Ogni insieme è autenticato su Molibra da una registrazione nella DocumentRegistry.','Leggi il PDF','Lingue','SHA-256','Autenticazione sulla rete','Manifesto','Registro','Registrazione n.','registrato · firmato','registrato · in attesa di firma','non ancora registrato','Verifica un download: lo SHA-256 del PDF è nel manifesto, e lo SHA-256 del manifesto è la registrazione.','originale','caricamento…','Collega il portafoglio e autentica','edizione','Registrato','Firmato','Ancoraggio su Ethereum','ancorato — altezza finalizzata','in attesa del prossimo ancoraggio'],
+  nl: ['Artikelen','De artikelen in alle talen van de site. Elke set wordt op Molibra gewaarmerkt door één registratie in de DocumentRegistry.','PDF lezen','Talen','SHA-256','Waarmerking op het netwerk','Manifest','Register','Registratie nr.','geregistreerd · ondertekend','geregistreerd · wacht op handtekening','nog niet geregistreerd','Controleer een download: de SHA-256 van de pdf staat in het manifest, en de SHA-256 van het manifest is de registratie.','origineel','laden…','Wallet verbinden en waarmerken','editie','Geregistreerd','Ondertekend','Ethereum-anker','verankerd — gefinaliseerde hoogte','wacht op het volgende anker'],
+  pl: ['Artykuły','Artykuły we wszystkich językach serwisu. Każdy zestaw jest uwierzytelniony w Molibrze jednym wpisem w DocumentRegistry.','Czytaj PDF','Języki','SHA-256','Uwierzytelnienie w sieci','Manifest','Rejestr','Wpis nr','zarejestrowany · podpisany','zarejestrowany · czeka na podpis','jeszcze niezarejestrowany','Sprawdź pobrany plik: SHA-256 PDF-u jest w manifeście, a SHA-256 manifestu jest wpisem.','oryginał','ładowanie…','Połącz portfel i uwierzytelnij','wydanie','Zarejestrowano','Podpisano','Kotwica w Ethereum','zakotwiczono — sfinalizowana wysokość','czeka na następną kotwicę'],
+  ru: ['Статьи','Статьи на всех языках сайта. Каждый комплект заверен в Molibra одной записью в DocumentRegistry.','Читать PDF','Языки','SHA-256','Подтверждение в сети','Манифест','Реестр','Запись №','зарегистрировано · подписано','зарегистрировано · ожидает подписи','ещё не зарегистрировано','Проверьте загрузку: SHA-256 PDF указан в манифесте, а SHA-256 манифеста — это запись.','оригинал','загрузка…','Подключить кошелёк и заверить','издание','Зарегистрировано','Подписано','Якорь в Ethereum','заякорено — финализированная высота','ожидает следующего якоря'],
+  tr: ['Makaleler','Makaleler sitenin tüm dillerinde. Her set Molibra’da DocumentRegistry’deki tek bir kayıtla doğrulanır.','PDF’yi oku','Diller','SHA-256','Ağda doğrulama','Manifesto','Kayıt defteri','Kayıt no.','kayıtlı · imzalı','kayıtlı · imza bekliyor','henüz kayıtlı değil','İndirmeyi doğrulayın: PDF’nin SHA-256’sı manifestoda, manifestonun SHA-256’sı ise kayıttır.','orijinal','yükleniyor…','Cüzdanı bağla ve doğrula','baskı','Kaydedildi','İmzalandı','Ethereum çapası','çapalandı — kesinleşmiş yükseklik','bir sonraki çapa bekleniyor'],
+  id: ['Artikel','Artikel dalam semua bahasa situs. Setiap set diautentikasi di Molibra oleh satu catatan di DocumentRegistry.','Baca PDF','Bahasa','SHA-256','Autentikasi di jaringan','Manifes','Registri','Catatan no.','terdaftar · ditandatangani','terdaftar · menunggu tanda tangan','belum terdaftar','Periksa unduhan: SHA-256 PDF ada di manifes, dan SHA-256 manifes adalah catatannya.','asli','memuat…','Hubungkan dompet dan autentikasi','edisi','Didaftarkan','Ditandatangani','Jangkar di Ethereum','terjangkar — tinggi final','menunggu jangkar berikutnya'],
+  hi: ['लेख','साइट की सभी भाषाओं में लेख। हर सेट Molibra पर DocumentRegistry के एक रिकॉर्ड से प्रमाणित है।','PDF पढ़ें','भाषाएँ','SHA-256','नेटवर्क पर प्रमाणीकरण','मैनिफ़ेस्ट','रजिस्ट्री','रिकॉर्ड सं.','पंजीकृत · हस्ताक्षरित','पंजीकृत · हस्ताक्षर की प्रतीक्षा','अभी पंजीकृत नहीं','डाउनलोड जाँचें: PDF का SHA-256 मैनिफ़ेस्ट में है, और मैनिफ़ेस्ट का SHA-256 ही रिकॉर्ड है।','मूल','लोड हो रहा है…','वॉलेट जोड़ें और प्रमाणित करें','संस्करण','पंजीकृत','हस्ताक्षरित','Ethereum एंकर','एंकर किया गया — अंतिम ऊँचाई','अगले एंकर की प्रतीक्षा'],
+  ar: ['مقالات','المقالات بجميع لغات الموقع. كل مجموعة موثّقة على Molibra بسجلّ واحد في DocumentRegistry.','اقرأ ملف PDF','اللغات','SHA-256','التوثيق على الشبكة','البيان','السجلّ','السجلّ رقم','مسجّل · موقّع','مسجّل · بانتظار التوقيع','غير مسجّل بعد','تحقّق من التنزيل: بصمة SHA-256 لملف PDF موجودة في البيان، وبصمة SHA-256 للبيان هي السجلّ.','الأصل','جارٍ التحميل…','اربط المحفظة ووثّق','الطبعة','سُجّل','وُقّع','الربط على Ethereum','مربوط — الارتفاع النهائي','بانتظار الربط التالي'],
+  ja: ['論文','サイトのすべての言語で読める論文です。各セットは DocumentRegistry の 1 件の記録で Molibra 上に認証されています。','PDF を読む','言語','SHA-256','ネットワーク上の認証','マニフェスト','レジストリ','記録番号','登録済み・署名済み','登録済み・署名待ち','未登録','ダウンロードの確認：PDF の SHA-256 はマニフェストに記載され、マニフェストの SHA-256 が記録です。','原文','読み込み中…','ウォレットを接続して認証','版','登録','署名','Ethereum アンカー','アンカー済み — 確定高','次のアンカー待ち'],
+  ko: ['논문','사이트의 모든 언어로 제공되는 논문입니다. 각 묶음은 DocumentRegistry의 기록 1건으로 Molibra에서 인증됩니다.','PDF 읽기','언어','SHA-256','네트워크 인증','매니페스트','레지스트리','기록 번호','등록됨 · 서명됨','등록됨 · 서명 대기','아직 등록되지 않음','다운로드 확인: PDF의 SHA-256은 매니페스트에 있고, 매니페스트의 SHA-256이 기록입니다.','원문','불러오는 중…','지갑 연결 후 인증','판','등록','서명','Ethereum 앵커','앵커됨 — 확정 높이','다음 앵커 대기 중'],
+  zh: ['文章','以本站所有语言提供的文章。每一组都由 DocumentRegistry 中的一条记录在 Molibra 上认证。','阅读 PDF','语言','SHA-256','网络认证','清单','登记处','记录编号','已登记 · 已签署','已登记 · 等待签署','尚未登记','核对下载：PDF 的 SHA-256 列在清单中，清单的 SHA-256 就是链上记录。','原文','加载中…','连接钱包并认证','版','已登记','已签署','Ethereum 锚定','已锚定 — 最终高度','等待下一次锚定'],
 };
 const RTL = new Set(['ar']);
 const $ = (id) => document.getElementById(id);
@@ -104,6 +104,7 @@ $('lang').value = LANG;
 $('lang').onchange = () => { LANG = $('lang').value; try { localStorage.setItem('molibraLang', LANG); } catch {} render(); };
 
 let DATA = null;
+let FINAL = null;   // finality.finalizedHeight of the node that served the page
 const status = new Map();   // manifest sha -> { n, signed, revoked } | 'error'
 
 async function rpc(method, params) {
@@ -127,53 +128,80 @@ function render() {
   const list = $('list'); list.replaceChildren();
   if (!DATA) { $('state').textContent = t[14]; return; }
   $('state').textContent = '';
-  for (const a of DATA.articles) {
+  // An edition after the first is its own catalogue entry naming its article in
+  // "of": one card per article, newest edition first.
+  for (const base of DATA.articles.filter((a) => !a.of)) {
+    const eds = [base, ...DATA.articles.filter((a) => a.of === base.slug)].sort((x, y) => y.edition - x.edition);
     const card = el('section', 'card');
-    const mine = a.languages.find((l) => l.code === LANG) || a.languages.find((l) => l.code === a.original) || a.languages[0];
+    const pick = (a) => a.languages.find((l) => l.code === LANG);
+    const best = eds.find(pick) || base;
+    const mine = pick(best) || best.languages.find((l) => l.code === base.original) || best.languages[0];
     card.append(el('h2', null, mine.title));
-    card.append(el('p', 'meta', `${a.author} · ${a.date}`));
-    const open = el('a', 'open', `${t[2]} (${mine.name})`); open.href = `/articles/${a.slug}/${mine.file}`; card.append(open);
+    card.append(el('p', 'meta', base.author + ' · ' + best.date + (eds.length > 1 ? ' · ' + best.edition + '.ª ' + t[16] : '')));
+    const open = el('a', 'open', t[2] + ' (' + mine.name + (eds.length > 1 ? ', ' + best.edition + '.ª ' + t[16] : '') + ')');
+    open.href = '/articles/' + best.slug + '/' + mine.file; card.append(open);
 
     const table = el('table'); const head = el('tr');
     head.append(el('th', null, t[3]), el('th', null, ''), el('th', 'hide-sm', t[4]));
     table.append(head);
-    for (const l of a.languages) {
+    for (const l of base.languages) {
       const tr = el('tr', l.code === mine.code ? 'cur' : null);
-      const name = el('td'); const link = el('a', null, l.name); link.href = `/articles/${a.slug}/${l.file}`;
-      name.append(link); if (l.code === a.original) name.append(el('span', 'mono', ` · ${t[13]}`));
+      const name = el('td'); const link = el('a', null, l.name); link.href = '/articles/' + base.slug + '/' + l.file;
+      name.append(link); if (l.code === base.original) name.append(el('span', 'mono', ' · ' + t[13]));
+      for (const ed of eds.filter((e) => e !== base)) {
+        const later = ed.languages.find((x) => x.code === l.code);
+        if (!later) continue;
+        const a2 = el('a', null, ed.edition + '.ª ' + t[16]); a2.href = '/articles/' + ed.slug + '/' + later.file;
+        name.append(el('br'), a2);
+      }
       const title = el('td', null, l.title); title.dir = RTL.has(l.code) ? 'rtl' : 'ltr'; title.lang = l.code;
       tr.append(name, title, el('td', 'mono hide-sm', l.sha256));
       table.append(tr);
     }
     card.append(table);
-
-    const auth = el('div', 'auth'); auth.append(el('strong', null, t[5]));
-    const dl = el('dl');
-    const mLink = el('a', null, a.manifest.file); mLink.href = `/articles/${a.slug}/${a.manifest.file}`;
-    const add = (k, v) => { const dd = el('dd'); dd.append(v); dl.append(el('dt', null, k), dd); };
-    add(t[6], mLink);
-    add('SHA-256', el('span', 'mono', '0x' + a.manifest.sha256));
-    const regLink = el('a', 'mono', a.registry); regLink.href = `/molibra/documents?hash=0x${a.manifest.sha256}`;
-    add(t[7], regLink);
-    const s = status.get(a.manifest.sha256);
-    let badge, regHref = null;
-    if (!s || s === 'error') badge = el('span', 'badge wait', s === 'error' ? '—' : t[14]);
-    else if (s.n === 0n) {
-      badge = el('span', 'badge no', t[11]);
-      regHref = `/molibra/documents?hash=0x${a.manifest.sha256}&label=${encodeURIComponent(a.label)}&signers=${OPERATOR}`;
-    } else badge = el('span', 'badge ' + (s.revoked ? 'no' : s.signed ? 'ok' : 'wait'),
-      `${s.n} · ${s.revoked ? 'revoked' : s.signed ? t[9] : t[10]}`);
-    add(t[8], badge);
-    auth.append(dl, el('p', null, t[12]));
-    // ⛔ Signing happens on /molibra/documents, in the visitor's own wallet; this
-    //    page holds no key. The button is the way in, pre-filled with this record.
-    if (regHref) { const go = el('a', 'open', '🦊 ' + t[15]); go.href = regHref; auth.append(go); }
-    card.append(auth);
+    for (const ed of eds.slice().reverse()) card.append(authBox(ed, t, eds.length > 1));
     list.append(card);
   }
 }
 
+function authBox(a, t, numbered) {
+  const auth = el('div', 'auth');
+  auth.append(el('strong', null, t[5] + (numbered ? ' · ' + a.edition + '.ª ' + t[16] + ' (' + a.languages.map((l) => l.code.toUpperCase()).join(', ') + ')' : '')));
+  const dl = el('dl');
+  const add = (k, v) => { const dd = el('dd'); dd.append(v); dl.append(el('dt', null, k), dd); };
+  const mLink = el('a', null, a.manifest.file); mLink.href = '/articles/' + a.slug + '/' + a.manifest.file;
+  add(t[6], mLink);
+  add('SHA-256', el('span', 'mono', '0x' + a.manifest.sha256));
+  const regLink = el('a', 'mono', a.registry); regLink.href = '/molibra/documents?hash=0x' + a.manifest.sha256;
+  add(t[7], regLink);
+  const s = status.get(a.manifest.sha256);
+  let badge, regHref = null;
+  if (!s || s === 'error') badge = el('span', 'badge wait', s === 'error' ? '—' : t[14]);
+  else if (s.n === 0n) {
+    badge = el('span', 'badge no', t[11]);
+    regHref = '/molibra/documents?hash=0x' + a.manifest.sha256 + '&label=' + encodeURIComponent(a.label) + '&signers=' + OPERATOR;
+  } else badge = el('span', 'badge ' + (s.revoked ? 'no' : s.signed ? 'ok' : 'wait'),
+    s.n + ' · ' + (s.revoked ? 'revoked' : s.signed ? t[9] : t[10]));
+  add(t[8], badge);
+  // The block and transaction facts come from the catalogue; whether that block
+  // is anchored on Ethereum is read live from this node, never asserted.
+  const r = a.registration;
+  if (r) {
+    add(t[17], el('span', 'mono', '#' + r.block + ' · ' + r.time.replace('T', ' ').replace('Z', ' UTC') + ' · ' + r.tx));
+    add(t[18], el('span', 'mono', '#' + r.signedBlock + ' · ' + r.signedTime.replace('T', ' ').replace('Z', ' UTC') + ' · ' + r.signTx));
+    const fin = FINAL;
+    add(t[19], fin == null ? el('span', 'badge wait', '—')
+      : fin >= r.signedBlock ? el('span', 'badge ok', t[20] + ' ' + fin)
+      : el('span', 'badge wait', t[21] + ' (' + fin + ' < ' + r.signedBlock + ')'));
+  }
+  auth.append(dl, el('p', null, t[12]));
+  // ⛔ Signing happens on /molibra/documents, in the visitor's own wallet; this
+  //    page holds no key. The button is the way in, pre-filled with this record.
+  if (regHref) { const go = el('a', 'open', '🦊 ' + t[15]); go.href = regHref; auth.append(go); }
+  return auth;
+}
 render();
+fetch('/molibra').then((r) => r.json()).then((j) => { FINAL = j.finality?.finalizedHeight ?? null; render(); }).catch(() => {});
 fetch('/articles/index.json').then((r) => r.json()).then(async (d) => {
   DATA = d; render();
   for (const a of d.articles) {

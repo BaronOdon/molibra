@@ -1,0 +1,23 @@
+{
+ "manifestTitle": "Molibra, a blockchain de Opiniao como Servico (OaaS) - 2a edicao PT/EN, com o registro n. 3 da 1a edicao / 2nd edition PT/EN, with record no. 3 of the 1st edition",
+ "author": "Marcelo Marshall De Siqueira (MC Jesus)",
+ "date": "2026-10-09",
+ "registry": "0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946",
+ "label": "Artigo: Molibra, a blockchain de Opinião como Serviço (OaaS) — 2.ª edição PT/EN, com o registro n.º 3 (MANIFEST, 09/10/2026)",
+ "original": "pt",
+ "frozen": true,
+ "edition": 2,
+ "of": "molibra-oaas-2026-10-09",
+ "languages": [
+  {
+   "code": "pt",
+   "name": "Português",
+   "title": "Molibra, a blockchain de Opinião como Serviço (OaaS)"
+  },
+  {
+   "code": "en",
+   "name": "English",
+   "title": "Molibra, the Opinion as a Service (OaaS) Blockchain"
+  }
+ ]
+}

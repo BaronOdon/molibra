@@ -5,10 +5,21 @@
    "date": "2026-10-09",
    "author": "Marcelo Marshall De Siqueira (MC Jesus)",
    "registry": "0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946",
+   "edition": 1,
    "manifest": {
     "file": "MANIFEST.txt",
     "sha256": "b696226663ccc9f5f1437655fd03bb57ee9fed2b7ffeb75c475bc04d28e45c42",
     "bytes": 1483
+   },
+   "registration": {
+    "record": 3,
+    "block": 163858,
+    "time": "2026-10-09T19:36:48Z",
+    "tx": "0x38f4b8145dcb4e25dad8aed357641b45b684062b84f84e6ee914366554e3bd33",
+    "signedBlock": 163861,
+    "signedTime": "2026-10-09T19:39:08Z",
+    "signTx": "0x08ac65fd9316162849ffa55dca886e04ba8f0f32d290e05863792e93e7279da9",
+    "signer": "0xf51ac8FD4112bF1d45fD5C38D5aBfe0c61Ec3F5a"
    },
    "label": "Artigo: Molibra, a blockchain de Opinião como Serviço (OaaS) — 16 idiomas (MANIFEST, 09/10/2026)",
    "original": "pt",
@@ -140,6 +151,39 @@
      "file": "zh.pdf",
      "bytes": 494778,
      "sha256": "1d7065be69695687da931f1370809c267eaec85a2fccb02d060d61b75145ce77"
+    }
+   ]
+  },
+  {
+   "slug": "molibra-oaas-2026-10-09-e2",
+   "date": "2026-10-09",
+   "author": "Marcelo Marshall De Siqueira (MC Jesus)",
+   "registry": "0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946",
+   "edition": 2,
+   "of": "molibra-oaas-2026-10-09",
+   "manifest": {
+    "file": "MANIFEST.txt",
+    "sha256": "ada4208210df0dc2647016079f6039e5a8880498e2684bb681d32687b17716ba",
+    "bytes": 543
+   },
+   "label": "Artigo: Molibra, a blockchain de Opinião como Serviço (OaaS) — 2.ª edição PT/EN, com o registro n.º 3 (MANIFEST, 09/10/2026)",
+   "original": "pt",
+   "languages": [
+    {
+     "code": "pt",
+     "name": "Português",
+     "title": "Molibra, a blockchain de Opinião como Serviço (OaaS)",
+     "file": "pt.pdf",
+     "bytes": 107776,
+     "sha256": "ce3b55708bb15c2246364d20f60dce882185738ddd6e2c7d867d90efacab7f04"
+    },
+    {
+     "code": "en",
+     "name": "English",
+     "title": "Molibra, the Opinion as a Service (OaaS) Blockchain",
+     "file": "en.pdf",
+     "bytes": 115347,
+     "sha256": "b41bce245ba3947c5de2f418bc7c362968f7a6ea508fc4f57cfa59bf879ced3b"
     }
    ]
   }

@@ -1,0 +1,6 @@
+# Molibra, a blockchain de Opiniao como Servico (OaaS) - 2a edicao PT/EN, com o registro n. 3 da 1a edicao / 2nd edition PT/EN, with record no. 3 of the 1st edition
+# Marcelo Marshall De Siqueira (MC Jesus) - 2026-10-09
+# Molibra DocumentRegistry 0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946 (chain 20226): the SHA-256 of THIS file is the record.
+# Check a download with:  sha256sum -c MANIFEST.txt
+ce3b55708bb15c2246364d20f60dce882185738ddd6e2c7d867d90efacab7f04  pt.pdf
+b41bce245ba3947c5de2f418bc7c362968f7a6ea508fc4f57cfa59bf879ced3b  en.pdf

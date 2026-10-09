@@ -43,7 +43,19 @@ const idx = JSON.parse(read('articles/index.json'));
 check('there is at least one article', idx.articles.length > 0);
 for (const a of idx.articles) {
   const codes = a.languages.map((l) => l.code).sort();
-  check(`${a.slug}: one PDF per site language`, JSON.stringify(codes) === JSON.stringify(siteLangs), codes.join(' '));
+  if (a.of) {
+    // A later edition: its own slug, manifest and record, naming its article.
+    const base = idx.articles.find((x) => x.slug === a.of);
+    check(`${a.slug}: edition ${a.edition} of an article that exists`, !!base && !base.of && a.edition > (base.edition ?? 1));
+    check(`${a.slug}: only languages the article has`, codes.every((c) => siteLangs.includes(c)), codes.join(' '));
+  } else {
+    check(`${a.slug}: one PDF per site language`, JSON.stringify(codes) === JSON.stringify(siteLangs), codes.join(' '));
+  }
+  if (a.registration) {
+    const r = a.registration;
+    check(`${a.slug}: registration facts are well-formed`, Number.isInteger(r.record) && r.signedBlock >= r.block
+      && /^0x[0-9a-f]{64}$/.test(r.tx) && /^0x[0-9a-f]{64}$/.test(r.signTx));
+  }
   check(`${a.slug}: the original language is listed`, codes.includes(a.original));
   const manifest = read(`articles/${a.slug}/MANIFEST.txt`);
   check(`${a.slug}: index.json carries the manifest's real hash`, sha(manifest) === a.manifest.sha256);

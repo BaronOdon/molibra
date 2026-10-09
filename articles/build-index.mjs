@@ -54,9 +54,14 @@ for (const slug of readdirSync(DIR).sort()) {
     writeFileSync(mPath, manifest);
   }
   const manifestSha = sha(readFileSync(mPath));
+  // An edition after the first is its own slug (its own manifest and record)
+  // that names the article it updates in `of`; the page shows them together.
+  if (meta.of && !existsSync(join(DIR, meta.of, 'meta.json'))) throw new Error(`${slug}: of=${meta.of} does not exist`);
   articles.push({
     slug, date: meta.date, author: meta.author, registry: meta.registry,
+    edition: meta.edition ?? 1, ...(meta.of ? { of: meta.of } : {}),
     manifest: { file: 'MANIFEST.txt', sha256: manifestSha, bytes: statSync(mPath).size },
+    ...(meta.registration ? { registration: meta.registration } : {}),
     label: meta.label, original: meta.original, languages,
   });
   console.log(`${slug}: ${languages.length} languages, manifest 0x${manifestSha}`);
