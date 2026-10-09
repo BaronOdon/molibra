@@ -163,7 +163,7 @@
    "of": "molibra-oaas-2026-10-09",
    "manifest": {
     "file": "MANIFEST.txt",
-    "sha256": "ada4208210df0dc2647016079f6039e5a8880498e2684bb681d32687b17716ba",
+    "sha256": "11a4e04b94d2d5e20e768aea13e39f2d4559b97bc8c1d79be71819ba8c0102ae",
     "bytes": 543
    },
    "label": "Artigo: Molibra, a blockchain de Opinião como Serviço (OaaS) — 2.ª edição PT/EN, com o registro n.º 3 (MANIFEST, 09/10/2026)",
@@ -174,16 +174,16 @@
      "name": "Português",
      "title": "Molibra, a blockchain de Opinião como Serviço (OaaS)",
      "file": "pt.pdf",
-     "bytes": 107776,
-     "sha256": "ce3b55708bb15c2246364d20f60dce882185738ddd6e2c7d867d90efacab7f04"
+     "bytes": 108905,
+     "sha256": "a84bacea3a4fb0ec3447ea64c76f5fb0ce714636b359fd7e5cb22fd8d03a3cd4"
     },
     {
      "code": "en",
      "name": "English",
      "title": "Molibra, the Opinion as a Service (OaaS) Blockchain",
      "file": "en.pdf",
-     "bytes": 115347,
-     "sha256": "b41bce245ba3947c5de2f418bc7c362968f7a6ea508fc4f57cfa59bf879ced3b"
+     "bytes": 116391,
+     "sha256": "2056cbd0423adc9406ca97cd616d10c28109c83fa6746af0440cbf2b1cfc32d6"
     }
    ]
   }

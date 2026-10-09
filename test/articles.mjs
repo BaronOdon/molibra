@@ -39,6 +39,11 @@ check('the page offers exactly the languages of the site', JSON.stringify(pageLa
 const uiLangs = [...page.matchAll(/^\s{2}([a-z]{2}): \[/gm)].map((m) => m[1]).sort();
 check('  and has its interface in each of them', JSON.stringify(uiLangs) === JSON.stringify(siteLangs), uiLangs.join(' '));
 
+const lic = existsSync(join(ROOT, 'articles/LICENSE')) ? read('articles/LICENSE').toString() : '';
+check('⛔ the articles carry their own licence, not the software\'s Apache-2.0', /CC BY-NC-ND 4\.0/.test(lic) && /NOT\s+covered by the repository's Apache-2\.0/.test(lic));
+const licRows = [...page.matchAll(/^\s{2}[a-z]{2}: \[.*'([^']*CC BY-NC-ND 4\.0[^']*)'\],$/gm)];
+check('  and the page states it in every language', licRows.length === siteLangs.length, `${licRows.length}/${siteLangs.length}`);
+
 const idx = JSON.parse(read('articles/index.json'));
 check('there is at least one article', idx.articles.length > 0);
 for (const a of idx.articles) {
