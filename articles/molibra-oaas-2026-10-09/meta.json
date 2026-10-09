@@ -1,0 +1,91 @@
+{
+ "manifestTitle": "Molibra, a blockchain de Opiniao como Servico (OaaS) - 16 idiomas / 16 languages",
+ "author": "Marcelo Marshall De Siqueira (MC Jesus)",
+ "date": "2026-10-09",
+ "registry": "0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946",
+ "label": "Artigo: Molibra, a blockchain de Opinião como Serviço (OaaS) — 16 idiomas (MANIFEST, 09/10/2026)",
+ "original": "pt",
+ "frozen": true,
+ "languages": [
+  {
+   "code": "pt",
+   "name": "Português",
+   "title": "Molibra, a blockchain de Opinião como Serviço (OaaS)"
+  },
+  {
+   "code": "en",
+   "name": "English",
+   "title": "Molibra, the Opinion as a Service (OaaS) Blockchain"
+  },
+  {
+   "code": "es",
+   "name": "Español",
+   "title": "Molibra, la blockchain de Opinión como Servicio (OaaS)"
+  },
+  {
+   "code": "fr",
+   "name": "Français",
+   "title": "Molibra, la blockchain de l'Opinion en tant que Service (OaaS)"
+  },
+  {
+   "code": "de",
+   "name": "Deutsch",
+   "title": "Molibra, die Blockchain der Meinung als Dienstleistung (OaaS)"
+  },
+  {
+   "code": "it",
+   "name": "Italiano",
+   "title": "Molibra, la blockchain dell'Opinione come Servizio (OaaS)"
+  },
+  {
+   "code": "nl",
+   "name": "Nederlands",
+   "title": "Molibra, de blockchain van Opinie als Dienst (OaaS)"
+  },
+  {
+   "code": "pl",
+   "name": "Polski",
+   "title": "Molibra, blockchain Opinii jako Usługi (OaaS)"
+  },
+  {
+   "code": "ru",
+   "name": "Русский",
+   "title": "Molibra, блокчейн «Мнение как услуга» (OaaS)"
+  },
+  {
+   "code": "tr",
+   "name": "Türkçe",
+   "title": "Molibra, Hizmet Olarak Görüş (OaaS) blokzinciri"
+  },
+  {
+   "code": "id",
+   "name": "Bahasa Indonesia",
+   "title": "Molibra, blockchain Opini sebagai Layanan (OaaS)"
+  },
+  {
+   "code": "hi",
+   "name": "हिन्दी",
+   "title": "Molibra, राय-एक-सेवा (OaaS) ब्लॉकचेन"
+  },
+  {
+   "code": "ar",
+   "name": "العربية",
+   "title": "Molibra، سلسلة كتل الرأي كخدمة (OaaS)"
+  },
+  {
+   "code": "ja",
+   "name": "日本語",
+   "title": "Molibra：サービスとしての意見（OaaS）のブロックチェーン"
+  },
+  {
+   "code": "ko",
+   "name": "한국어",
+   "title": "Molibra, 서비스로서의 의견(OaaS) 블록체인"
+  },
+  {
+   "code": "zh",
+   "name": "中文",
+   "title": "Molibra：意见即服务（OaaS）区块链"
+  }
+ ]
+}

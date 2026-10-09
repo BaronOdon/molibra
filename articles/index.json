@@ -1,0 +1,147 @@
+{
+ "articles": [
+  {
+   "slug": "molibra-oaas-2026-10-09",
+   "date": "2026-10-09",
+   "author": "Marcelo Marshall De Siqueira (MC Jesus)",
+   "registry": "0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946",
+   "manifest": {
+    "file": "MANIFEST.txt",
+    "sha256": "b696226663ccc9f5f1437655fd03bb57ee9fed2b7ffeb75c475bc04d28e45c42",
+    "bytes": 1483
+   },
+   "label": "Artigo: Molibra, a blockchain de Opinião como Serviço (OaaS) — 16 idiomas (MANIFEST, 09/10/2026)",
+   "original": "pt",
+   "languages": [
+    {
+     "code": "pt",
+     "name": "Português",
+     "title": "Molibra, a blockchain de Opinião como Serviço (OaaS)",
+     "file": "pt.pdf",
+     "bytes": 103764,
+     "sha256": "635ddc4f16cf8109a032dbb1e88002063d3e65a54392cabcad34e7ba829abdbb"
+    },
+    {
+     "code": "en",
+     "name": "English",
+     "title": "Molibra, the Opinion as a Service (OaaS) Blockchain",
+     "file": "en.pdf",
+     "bytes": 111478,
+     "sha256": "cb58c2db0de57514b57b00a7346e4daeea33ead3335daeeb010b9bbcb82fee26"
+    },
+    {
+     "code": "es",
+     "name": "Español",
+     "title": "Molibra, la blockchain de Opinión como Servicio (OaaS)",
+     "file": "es.pdf",
+     "bytes": 111379,
+     "sha256": "c13d96111997d35d3975e00b77d1438dfaca29b25be6f73fb98609568209046e"
+    },
+    {
+     "code": "fr",
+     "name": "Français",
+     "title": "Molibra, la blockchain de l'Opinion en tant que Service (OaaS)",
+     "file": "fr.pdf",
+     "bytes": 114985,
+     "sha256": "2ef58e3504022e79f05bc1cf4bab468398b37b4e1fcbbe0186db7eef0d6725a1"
+    },
+    {
+     "code": "de",
+     "name": "Deutsch",
+     "title": "Molibra, die Blockchain der Meinung als Dienstleistung (OaaS)",
+     "file": "de.pdf",
+     "bytes": 109552,
+     "sha256": "1cde83159076894028d8aa66772b40048ed4b6fd09ee8850bf0918009ddee97b"
+    },
+    {
+     "code": "it",
+     "name": "Italiano",
+     "title": "Molibra, la blockchain dell'Opinione come Servizio (OaaS)",
+     "file": "it.pdf",
+     "bytes": 105866,
+     "sha256": "cde4a0de3786dd8af27384d8027dcf30094e6e9437b05ab89beeeb960dd35dee"
+    },
+    {
+     "code": "nl",
+     "name": "Nederlands",
+     "title": "Molibra, de blockchain van Opinie als Dienst (OaaS)",
+     "file": "nl.pdf",
+     "bytes": 107122,
+     "sha256": "c311989cac7875e50c3b0057a90bd2c699ecfe6eaf4ad8e68c87c2f33e4dc58b"
+    },
+    {
+     "code": "pl",
+     "name": "Polski",
+     "title": "Molibra, blockchain Opinii jako Usługi (OaaS)",
+     "file": "pl.pdf",
+     "bytes": 107941,
+     "sha256": "d8f5238d8cc0262619104b2645a7f1f6350ec3c64c413073b1c693d977827117"
+    },
+    {
+     "code": "ru",
+     "name": "Русский",
+     "title": "Molibra, блокчейн «Мнение как услуга» (OaaS)",
+     "file": "ru.pdf",
+     "bytes": 120453,
+     "sha256": "bc85e37879e29345b06b096e3909e2abfe9027e795cf6afd46780069fbdcb4a2"
+    },
+    {
+     "code": "tr",
+     "name": "Türkçe",
+     "title": "Molibra, Hizmet Olarak Görüş (OaaS) blokzinciri",
+     "file": "tr.pdf",
+     "bytes": 107016,
+     "sha256": "ba594778e6fc0a3b55d2625c20d6203f141b3d9bc7f7774e12378b501b3bf8af"
+    },
+    {
+     "code": "id",
+     "name": "Bahasa Indonesia",
+     "title": "Molibra, blockchain Opini sebagai Layanan (OaaS)",
+     "file": "id.pdf",
+     "bytes": 105787,
+     "sha256": "4571bc06ab9514e4139b449fe1a1f6112396cd9c3076bc2de59c991eb74e8e2a"
+    },
+    {
+     "code": "hi",
+     "name": "हिन्दी",
+     "title": "Molibra, राय-एक-सेवा (OaaS) ब्लॉकचेन",
+     "file": "hi.pdf",
+     "bytes": 131876,
+     "sha256": "093bee941fb465adddeedf4118cbffb27d01fa94924618ddbe697148d4b6b4e4"
+    },
+    {
+     "code": "ar",
+     "name": "العربية",
+     "title": "Molibra، سلسلة كتل الرأي كخدمة (OaaS)",
+     "file": "ar.pdf",
+     "bytes": 168901,
+     "sha256": "a20b9d2c928ff0332852be9f584391c3ba8910ad0089b6eda5a89567da29dbfe"
+    },
+    {
+     "code": "ja",
+     "name": "日本語",
+     "title": "Molibra：サービスとしての意見（OaaS）のブロックチェーン",
+     "file": "ja.pdf",
+     "bytes": 467446,
+     "sha256": "a05ac351b285ad77d3a1660f59c4a1f3271322599fa2cf109d160eef2a97ffdb"
+    },
+    {
+     "code": "ko",
+     "name": "한국어",
+     "title": "Molibra, 서비스로서의 의견(OaaS) 블록체인",
+     "file": "ko.pdf",
+     "bytes": 239882,
+     "sha256": "69e150302bd1cf6565ce334b8db962e3059c7a67c8b778d9c91266a0b098531e"
+    },
+    {
+     "code": "zh",
+     "name": "中文",
+     "title": "Molibra：意见即服务（OaaS）区块链",
+     "file": "zh.pdf",
+     "bytes": 494778,
+     "sha256": "1d7065be69695687da931f1370809c267eaec85a2fccb02d060d61b75145ce77"
+    }
+   ]
+  }
+ ]
+}

@@ -1236,6 +1236,47 @@ async function handleAudit(node, req, res) {
   }
 
   /**
+   * Articles: the papers, in every language the site speaks, each set
+   * authenticated by one DocumentRegistry record (its MANIFEST.txt).
+   *
+   * ⛔ Files are served only when articles/index.json lists them: the slug and
+   * the file name are matched against the catalogue, never joined from the URL
+   * onto a directory (an open static route is a file-read primitive).
+   */
+  if (path === '/articles' || path === '/articles/') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'articles.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+  if (path === '/articles/index.json') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'articles', 'index.json');
+    if (!existsSync(file)) return json(res, 404, { error: 'no articles published yet' });
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+  if (path.startsWith('/articles/')) {
+    const m = path.match(/^\/articles\/([a-z0-9-]+)\/([a-z]{2}\.pdf|MANIFEST\.txt)$/);
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'articles');
+    let listed = null;
+    if (m && existsSync(join(root, 'index.json'))) {
+      const { articles = [] } = JSON.parse(readFileSync(join(root, 'index.json'), 'utf8'));
+      const a = articles.find((x) => x.slug === m[1]);
+      if (a && (m[2] === a.manifest.file || a.languages.some((l) => l.file === m[2]))) listed = a;
+    }
+    if (!listed) return json(res, 404, { error: 'no such article file' });
+    const pdf = m[2].endsWith('.pdf');
+    res.writeHead(200, {
+      'Content-Type': pdf ? 'application/pdf' : 'text/plain; charset=utf-8',
+      'Content-Disposition': `inline; filename="${pdf ? `${listed.slug}-${m[2]}` : m[2]}"`,
+      'Cache-Control': 'public, max-age=3600',
+    });
+    res.end(readFileSync(join(root, listed.slug, m[2])));
+    return;
+  }
+
+  /**
    * Document registry: hash a file in the browser, then register / sign / check
    * it against DocumentRegistry. The file never leaves the browser.
    */

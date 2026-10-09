@@ -1,0 +1,20 @@
+# Molibra, a blockchain de Opiniao como Servico (OaaS) - 16 idiomas / 16 languages
+# Marcelo Marshall De Siqueira (MC Jesus) - 2026-10-09
+# Molibra DocumentRegistry 0xeadcd3e918be3ad67a6b5c2a3c4fa8e59a809946 (chain 20226): the SHA-256 of THIS file is the record.
+# Check a download with:  sha256sum -c MANIFEST.txt
+635ddc4f16cf8109a032dbb1e88002063d3e65a54392cabcad34e7ba829abdbb  pt.pdf
+cb58c2db0de57514b57b00a7346e4daeea33ead3335daeeb010b9bbcb82fee26  en.pdf
+c13d96111997d35d3975e00b77d1438dfaca29b25be6f73fb98609568209046e  es.pdf
+2ef58e3504022e79f05bc1cf4bab468398b37b4e1fcbbe0186db7eef0d6725a1  fr.pdf
+1cde83159076894028d8aa66772b40048ed4b6fd09ee8850bf0918009ddee97b  de.pdf
+cde4a0de3786dd8af27384d8027dcf30094e6e9437b05ab89beeeb960dd35dee  it.pdf
+c311989cac7875e50c3b0057a90bd2c699ecfe6eaf4ad8e68c87c2f33e4dc58b  nl.pdf
+d8f5238d8cc0262619104b2645a7f1f6350ec3c64c413073b1c693d977827117  pl.pdf
+bc85e37879e29345b06b096e3909e2abfe9027e795cf6afd46780069fbdcb4a2  ru.pdf
+ba594778e6fc0a3b55d2625c20d6203f141b3d9bc7f7774e12378b501b3bf8af  tr.pdf
+4571bc06ab9514e4139b449fe1a1f6112396cd9c3076bc2de59c991eb74e8e2a  id.pdf
+093bee941fb465adddeedf4118cbffb27d01fa94924618ddbe697148d4b6b4e4  hi.pdf
+a20b9d2c928ff0332852be9f584391c3ba8910ad0089b6eda5a89567da29dbfe  ar.pdf
+a05ac351b285ad77d3a1660f59c4a1f3271322599fa2cf109d160eef2a97ffdb  ja.pdf
+69e150302bd1cf6565ce334b8db962e3059c7a67c8b778d9c91266a0b098531e  ko.pdf
+1d7065be69695687da931f1370809c267eaec85a2fccb02d060d61b75145ce77  zh.pdf
