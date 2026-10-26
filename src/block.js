@@ -101,7 +101,7 @@ export function isValidSeal(header) {
  * Grind nonces until the seal is valid. Returns the sealed header.
  * `signal.stop` lets a caller interrupt a long grind.
  */
-export function mineHeader(header, { start = 0n, signal = null, maxRounds = Infinity } = {}) {
+export function mineHeader(header, { start = 0n, signal = null, maxRounds = Infinity, deadline = Infinity } = {}) {
   const digest = sealDigest(header);
   const target = targetFor(header.difficulty);
   let nonce = BigInt(start);
@@ -115,8 +115,10 @@ export function mineHeader(header, { start = 0n, signal = null, maxRounds = Infi
     if (signal?.stop) return null;
     // Bounded slices. An unbounded grind starves the event loop, which means a
     // mining node stops answering RPC exactly as difficulty rises - the wallet
-    // sees the network as down while the node is busy working.
-    if (++rounds >= maxRounds) {
+    // sees the network as down while the node is busy working. A slice also
+    // ends on a wall-clock deadline: 20k nonces is ~0.3 s on a slow core, and a
+    // request that needs dozens of event-loop turns then waits many seconds.
+    if (++rounds >= maxRounds || ((rounds & 255) === 0 && Date.now() >= deadline)) {
       if (signal) signal.nextNonce = nonce;
       return null;
     }

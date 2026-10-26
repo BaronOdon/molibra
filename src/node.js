@@ -86,6 +86,7 @@ export class Node {
     this.netAbort = null;
     this.minGasPrice = BigInt(minGasPrice);
     this.miningRounds = 20000; // nonces per slice before yielding to the event loop
+    this.miningSliceMs = 15; // and never grind longer than this per slice
     this.mining = false;
     this.challenges = new Map(); // nonce -> expiry, for wallet linking proofs
     this.server = null;
@@ -173,6 +174,7 @@ export class Node {
           start: nonce,
           signal: this._stopSignal,
           maxRounds: this.miningRounds,
+          deadline: Date.now() + this.miningSliceMs,
         });
         if (sealed) {
           const block = { header: sealed, hash: blockHash(sealed), transactions: candidate.transactions };
