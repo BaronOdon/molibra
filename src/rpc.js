@@ -706,6 +706,29 @@ async function handleAudit(node, req, res) {
   }
 
   /**
+   * A block to mine, paying `coinbase`, for the public pool running beside
+   * this node (src/poolserver.js). The pool sets extraData per miner and
+   * re-derives the seal digest itself; a solved block comes back through
+   * /molibra/submit-block like any peer's.
+   *
+   * ⛔ Loopback only, and never through the proxy. Composing a block runs every
+   * mempool transaction through the EVM, so an open endpoint is a free way to
+   * make the node work. Caddy reaches the node over loopback too, so a request
+   * that carries a forwarding header came from the internet and is refused.
+   */
+  if (path === '/molibra/block-template') {
+    const remote = req.socket?.remoteAddress ?? '';
+    const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+    if (!loopback || req.headers['x-forwarded-for'] || req.headers['via']) {
+      return json(res, 403, { error: 'block templates are served to the local pool only' });
+    }
+    const coinbase = url.searchParams.get('coinbase');
+    if (!coinbase) return json(res, 400, { error: 'coinbase=0x… is required' });
+    const candidate = await chain.composeBlock(coinbase);
+    return json(res, 200, serializeBlock({ ...candidate, hash: null }));
+  }
+
+  /**
    * An inclusion proof for one account's line in the state.
    *
    *   /molibra/state-proof/0x…
@@ -1223,6 +1246,19 @@ async function handleAudit(node, req, res) {
   if (wanted === 'install-mac.sh') {
     const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'installers', 'mac', 'install-mac.sh');
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file, 'utf8'));
+    return;
+  }
+
+  /**
+   * The public mining pool's page. Caddy sends /pool to the pool server
+   * (src/poolserver.js) on node 1; this is the fallback when that process is
+   * down, or on a node without one: the page still loads and its live
+   * numbers simply show the pool as offline, instead of a 404.
+   */
+  if (path === '/pool' || path === '/pool/' || path === '/molibra/pool-mining') {
+    const file = join(dirname(fileURLToPath(import.meta.url)), 'web', 'mining-pool.html');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(readFileSync(file, 'utf8'));
     return;
   }
