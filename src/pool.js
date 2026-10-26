@@ -39,6 +39,9 @@ export class PoolCore {
     targetShareSeconds = 15,
     pplnsFactor = 2n,
     jobTtlMs = 10 * 60_000,
+    maxJobs = 50_000,            // ⛔ memory bounds: a public endpoint must not grow without limit
+    maxWorkers = 20_000,
+    maxWorkersPerAddress = 64,
     now = () => Date.now(),
   }) {
     this.poolAddress = normalizeAddress(poolAddress);
@@ -48,6 +51,9 @@ export class PoolCore {
     this.targetShareSeconds = targetShareSeconds;
     this.pplnsFactor = BigInt(pplnsFactor);
     this.jobTtlMs = jobTtlMs;
+    this.maxJobs = maxJobs;
+    this.maxWorkers = maxWorkers;
+    this.maxWorkersPerAddress = maxWorkersPerAddress;
     this.now = now;
 
     this.template = null;        // { header, transactions, id }
@@ -99,6 +105,11 @@ export class PoolCore {
     const key = this.workerKey(addr, worker);
     let w = this.workers.get(key);
     if (!w) {
+      if (this.workers.size >= this.maxWorkers) throw new Error('the pool is at its worker limit; try again later');
+      const prefix = addr.toLowerCase() + '/';
+      let mine = 0;
+      for (const k of this.workers.keys()) if (k.startsWith(prefix)) mine++;
+      if (mine >= this.maxWorkersPerAddress) throw new Error(`at most ${this.maxWorkersPerAddress} workers per address`);
       w = { difficulty: this.clampDifficulty(this.startShareDifficulty), lastShareAt: null, shares: 0, lastSeen: this.now() };
       this.workers.set(key, w);
     }
@@ -109,6 +120,11 @@ export class PoolCore {
     const header = { ...this.template.header, extraData, nonce: 0n };
     const digest = sealDigest(header);
     const jobId = randomBytes(8).toString('hex');
+    if (this.jobs.size >= this.maxJobs) {
+      // Evict the oldest (Map keeps insertion order); an honest miner refetches every minute anyway.
+      const oldest = this.jobs.keys().next().value;
+      this.jobs.delete(oldest);
+    }
     this.jobs.set(jobId, {
       address: addr,
       worker: cleanWorker(worker),

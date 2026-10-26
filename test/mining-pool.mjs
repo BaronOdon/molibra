@@ -184,6 +184,18 @@ try {
     split.fee + split.credits.get(ALICE) + split.credits.get(BOB) === 1000n);
   check('with no shares, nobody is credited', new PoolCore({ poolAddress: POOL_ADDR }).splitReward(1000n, 10n).credits.size === 0);
 
+  const capped = new PoolCore({ poolAddress: POOL_ADDR, maxJobs: 3, maxWorkers: 2, maxWorkersPerAddress: 1 });
+  capped.setTemplate(tpl);
+  for (let i = 0; i < 5; i++) capped.newJob(ALICE, 'w');
+  check('⛔ open jobs are capped (oldest evicted)', capped.jobs.size === 3);
+  let perAddr = false;
+  try { capped.newJob(ALICE, 'second'); } catch { perAddr = true; }
+  check('⛔ workers per address are capped', perAddr);
+  capped.newJob(BOB, 'w');
+  let total = false;
+  try { capped.newJob(SOLO, 'w'); } catch { total = true; }
+  check('⛔ total workers are capped', total);
+
   let wrongKey = false;
   try {
     new PoolServer({ nodeUrl: NODE, address: ALICE, privateKey: KEY, dataDir: join(dir, 'x'), genesis });
