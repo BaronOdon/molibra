@@ -240,6 +240,24 @@ export class Node {
         if (typeof u === 'string' && /^https?:\/\/[\w.\-:[\]]+$/.test(u) && u !== this.rpcUrl) this.peers.add(u);
       }
     } catch { /* no file yet */ }
+    // ⛔ The file is this node's own memory of what strangers announced, so it
+    // gets the same guard an announcement does, on every boot - a rule added
+    // after an address was learned must still evict it.
+    this.recheckLoadedPeers().catch(() => {});
+  }
+
+  async recheckLoadedPeers({ check = checkPeerUrl } = {}) {
+    let dropped = 0;
+    for (const peer of [...this.peers]) {
+      if (this.configuredPeers.has(peer)) continue;
+      try { await check(peer); } catch (e) {
+        this.peers.delete(peer);
+        dropped++;
+        console.log(`[molibra] dropped remembered peer ${peer}: ${e.message}`);
+      }
+    }
+    if (dropped) this.savePeers();
+    return dropped;
   }
 
   savePeers() {

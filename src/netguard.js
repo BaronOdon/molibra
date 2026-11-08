@@ -25,6 +25,10 @@ const BLOCKED_NAMES = [
   /^localhost$/i, /\.localhost$/i,
   /^metadata$/i, /^metadata\.google\.internal$/i, /\.internal$/i,
   /^instance-data(\.ec2\.internal)?$/i,
+  // DNS-rebinding services: the name answers public on the check and loopback
+  // on the fetch, so resolving it once proves nothing. One of these sat in
+  // node 2's peer list until Nov 2026 (make-<ip>-rebind-127.0.0.1-rr.1u.ms).
+  /(^|\.)1u\.ms$/i, /(^|\.)rbndr\.us$/i, /(^|[.-])rebind([.-]|$)/i,
 ];
 
 function v4ToInt(ip) {

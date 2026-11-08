@@ -86,6 +86,22 @@ try {
   // release.json is served from releases/ when present, 404 when not.
   const rel = await fetch(url(18610) + '/download/release.json');
   check('/download/release.json is a route (200 with a release, 404 before the first)', rel.status === 200 || rel.status === 404, String(rel.status));
+
+  // ⛔ Remembered peers are re-checked on every boot. node 2 kept a DNS-rebinding
+  // host (and kept dialling it) because peers.json was trusted as written.
+  const { checkPeerUrl } = await import('../src/netguard.js');
+  delete process.env.MOLIBRA_ALLOW_PRIVATE_PEERS;
+  let rebind = null;
+  try { await checkPeerUrl('http://make-193.123.191.142-rebind-127.0.0.1-rr.1u.ms:8545'); } catch (e) { rebind = e.message; }
+  check('a DNS-rebinding host name is refused before it is resolved', /local or metadata host name/.test(rebind ?? ''), rebind ?? 'accepted');
+  const keeper = nodes[0];
+  keeper.peers.add('http://make-1-rebind-127.0.0.1-rr.1u.ms:8545');
+  keeper.peers.add('http://10.0.0.7:8545');
+  const dropped = await keeper.recheckLoadedPeers();
+  check('a boot re-check evicts remembered peers the guard now refuses', dropped >= 2
+    && ![...keeper.peers].some((p) => /1u\.ms|10\.0\.0\.7/.test(p)), `dropped ${dropped}`);
+  check('  and never a configured peer', [...keeper.configuredPeers].every((p) => keeper.peers.has(p)));
+  process.env.MOLIBRA_ALLOW_PRIVATE_PEERS = '1';
 } finally {
   for (const n of nodes) await n.stop().catch(() => {});
   rmSync(dir, { recursive: true, force: true });
