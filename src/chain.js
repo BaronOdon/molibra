@@ -28,6 +28,11 @@ import {
   MAX_REORG_DEPTH,
 } from './limits.js';
 
+// Post-states are kept for maxReorgDepth + this many blocks below the head, and
+// side branches below that are swept every STATE_SWEEP_EVERY heights.
+const STATE_KEEP_MARGIN = 16;
+const STATE_SWEEP_EVERY = 1024;
+
 export class Chain {
   /**
    * `limits` overrides the LOCAL-POLICY bounds only - mempool caps, orphan
@@ -381,6 +386,10 @@ export class Chain {
     const wallClock = BigInt(Math.floor(Date.now() / 1000));
     const timestamp = wallClock > parent.header.timestamp ? wallClock : parent.header.timestamp + 1n;
 
+    if (!parent.state) {
+      throw new Error(`cannot build on #${parent.header.number}: it is deeper than the `
+        + `${this.maxReorgDepth}-block reorg bound and its state is no longer held`);
+    }
     const state = parent.state.clone();
 
     const candidates = [...this.mempool.values()].sort((a, b) => {
@@ -551,6 +560,13 @@ export class Chain {
       return { accepted: false, adopted: false, reason: 'orphan' };
     }
 
+    if (!parent.state) {
+      // The parent's state was dropped because it sits deeper than any reorg
+      // this node would accept (see pruneStates). A block building on it could
+      // only ever be "kept but not adopted", so refuse it outright.
+      throw new Error(`parent #${parent.header.number} is deeper than the ${this.maxReorgDepth}-block `
+        + 'reorg bound and its state is no longer held');
+    }
     const entry = await this.verifyAgainstParent(block, parent);
     this.byHash.set(entry.hash, entry);
 
@@ -618,8 +634,37 @@ export class Chain {
       }
     }
 
+    this.pruneStates();
     if (persist) this.persist();
     return { accepted: true, adopted: this.head.hash === entry.hash || this.isCanonical(entry.hash), reorg };
+  }
+
+  /**
+   * Drop the post-state of every block deeper than the reorg bound.
+   *
+   * ⛔⛔ Each block entry carried a full clone of the world state, so memory grew
+   * with the length of the chain. At ~257k blocks it passed the V8 heap limit:
+   * node 2 died ~65 minutes into every replay and the network was halted from
+   * 3 to 8 Nov 2026. Only blocks a reorg could still reach need their state -
+   * the head's, to build and verify on, and the last maxReorgDepth below it, to
+   * verify a competing branch. Anything deeper is refused by the fork choice
+   * anyway, so its state is dead weight.
+   */
+  pruneStates() {
+    const keepFrom = this.canonical.length - 1 - this.maxReorgDepth - STATE_KEEP_MARGIN;
+    if (keepFrom <= 0) return;
+    // Canonical: walk forward from where the last call stopped.
+    for (let h = this.statesPrunedTo ?? 0; h < keepFrom; h++) {
+      const entry = this.canonical[h];
+      if (entry) entry.state = null;
+    }
+    this.statesPrunedTo = Math.max(this.statesPrunedTo ?? 0, keepFrom);
+    // Side branches are rare; sweep them occasionally rather than per block.
+    if (keepFrom % STATE_SWEEP_EVERY === 0) {
+      for (const entry of this.byHash.values()) {
+        if (entry.state && Number(entry.header.number) < keepFrom) entry.state = null;
+      }
+    }
   }
 
   orphanCount() {
