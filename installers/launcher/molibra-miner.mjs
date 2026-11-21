@@ -59,7 +59,7 @@ import dgram from 'node:dgram';
  * "updated" itself BACKWARDS on the first independent miner's laptop (25 Sep
  * 2026). Bump this whenever this file changes.
  */
-const LAUNCHER_VERSION = 4;
+const LAUNCHER_VERSION = 5;
 
 /**
  * ⛔⛔ The keys that may sign a miner release, and how many must agree. A
@@ -84,7 +84,11 @@ const RELEASE_URLS = [
   'https://molibra.org/download/release.json',
   'https://raw.githubusercontent.com/BaronOdon/molibra/main/releases/miner-release.json',
 ];
-const PEERS = 'http://193.123.191.142:8545,http://141.147.99.86:8545';
+// Node 1 (193.123.191.142) was terminated on the free tier 29 Oct 2026 — gone, not down.
+const PEERS = 'http://141.147.99.86:8545';
+// The public PPLNS mining pool. Default mode: the miner submits shares here and is
+// paid regardless of NAT or reorg, instead of solo-mining a fork node 2 never accepts.
+const POOL_URL = 'https://molibra.org/pool';
 const PORT = 20226;
 const CHECK_EVERY_MS = 60 * 60_000;            // release check: hourly (cheap: one small JSON)
 const MANDATORY_LEAD_BLOCKS = 2000;            // ~11 h before a flag day: apply regardless of rollout
@@ -229,6 +233,12 @@ function config() {
   //    open a router port, so it stays PRIVATE (a full, verifying node that
   //    serves nobody) until its owner turns public on. New installs ask.
   if (cfg.public === undefined) { cfg.public = false; changed = true; }
+  // ⛔ Default mode is the public pool. A solo node behind a home router mines a
+  //    fork node 2 never accepts, so an install that never chose stays on the
+  //    pool, where its work is paid by shares (PPLNS) regardless of reorgs.
+  if (cfg.mode === undefined) { cfg.mode = 'pool'; changed = true; }
+  // The terminated node 1 lingered in old configs' peer lists; drop the corpse.
+  if (typeof cfg.peers === 'string' && cfg.peers.includes('193.123.191.142')) { cfg.peers = PEERS; changed = true; }
   if (changed) writeFileSync(CONFIG, JSON.stringify(cfg, null, 2));
   return cfg;
 }
@@ -663,6 +673,29 @@ function watchNodeOutput(line) {
   }
 }
 
+/** Read the pool miner's output: connection, hashrate, shares, blocks found. */
+function watchPoolOutput(line) {
+  let m;
+  if ((m = line.match(/([\d.]+) kH\/s\s+shares (\d+) ok \/ (\d+) rejected\s+blocks (\d+)\s+height (\d+|-)/))) {
+    status.mining = true;
+    status.hashrate = Number(m[1]);
+    status.shares = { ok: Number(m[2]), rejected: Number(m[3]) };
+    status.poolBlocks = Number(m[4]);
+    if (m[5] !== '-') status.networkHeight = Number(m[5]);
+    phase('mining', `Mining on the Molibra pool · ${m[1]} kH/s · ${m[2]} shares accepted · paid by shares (PPLNS).`);
+    healthy = true;
+  } else if (/thread\(s\)\s*→/.test(line)) {
+    status.mining = true;
+    phase('mining', 'Connected to the Molibra pool and mining to your wallet.');
+    healthy = true;
+  } else if ((m = line.match(/block found!\s*(0x[0-9a-fA-F]+)/))) {
+    status.minedThisSession.push({ block: m[1], at: new Date().toISOString() });
+    if (status.minedThisSession.length > 50) status.minedThisSession.shift();
+  } else if (/no job|share not sent/.test(line)) {
+    status.detail = line.trim().slice(0, 200);
+  }
+}
+
 function logTail(file, lines = 12) {
   try {
     const text = readFileSync(join(LOGS, file), 'utf8');
@@ -676,7 +709,8 @@ function startStatusServer() {
   const server = statusServer = createServer(async (req, res) => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
     if (req.url.startsWith('/status')) {
-      if (child && ['catching-up', 'mining', 'loading'].includes(status.phase)) {
+      if (child && (readConfig().mode ?? 'pool') !== 'pool'
+          && ['catching-up', 'mining', 'loading'].includes(status.phase)) {
         try {
           const cfg = readConfig();
           const r = await fetch(`http://127.0.0.1:${cfg.port ?? PORT}/molibra`, { signal: AbortSignal.timeout(1500) });
@@ -714,16 +748,30 @@ function startNode() {
   status.mining = false;
   status.network.public = cfg.public !== false;
   status.network.advertised = advertised;
-  phase('loading', 'Loading this computer\'s copy of the chain…');
+  const pool = (cfg.mode ?? 'pool') === 'pool';
+  phase(pool ? 'mining' : 'loading', pool
+    ? 'Connecting to the Molibra pool and mining to your wallet…'
+    : 'Loading this computer\'s copy of the chain…');
   const out = createWriteStream(join(LOGS, 'node.log'), { flags: 'a' });
-  // ⭐ A full peer: binds every interface when public (so peers can sync from
-  //    it), only loopback when the user chose private.
-  const args = [join('src', 'cli.js'), 'node',
-    '--host', cfg.public === false ? '127.0.0.1' : '0.0.0.0',
-    '--port', String(cfg.port ?? PORT), '--datadir', join(ROOT, 'data'),
-    '--peers', cfg.peers ?? PEERS, '--miner', cfg.miner];
-  if (cfg.public !== false && advertised) args.push('--advertise', advertised);
-  if (mineAllowed) args.push('--mine');
+  let args, watcher;
+  if (pool) {
+    // ⭐ Pool miner: a pure OUTBOUND client. It asks molibra.org/pool for work,
+    //    submits shares, and is paid by PPLNS — so a miner behind a home router
+    //    (which can never win a solo block node 2 would accept) still earns.
+    //    No port to open, no chain to replay, no fork.
+    args = [join('tools', 'pool-miner.mjs'), '--address', cfg.miner, '--pool', cfg.pool ?? POOL_URL];
+    watcher = watchPoolOutput;
+  } else {
+    // ⭐ A full peer: binds every interface when public (so peers can sync from
+    //    it), only loopback when the user chose private.
+    args = [join('src', 'cli.js'), 'node',
+      '--host', cfg.public === false ? '127.0.0.1' : '0.0.0.0',
+      '--port', String(cfg.port ?? PORT), '--datadir', join(ROOT, 'data'),
+      '--peers', cfg.peers ?? PEERS, '--miner', cfg.miner];
+    if (cfg.public !== false && advertised) args.push('--advertise', advertised);
+    if (mineAllowed) args.push('--mine');
+    watcher = watchNodeOutput;
+  }
   child = spawn(process.execPath, args, { cwd: APP, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   child.stdout.pipe(out);
   child.stderr.pipe(out);
@@ -731,14 +779,16 @@ function startNode() {
   const feed = (chunk) => {
     const lines = (partial + chunk.toString()).split(/\r?\n/);
     partial = lines.pop();
-    for (const l of lines) watchNodeOutput(l);
+    for (const l of lines) watcher(l);
   };
   child.stdout.on('data', feed);
   child.stderr.on('data', feed);
   try { setPriority(child.pid, LOW); } catch { /* best effort */ }
   writeFileSync(join(ROOT, 'node.pid'), String(child.pid));
-  log(`node started (pid ${child.pid}), ${mineAllowed ? `mining to ${cfg.miner}` : 'NOT mining (needs the mandatory update)'}`
-    + `${advertised ? `, serving at ${advertised}` : ''}`);
+  log(pool
+    ? `pool miner started (pid ${child.pid}), paid to ${cfg.miner} via ${cfg.pool ?? POOL_URL}`
+    : `node started (pid ${child.pid}), ${mineAllowed ? `mining to ${cfg.miner}` : 'NOT mining (needs the mandatory update)'}`
+      + `${advertised ? `, serving at ${advertised}` : ''}`);
   const me = child;
   child.on('exit', (code) => {
     if (child !== me) return;           // replaced on purpose by an update
