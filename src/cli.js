@@ -10,6 +10,7 @@
  */
 
 import { fileURLToPath } from 'node:url';
+import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { Node } from './node.js';
 import { Chain } from './chain.js';
@@ -241,6 +242,43 @@ const commands = {
     const node = await makeNode(args);
     const adopted = await node.syncFrom(args.peer);
     console.log(`adopted ${adopted} block(s); height is now ${node.chain.height}`);
+  },
+
+  /**
+   * Submit this computer's orphaned work for recovery. Reads the local chain,
+   * sends the blocks THIS wallet sealed to a public node, which verifies the
+   * proof of work, skips anything already canonical, and records what is owed.
+   * A lightweight raw read - it does NOT replay or validate state, so it is safe
+   * on a modest machine and never forks or mines.
+   */
+  async 'recover-submit'(args) {
+    const dataDir = args.datadir ? resolve(args.datadir) : join(ROOT, 'data');
+    const miner = String(args.miner ?? '').toLowerCase();
+    const peer = String(args.peer ?? 'http://141.147.99.86:8545').replace(/\/$/, '');
+    if (!/^0x[0-9a-f]{40}$/.test(miner)) throw new Error('--miner 0x... is required');
+    const file = join(dataDir, 'chain.json');
+    if (!existsSync(file)) { console.log('no local chain found; nothing to recover'); return; }
+    const payload = JSON.parse(readFileSync(file, 'utf8'));
+    const mine = (payload.blocks ?? []).filter((b) => String(b.header?.miner).toLowerCase() === miner);
+    if (mine.length === 0) { console.log(`no blocks sealed by ${miner} in the local chain`); return; }
+    console.log(`submitting ${mine.length} block(s) sealed by ${miner} for recovery to ${peer}`);
+    let accepted = 0, credited = 0, owedMoli = '0';
+    const BATCH = 1000;
+    for (let i = 0; i < mine.length; i += BATCH) {
+      try {
+        const r = await fetch(`${peer}/molibra/recover-claim`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blocks: mine.slice(i, i + BATCH) }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const j = await r.json();
+        accepted += Number(j.accepted ?? 0);
+        const row = j.credited?.[miner];
+        if (row) { credited += Number(row.newBlocks ?? 0); owedMoli = row.owedMoli ?? owedMoli; }
+      } catch (error) { console.log(`  batch at ${i} failed: ${error.message}`); }
+    }
+    console.log(`recovered: ${accepted} orphaned block(s) counted this run, ${credited} newly credited`);
+    console.log(`your wallet is now owed ${owedMoli} MOLI for its orphaned work (airdropped after operator review).`);
   },
 };
 

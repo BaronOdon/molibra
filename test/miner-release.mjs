@@ -24,7 +24,7 @@ import { gzipSync } from 'node:zlib';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import {
   canonicalJson, releaseMessage, verifyRelease, tarFiles, treeDigest, rolloutBucket, rolloutAllows,
-  mustStopMining, upnpService,
+  mustStopMining, upnpService, LAUNCHER_VERSION,
 } from '../installers/launcher/molibra-miner.mjs';
 import { commitFiles } from '../installers/release-tool.mjs';
 
@@ -183,7 +183,7 @@ try {
   check('4. ⭐ a signed release that crash-loops is ROLLED BACK to the last good one', installed() === 1 && /rolled back release 1\.4\.0/.test(minerLog()), `installed seq ${installed()}`);
   check('   and the miner is back to mining on it', st?.phase === 'mining', st?.phase);
   check('   and that release is never tried again here', badSeqs.includes(4), JSON.stringify(badSeqs));
-  check('   the window says which signed release runs', st?.release === '1.1.0' && st?.launcher === 4, `${st?.release} / ${st?.launcher}`);
+  check('   the window says which signed release runs', st?.release === '1.1.0' && st?.launcher === LAUNCHER_VERSION, `${st?.release} / ${st?.launcher}`);
 } finally {
   supProc?.kill();
   server.close();

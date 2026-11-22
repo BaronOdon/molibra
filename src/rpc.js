@@ -16,6 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { toQuantity, normalizeAddress, keccak256, recoverAddress, fromHex, toHex, bytesToBig } from './crypto.js';
 import { intrinsicGas } from './tx.js';
 import { serializeBlock, encodeHeader } from './block.js';
+import { valueRecoveryClaim, RecoveryLedger } from './recover.js';
 import { PURPOSE_LABELS } from './token.js';
 import { MAX_REQUEST_BYTES, MAX_BLOCK_RANGE, MAX_PEERS } from './limits.js';
 import { transactionProof, verifyTransactionProof } from './proof.js';
@@ -491,6 +492,7 @@ export function startRpcServer(node, { host, port }) {
     const POSTABLE = new Set([
       '/molibra/submit-block', '/molibra/submit-tx', '/molibra/verify-proof',
       '/molibra/airdrop', '/molibra/earn', '/molibra/grant', '/molibra/announce',
+      '/molibra/recover-claim',
     ]);
     if (POSTABLE.has(req.url)) {
       return handlePeerPost(node, req.url, payload, res);
@@ -1793,6 +1795,21 @@ async function handlePeerPost(node, path, payload, res) {
     }
     if (path === '/molibra/verify-proof') {
       return json(res, 200, { ok: true, proof: verifyLinkingProof(node, payload.code ?? payload) });
+    }
+    /**
+     * Orphaned-work recovery. A miner submits block headers it sealed that never
+     * went canonical; the node verifies the proof of work, excludes anything
+     * already canonical (never honoured twice), values it by work and records
+     * what each block's OWN coinbase is owed. Paying it out is a separate,
+     * operator-reviewed step - this endpoint moves no MOLI.
+     */
+    if (path === '/molibra/recover-claim') {
+      const valued = valueRecoveryClaim(node.chain, payload.blocks ?? payload);
+      const ledger = new RecoveryLedger(join(dirname(node.chain.chainFile), 'recover-claims.json'));
+      const recorded = ledger.record(valued.perAddress);
+      const credited = Object.fromEntries(Object.entries(recorded).map(([a, v]) =>
+        [a, { newBlocks: v.added, owedMoli: (Number(BigInt(v.owedWei) / 10n ** 14n) / 1e4).toFixed(4) }]));
+      return json(res, 200, { ok: true, accepted: valued.accepted, skipped: valued.skipped, credited });
     }
     /**
      * A peer telling us where to reach it, so we can push blocks to it rather
