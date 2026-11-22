@@ -91,6 +91,7 @@ const PEERS = 'http://141.147.99.86:8545';
 const POOL_URL = 'https://molibra.org/pool';
 const PORT = 20226;
 const CHECK_EVERY_MS = 60 * 60_000;            // release check: hourly (cheap: one small JSON)
+const RETRY_PUBLIC_MS = 3 * 60 * 60_000;       // a pool-fallback "help" node re-tries hosting every 3h
 const MANDATORY_LEAD_BLOCKS = 2000;            // ~11 h before a flag day: apply regardless of rollout
 const LOW = 10;   // niceness; on Windows this maps to BELOW_NORMAL
 const CODELOAD = 'https://codeload.github.com/BaronOdon/molibra/tar.gz';
@@ -932,6 +933,24 @@ async function supervise() {
   refreshWindow();
   setTimeout(() => checkReachable(cfg), 5 * 60_000);
   setInterval(() => checkReachable(config()), 30 * 60_000);
+  // Periodic retry: a "help the network" node that fell back to pool (router was
+  // closed) re-attempts hosting when UPnP can finally open the port — so if the
+  // user opens their router later, their node promotes itself to a real peer.
+  // Gated on an actual UPnP mapping, so a permanently-NAT'd host never wastes a
+  // full chain re-sync; checkReachable reverts it to pool if dial-back still fails.
+  setInterval(async () => {
+    const cfg = config();
+    if (!(runningPool && cfg.public === true && cfg.poolFallback === true)) return;
+    const ep = await publicEndpoint(config()).catch(() => null);   // probes/opens UPnP
+    if (!ep || status.network.upnp !== true) return;               // router still closed: stay on pool
+    log('UPnP now maps the port — retrying as a public node…');
+    advertised = ep;
+    const c = config();
+    delete c.poolFallback;
+    writeFileSync(CONFIG, JSON.stringify(c, null, 2));
+    if (child) { await stopNode(); startNode(); }                  // startNode now picks node mode
+    setTimeout(() => checkReachable(config()), 5 * 60_000);        // confirm dial-back; reverts if it fails
+  }, RETRY_PUBLIC_MS);
   // UPnP leases are two hours: renew hourly, beside the release check.
   setInterval(() => {
     refreshWindow();
