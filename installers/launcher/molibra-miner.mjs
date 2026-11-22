@@ -59,7 +59,7 @@ import dgram from 'node:dgram';
  * "updated" itself BACKWARDS on the first independent miner's laptop (25 Sep
  * 2026). Bump this whenever this file changes.
  */
-const LAUNCHER_VERSION = 5;
+const LAUNCHER_VERSION = 6;
 
 /**
  * ⛔⛔ The keys that may sign a miner release, and how many must agree. A
@@ -233,10 +233,10 @@ function config() {
   //    open a router port, so it stays PRIVATE (a full, verifying node that
   //    serves nobody) until its owner turns public on. New installs ask.
   if (cfg.public === undefined) { cfg.public = false; changed = true; }
-  // ⛔ Default mode is the public pool. A solo node behind a home router mines a
-  //    fork node 2 never accepts, so an install that never chose stays on the
-  //    pool, where its work is paid by shares (PPLNS) regardless of reorgs.
-  if (cfg.mode === undefined) { cfg.mode = 'pool'; changed = true; }
+  // The effective mode is DERIVED from `public`, not stored: a user who ticked
+  // "help the network" runs as a full node; everyone else pool-mines. If a
+  // ticked node proves unreachable, checkReachable() sets `poolFallback` so it
+  // pool-mines instead of forking. (A stale `mode` field from v5 is ignored.)
   // The terminated node 1 lingered in old configs' peer lists; drop the corpse.
   if (typeof cfg.peers === 'string' && cfg.peers.includes('193.123.191.142')) { cfg.peers = PEERS; changed = true; }
   if (changed) writeFileSync(CONFIG, JSON.stringify(cfg, null, 2));
@@ -739,6 +739,7 @@ let healthy = false;          // the running release has proved itself (caught u
 let mineAllowed = true;       // false while a mandatory release is missed past its height
 let exitsSinceStart = 0;
 let advertised = null;
+let runningPool = false;   // whether the child is the pool miner (vs a full node)
 
 function startNode() {
   const cfg = config();
@@ -748,7 +749,11 @@ function startNode() {
   status.mining = false;
   status.network.public = cfg.public !== false;
   status.network.advertised = advertised;
-  const pool = (cfg.mode ?? 'pool') === 'pool';
+  // Adaptive: a user who ticked "help the network" (public:true) runs as a full
+  // node — UNLESS checkReachable() proved the router won't allow it (poolFallback),
+  // in which case this computer pool-mines so its work still counts instead of forking.
+  const pool = cfg.public !== true || cfg.poolFallback === true;
+  runningPool = pool;
   phase(pool ? 'mining' : 'loading', pool
     ? 'Connecting to the Molibra pool and mining to your wallet…'
     : 'Loading this computer\'s copy of the chain…');
@@ -823,6 +828,16 @@ async function checkReachable(cfg) {
   if (cfg.public === false || !advertised) { status.network.reachable = cfg.public === false ? null : false; return; }
   const lists = await Promise.allSettled(peerList(cfg).map((p) => getJson(p.replace(/\/$/, '') + '/molibra/peers', 8000)));
   status.network.reachable = lists.some((l) => l.status === 'fulfilled' && (l.value?.peers ?? []).includes(advertised));
+  // Adaptive fallback: a "help the network" node the internet cannot dial back
+  // would fork and earn nothing. Switch it to pool mining so its work still counts.
+  if (!runningPool && cfg.public === true && status.network.reachable === false) {
+    const c = config();
+    c.poolFallback = true;
+    writeFileSync(CONFIG, JSON.stringify(c, null, 2));
+    log('not reachable from the internet (router port closed) — switching to pool mining so your work still counts');
+    if (child) { await stopNode(); startNode(); }
+    return;
+  }
   if (status.phase === 'mining') status.detail = `Up to date with the network and mining to your wallet. ${networkLine()}`;
 }
 
@@ -908,7 +923,8 @@ async function supervise() {
     restart = (await updateIfNeeded({ running: false }).catch((e) => { log(`update skipped: ${e.message}`); return false; })) === 'restart' || restart;
   }
   if (restart) await restartSelf();
-  if (cfg.public !== false) {
+  // Only a node that will actually run public needs its reachable address.
+  if (cfg.public === true && cfg.poolFallback !== true) {
     advertised = await publicEndpoint(cfg).catch((e) => { log(`public address unknown: ${e.message}`); return null; });
   }
   startNode();
