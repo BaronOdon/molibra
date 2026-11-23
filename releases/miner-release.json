@@ -1,22 +1,22 @@
 {
   "manifest": {
     "product": "molibra-miner",
-    "version": "1.2.0",
-    "seq": 3,
-    "commit": "041eb4b17f1d98e99dbd2efde364664f8d121867",
-    "tree": "sha256:90bfd82a1c66e5fe512a12f1274bf7f016efae61443cac8f326c0db4861912a9",
-    "publishedAt": "2026-11-22T11:12:30.779Z",
+    "version": "1.2.1",
+    "seq": 4,
+    "commit": "5967d4619985288545b1736074e0024441fde56a",
+    "tree": "sha256:d3f679593320abdbe4b94115c7fa5ca6da4a1506435bd521167d1c2281a35e0f",
+    "publishedAt": "2026-11-23T12:04:21.372Z",
     "rollout": {
       "hours": 3
     },
     "mandatory": null,
     "minLauncher": 4,
-    "notes": "pool fallback for unreachable miners + periodic retry (fast rollout)"
+    "notes": "adaptive pool-fallback: unreachable public miners auto-switch to pool"
   },
   "signatures": [
     {
       "signer": "molibra-release-2026-10",
-      "sig": "ctSGLizcI9QnccwNNBqW0pclG2QDFyywBtVaAE+TjYP2hc9VfM02/Nr3yDhEbGY0MdsAI1ZNXa9SDc0Ey+N4DQ=="
+      "sig": "Z2rmDIXgGfhxCm4hx0lWiUnQ/+MnVjiI6zbESUOc+tj5mEVFXdHQpg2/fEyaBly2VoSKJkXArOWT604+WMmvAg=="
     }
   ]
 }
