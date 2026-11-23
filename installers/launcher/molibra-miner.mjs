@@ -59,7 +59,7 @@ import dgram from 'node:dgram';
  * "updated" itself BACKWARDS on the first independent miner's laptop (25 Sep
  * 2026). Bump this whenever this file changes.
  */
-const LAUNCHER_VERSION = 6;
+export const LAUNCHER_VERSION = 7;
 
 /**
  * ⛔⛔ The keys that may sign a miner release, and how many must agree. A
@@ -904,6 +904,32 @@ function watchHealth() {
   }, HEALTH_POLL_MS);
 }
 
+/**
+ * One-time: submit this computer's orphaned work for recovery. A miner that
+ * helped the network from behind a closed router forked blocks that never went
+ * canonical; this proves that proof of work to node 2 so the operator can
+ * airdrop it back. Runs once (a flag in state), reads the local chain raw (no
+ * replay), and never blocks startup.
+ */
+function recoverOnce(cfg) {
+  if (state().recoverySubmitted) return;
+  if (!cfg.miner || !existsSync(join(ROOT, 'data', 'chain.json'))) {
+    const s = state(); s.recoverySubmitted = true; saveState(s); return; // nothing to recover
+  }
+  log('submitting this computer\'s orphaned work for recovery (one time)…');
+  const p = spawn(process.execPath, [join('src', 'cli.js'), 'recover-submit',
+    '--datadir', join(ROOT, 'data'), '--miner', cfg.miner, '--peer', cfg.peers ?? PEERS],
+    { cwd: APP, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let out = '';
+  const grab = (d) => { out += d.toString(); };
+  p.stdout.on('data', grab); p.stderr.on('data', grab);
+  p.on('exit', (code) => {
+    for (const line of out.split(/\r?\n/)) if (line.trim()) log(`  recover: ${line.trim()}`);
+    if (code === 0) { const s = state(); s.recoverySubmitted = true; saveState(s); }  // only once it succeeds
+  });
+  try { setPriority(p.pid, LOW); } catch { /* best effort */ }
+}
+
 /* ==================================================================== main */
 
 async function supervise() {
@@ -929,6 +955,7 @@ async function supervise() {
     advertised = await publicEndpoint(cfg).catch((e) => { log(`public address unknown: ${e.message}`); return null; });
   }
   startNode();
+  recoverOnce(cfg);                            // one-time orphaned-work recovery submit
   if (restartedAfterUpdate()) watchHealth();
   refreshWindow();
   setTimeout(() => checkReachable(cfg), 5 * 60_000);
