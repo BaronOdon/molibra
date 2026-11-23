@@ -59,7 +59,7 @@ import dgram from 'node:dgram';
  * "updated" itself BACKWARDS on the first independent miner's laptop (25 Sep
  * 2026). Bump this whenever this file changes.
  */
-export const LAUNCHER_VERSION = 7;
+export const LAUNCHER_VERSION = 8;
 
 /**
  * ⛔⛔ The keys that may sign a miner release, and how many must agree. A
@@ -826,9 +826,19 @@ async function checkReachable(cfg) {
       { signal: AbortSignal.timeout(3000) }).then((r) => r.json())]);
     if (counts[0].status === 'fulfilled') status.network.peers = counts[0].value?.peers?.length ?? null;
   } catch { /* node busy */ }
-  if (cfg.public === false || !advertised) { status.network.reachable = cfg.public === false ? null : false; return; }
-  const lists = await Promise.allSettled(peerList(cfg).map((p) => getJson(p.replace(/\/$/, '') + '/molibra/peers', 8000)));
-  status.network.reachable = lists.some((l) => l.status === 'fulfilled' && (l.value?.peers ?? []).includes(advertised));
+  if (cfg.public === false) { status.network.reachable = null; return; }
+  // public === true. If we never learned a public address, the node is by
+  // definition undialable from the internet (router blocks UPnP / no reachable
+  // IP) — the EXACT case the fallback exists for. Do NOT return early here: that
+  // left the neediest miners mining solo forever, forking every block. Treat
+  // "no advertised address" as unreachable and fall through to the fallback.
+  // Otherwise, being listed by a peer that dialed us back is the proof.
+  if (!advertised) {
+    status.network.reachable = false;
+  } else {
+    const lists = await Promise.allSettled(peerList(cfg).map((p) => getJson(p.replace(/\/$/, '') + '/molibra/peers', 8000)));
+    status.network.reachable = lists.some((l) => l.status === 'fulfilled' && (l.value?.peers ?? []).includes(advertised));
+  }
   // Adaptive fallback: a "help the network" node the internet cannot dial back
   // would fork and earn nothing. Switch it to pool mining so its work still counts.
   if (!runningPool && cfg.public === true && status.network.reachable === false) {
